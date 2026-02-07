@@ -1,5 +1,6 @@
 import requests, time, random, os, json
 from threading import Event
+import insta
 
 stop_event = Event()
 status_callback = None
@@ -54,26 +55,40 @@ def post_on_facebook(message, image_filename):
         return False
 
     try:
-        # Use static URL for image (Facebook /photos endpoint supports a public URL via the 'url' field)
+        # Upload the image file directly to Facebook (multipart upload)
         page_token = get_page_token()
         if not page_token:
             print("❌ Failed: Could not get page token")
             return False
 
-        image_url = get_image_url(image_filename)
-        data = {"url": image_url, "caption": message, "access_token": page_token}
-        res = requests.post(FB_API_URL, data=data).json()
+        with open(path, 'rb') as img:
+            files = {'source': (image_filename, img, 'image/jpeg')}
+            data = {"caption": message, "access_token": page_token}
+            res = requests.post(FB_API_URL, files=files, data=data).json()
 
         if 'error' in res:
-            # Handle API errors
             error_msg = res['error'].get('message', 'Unknown error')
             print(f"❌ Failed: {error_msg}")
             return False
 
-        success = "id" in res
-        status = "✅ Posted" if success else "❌ Failed"
-        print(status + ":", res)
-        return success
+        photo_id = res.get('id')
+        image_url = None
+        if photo_id:
+            info = requests.get(f"https://graph.facebook.com/v19.0/{photo_id}?fields=images&access_token={page_token}").json()
+            images = info.get('images') or []
+            if images:
+                image_url = images[0].get('source')
+
+        print("✅ Posted:", res)
+
+        # Cross-post to Instagram using the Facebook image URL if available
+        if image_url:
+            try:
+                insta.post_to_instagram(image_url, message)
+            except Exception:
+                pass
+
+        return {"photo_id": photo_id, "image_url": image_url, "response": res}
     except Exception as e:
         print(f"❌ Error: {str(e)}")
         return False
