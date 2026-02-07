@@ -3,11 +3,11 @@ from threading import Event
 
 stop_event = Event()
 status_callback = None
+current_interval = 30 * 60  # Default to 30 minutes
 
 ACCESS_TOKEN = "EAAT3Q4oZCLo0BQrLKpgjZBdzs7u6ZBPB6YbGuHpQtcLCBCxarH7YOaphe4mQFkTvklDiQFzKppMwmfIZB3Kj61OLwLquw19eZAAatKoXSdT8WpXedmqrgo3kApwLIhd3varkTFyVR2V3SdYnEvFeKKZAZC9tMdWjlbJZBnnimryyclki49nZBhkTldTK4iIOklAZDZD"
 PAGE_ID = "519872534547188"  # Nexora Suite page
 IMAGE_FOLDER = "images"
-POST_INTERVAL = 30 * 60
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
 POSTS_FILE = "posts/tour_posts.json"
 
@@ -19,6 +19,11 @@ def set_status_callback(callback):
     """Set callback for status updates"""
     global status_callback
     status_callback = callback
+
+def set_interval(interval):
+    """Set posting interval in seconds"""
+    global current_interval
+    current_interval = interval
 
 def post_on_facebook(message, image_filename):
     path = os.path.join(IMAGE_FOLDER, image_filename)
@@ -52,7 +57,7 @@ def run_tour():
             if status_callback:
                 status = "Posted" if success else "Failed"
                 status_callback('tour', True, status, None)
-            time.sleep(POST_INTERVAL)
+            time.sleep(current_interval)
 
 def stop_tour():
     """Stop Nexora Suite posting"""

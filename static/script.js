@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeButtons();
     loadExistingImages();
     loadAllPosts();
+    loadIntervals();
     updateStatus();
     setInterval(updateStatus, 3000);
 });
@@ -374,6 +375,52 @@ function updateStatus() {
             }
         })
         .catch(error => console.error('Error updating status:', error));
+}
+
+// Load and display current intervals
+function loadIntervals() {
+    fetch('/api/status')
+        .then(response => response.json())
+        .then(status => {
+            document.getElementById('tourInterval').value = Math.round(status.tour_interval / 60);
+            document.getElementById('nzInterval').value = Math.round(status.nz_interval / 60);
+            document.getElementById('instaInterval').value = Math.round(status.insta_interval / 60);
+        })
+        .catch(error => console.error('Error loading intervals:', error));
+}
+
+// Update interval for a posting type
+function updateInterval(postType) {
+    const inputId = postType === 'tour' ? 'tourInterval' : 
+                    postType === 'nz' ? 'nzInterval' : 'instaInterval';
+    const minutes = parseInt(document.getElementById(inputId).value);
+    
+    if (!minutes || minutes <= 0) {
+        showError('Please enter a valid interval');
+        return;
+    }
+    
+    const seconds = minutes * 60;
+    
+    fetch(`/api/interval/${postType}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ interval: seconds })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess(`${postType.toUpperCase()} interval updated to ${minutes} minutes`);
+        } else {
+            showError('Failed to update interval');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating interval:', error);
+        showError('Error updating interval');
+    });
 }
 
 function updateButtonState(type, isRunning) {

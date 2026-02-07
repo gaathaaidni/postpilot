@@ -27,7 +27,10 @@ posting_state = {
     'insta_status': '',
     'tour_current_post': None,
     'nz_current_post': None,
-    'insta_current_post': None
+    'insta_current_post': None,
+    'tour_interval': 30 * 60,  # 30 minutes in seconds
+    'nz_interval': 30 * 60,
+    'insta_interval': 3 * 60  # 3 minutes for Instagram sync
 }
 
 def load_posts(filepath):
@@ -173,6 +176,7 @@ def start_tour():
     """Start tour posting"""
     if not posting_state['tour_running']:
         tour.set_status_callback(update_posting_status)
+        tour.set_interval(posting_state['tour_interval'])
         tour.stop_event.clear()
         thread = threading.Thread(target=tour.run_tour, daemon=True)
         thread.start()
@@ -197,6 +201,7 @@ def start_nz():
     """Start NZ visa posting"""
     if not posting_state['nz_running']:
         visa.set_status_callback(update_posting_status)
+        visa.set_interval(posting_state['nz_interval'])
         visa.stop_event.clear()
         thread = threading.Thread(target=visa.run_nz, daemon=True)
         thread.start()
@@ -221,6 +226,7 @@ def start_insta():
     """Start Instagram sync"""
     if not posting_state['insta_running']:
         insta.set_status_callback(update_posting_status)
+        insta.set_interval(posting_state['insta_interval'])
         insta.stop_event.clear()
         thread = threading.Thread(target=insta.run_insta_sync, daemon=True)
         thread.start()
@@ -268,8 +274,45 @@ def get_status():
         'insta_status': posting_state['insta_status'],
         'tour_current_post': posting_state['tour_current_post'],
         'nz_current_post': posting_state['nz_current_post'],
-        'insta_current_post': posting_state['insta_current_post']
+        'insta_current_post': posting_state['insta_current_post'],
+        'tour_interval': posting_state['tour_interval'],
+        'nz_interval': posting_state['nz_interval'],
+        'insta_interval': posting_state['insta_interval']
     })
+
+# Interval management endpoints
+@app.route('/api/interval/<post_type>', methods=['GET'])
+def get_interval(post_type):
+    """Get posting interval for a specific post type"""
+    interval_key = f'{post_type}_interval'
+    if interval_key not in posting_state:
+        return jsonify({'error': 'Invalid post type'}), 400
+    return jsonify({'interval': posting_state[interval_key]})
+
+@app.route('/api/interval/<post_type>', methods=['PUT'])
+def set_interval(post_type):
+    """Set posting interval for a specific post type"""
+    interval_key = f'{post_type}_interval'
+    if interval_key not in posting_state:
+        return jsonify({'error': 'Invalid post type'}), 400
+    
+    data = request.get_json()
+    interval = data.get('interval')
+    
+    if not interval or interval <= 0:
+        return jsonify({'error': 'Invalid interval value'}), 400
+    
+    posting_state[interval_key] = interval
+    
+    # Update the module if it's running
+    if post_type == 'tour':
+        tour.set_interval(interval)
+    elif post_type == 'nz':
+        visa.set_interval(interval)
+    elif post_type == 'insta':
+        insta.set_interval(interval)
+    
+    return jsonify({'success': True, 'interval': interval})
 
 # Serve images
 @app.route('/images/<filename>')
