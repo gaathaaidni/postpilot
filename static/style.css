@@ -18,6 +18,7 @@ body {
     border-radius: 12px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     overflow: hidden;
+    padding: 16px;
 }
 
 header {
@@ -93,6 +94,17 @@ h1 {
     border-bottom: 2px solid #e0e0e0;
     margin-bottom: 20px;
     flex-wrap: wrap;
+}
+
+/* allow horizontal scrolling for tabs on small screens */
+.tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.tab-button {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .tab-button {
@@ -180,6 +192,13 @@ h1 {
     margin-bottom: 10px;
 }
 
+/* Slightly smaller images on narrow screens */
+@media (max-width:480px) {
+    .post-image {
+        height: 150px;
+    }
+}
+
 .post-message {
     margin-bottom: 10px;
     color: #333;
@@ -206,6 +225,14 @@ h1 {
     font-size: 0.9rem;
     transition: all 0.3s ease;
     display: inline-block;
+}
+
+/* larger touch targets on small screens */
+@media (max-width:768px) {
+    .btn {
+        padding: 12px 18px;
+        font-size: 1rem;
+    }
 }
 
 .btn:hover {
@@ -414,6 +441,16 @@ h1 {
         flex: 1;
     }
 
+    /* stack quick control buttons on very small screens */
+    .control-buttons {
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .control-buttons .btn {
+        width: 100%;
+    }
+
     .posts-list {
         grid-template-columns: 1fr;
     }
@@ -421,5 +458,32 @@ h1 {
     .modal-content {
         width: 95%;
         padding: 20px;
+    }
+}
+
+/* Extra-small screens: full-screen modal + easier close button */
+@media (max-width:420px) {
+    .container {
+        border-radius: 8px;
+        padding: 10px;
+    }
+
+    header {
+        padding: 20px;
+    }
+
+    .modal-content {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        border-radius: 0;
+        box-shadow: none;
+        padding: 16px;
+    }
+
+    .close {
+        right: 12px;
+        top: 8px;
+        font-size: 26px;
     }
 }
