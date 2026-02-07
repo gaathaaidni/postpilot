@@ -3,12 +3,18 @@ import requests, time, json
 from threading import Event
 
 stop_event = Event()
+status_callback = None
 
 FB_PAGE_ID = '519872534547188'
 FB_ACCESS_TOKEN = 'EAAT3Q4oZCLo0BO5C8QjWvvtOXLE9gT4g0F8i2hU9Snpf6c8T2hWul5BXsmgOi8wQGapJE41NkspbRxDhO21E9G1jv9yRr2WVeA7uJ5RVm73bR5IUHfts98FZAgzqp61HeM2G3s3xDdYXEL98ZBsXrIZCZCGHMdE0H98T1oiWOI1SwsTCZBS23sBxcB8SdZAZA1Yr3D5sQDWxAviOJFaEgQZDZD'
 IG_USER_ID = '17841472248438802'
 CHECK_INTERVAL = 180
 POSTED_FILE = 'posted.txt'
+
+def set_status_callback(callback):
+    """Set callback for status updates"""
+    global status_callback
+    status_callback = callback
 
 def get_recent_facebook_posts():
     url = f"https://graph.facebook.com/v18.0/{FB_PAGE_ID}/posts?fields=id,message,attachments{{media,type}}&access_token={FB_ACCESS_TOKEN}"
@@ -38,6 +44,7 @@ def post_to_instagram(image_url, caption):
     return 'id' in requests.post(publish_url, data={'creation_id': res['id'], 'access_token': FB_ACCESS_TOKEN}).json()
 
 def run_insta_sync():
+    post_count = 0
     while not stop_event.is_set():
         try:
             posts = get_recent_facebook_posts()
@@ -55,8 +62,14 @@ def run_insta_sync():
 
                 image_url = media.get('image', {}).get('src')
                 if image_url and post_to_instagram(image_url, post.get('message', '')):
+                    post_count += 1
+                    current_post_summary = f"{post.get('message', '')[:50]}..." if len(post.get('message', '')) > 50 else post.get('message', 'No message')
+                    if status_callback:
+                        status_callback('insta', True, f"Synced (Post #{post_count})", current_post_summary)
                     save_posted_id(post_id)
 
+            if status_callback:
+                status_callback('insta', True, 'Checking...', None)
             time.sleep(CHECK_INTERVAL)
         except Exception as e:
             print("Error in Insta sync:", e)

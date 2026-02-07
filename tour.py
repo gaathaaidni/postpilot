@@ -2,6 +2,8 @@ import requests, time, random, os, json
 from threading import Event
 
 stop_event = Event()
+status_callback = None
+
 ACCESS_TOKEN = "EAAT3Q4oZCLo0BQrLKpgjZBdzs7u6ZBPB6YbGuHpQtcLCBCxarH7YOaphe4mQFkTvklDiQFzKppMwmfIZB3Kj61OLwLquw19eZAAatKoXSdT8WpXedmqrgo3kApwLIhd3varkTFyVR2V3SdYnEvFeKKZAZC9tMdWjlbJZBnnimryyclki49nZBhkTldTK4iIOklAZDZD"
 PAGE_ID = "519872534547188"  # Nexora Suite page
 IMAGE_FOLDER = "images"
@@ -13,6 +15,11 @@ def load_posts():
     with open(POSTS_FILE, 'r') as f:
         return json.load(f)
 
+def set_status_callback(callback):
+    """Set callback for status updates"""
+    global status_callback
+    status_callback = callback
+
 def post_on_facebook(message, image_filename):
     path = os.path.join(IMAGE_FOLDER, image_filename)
     if not os.path.exists(path):
@@ -23,17 +30,28 @@ def post_on_facebook(message, image_filename):
         files = {'source': (image_filename, img, 'image/jpeg')}
         data = {"message": message, "access_token": ACCESS_TOKEN}
         res = requests.post(FB_API_URL, files=files, data=data).json()
-        print("✅ Posted" if "id" in res else "❌ Failed:", res)
+        success = "id" in res
+        status = "✅ Posted" if success else "❌ Failed"
+        print(status + ":", res)
+        return success
 
 def run_tour():
     """Run Nexora Suite posting"""
     posts = load_posts()
     random.shuffle(posts)
+    post_count = 0
     while not stop_event.is_set():
         for post in posts:
             if stop_event.is_set():
                 break
-            post_on_facebook(post["message"], post["image_filename"])
+            post_count += 1
+            current_post_summary = f"{post['message'][:50]}..." if len(post.get('message', '')) > 50 else post.get('message', 'No message')
+            if status_callback:
+                status_callback('tour', True, f"Posting... (Post #{post_count})", current_post_summary)
+            success = post_on_facebook(post["message"], post["image_filename"])
+            if status_callback:
+                status = "Posted" if success else "Failed"
+                status_callback('tour', True, status, None)
             time.sleep(POST_INTERVAL)
 
 def stop_tour():
