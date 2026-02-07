@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PostPilot - Facebook Auto Poster</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <img src="{{ url_for('static', filename='logo.png') }}" alt="PostPilot" class="logo-small">
+                <h1>
+                    <span class="logo-text">PostPilot</span>
+                </h1>
+                <p class="subtitle">Facebook Auto Poster & Instagram Sync</p>
+            </div>
+        </header>
+
+        <div class="controls-section">
+            <h2>Quick Controls</h2>
+            <div class="control-buttons">
+                <button id="runAllBtn" class="btn btn-success">▶ Run All</button>
+                <button id="stopAllBtn" class="btn btn-danger">⏹ Stop All</button>
+            </div>
+            <div class="status-info">
+                <p>Status: <span id="globalStatus">All Stopped</span></p>
+            </div>
+        </div>
+
+        <div class="tabs-container">
+            <div class="tabs">
+                <button class="tab-button active" data-tab="tour">Tour Posts</button>
+                <button class="tab-button" data-tab="nz">NZ Posts</button>
+                <button class="tab-button" data-tab="insta">Insta Posts</button>
+            </div>
+
+            <!-- Tour Posts Tab -->
+            <div id="tour" class="tab-content active">
+                <div class="tab-header">
+                    <h2>Tour Posts</h2>
+                    <div class="tab-controls">
+                        <button id="startTourBtn" class="btn btn-primary">▶ Start Tour</button>
+                        <button id="stopTourBtn" class="btn btn-secondary">⏹ Stop Tour</button>
+                        <button class="btn btn-info" onclick="openAddPostModal('tour')">➕ Add Post</button>
+                    </div>
+                </div>
+                <div id="tourPostsList" class="posts-list">
+                    <p class="loading">Loading...</p>
+                </div>
+            </div>
+
+            <!-- NZ Posts Tab -->
+            <div id="nz" class="tab-content">
+                <div class="tab-header">
+                    <h2>NZ/Visa Posts</h2>
+                    <div class="tab-controls">
+                        <button id="startNZBtn" class="btn btn-primary">▶ Start NZ</button>
+                        <button id="stopNZBtn" class="btn btn-secondary">⏹ Stop NZ</button>
+                        <button class="btn btn-info" onclick="openAddPostModal('nz')">➕ Add Post</button>
+                    </div>
+                </div>
+                <div id="nzPostsList" class="posts-list">
+                    <p class="loading">Loading...</p>
+                </div>
+            </div>
+
+            <!-- Instagram Posts Tab -->
+            <div id="insta" class="tab-content">
+                <div class="tab-header">
+                    <h2>Instagram Sync</h2>
+                    <div class="tab-controls">
+                        <button id="startInstaBtn" class="btn btn-primary">▶ Start Insta</button>
+                        <button id="stopInstaBtn" class="btn btn-secondary">⏹ Stop Insta</button>
+                        <button class="btn btn-info" onclick="openAddPostModal('insta')">➕ Add Post</button>
+                    </div>
+                </div>
+                <div id="instaPostsList" class="posts-list">
+                    <p class="loading">Loading...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Post Modal -->
+    <div id="postModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeAddPostModal()">&times;</span>
+            <h2>Add/Edit Post</h2>
+            <form id="postForm">
+                <div class="form-group">
+                    <label for="postMessage">Message:</label>
+                    <textarea id="postMessage" placeholder="Enter post message..." required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="postImage">Image:</label>
+                    <input type="file" id="postImage" accept="image/*">
+                    <p class="help-text">Or select existing image:</p>
+                    <select id="existingImage">
+                        <option value="">-- Select image --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="imagePreview">Image Preview:</label>
+                    <img id="imagePreview" src="" alt="Preview" style="max-width: 200px;">
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-success">Save Post</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeAddPostModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
