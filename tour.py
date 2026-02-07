@@ -2,8 +2,8 @@ import requests, time, random, os, json
 from threading import Event
 
 stop_event = Event()
-ACCESS_TOKEN = "EAAT3Q4oZCLo0BO5C8QjWvvtOXLE9gT4g0F8i2hU9Snpf6c8T2hWul5BXsmgOi8wQGapJE41NkspbRxDhO21E9G1jv9yRr2WVeA7uJ5RVm73bR5IUHfts98FZAgzqp61HeM2G3s3xDdYXEL98ZBsXrIZCZCGHMdE0H98T1oiWOI1SwsTCZBS23sBxcB8SdZAZA1Yr3D5sQDWxAviOJFaEgQZDZD"
-PAGE_ID = "519872534547188"
+ACCESS_TOKEN = "EAAT3Q4oZCLo0BQrLKpgjZBdzs7u6ZBPB6YbGuHpQtcLCBCxarH7YOaphe4mQFkTvklDiQFzKppMwmfIZB3Kj61OLwLquw19eZAAatKoXSdT8WpXedmqrgo3kApwLIhd3varkTFyVR2V3SdYnEvFeKKZAZC9tMdWjlbJZBnnimryyclki49nZBhkTldTK4iIOklAZDZD"
+PAGE_ID = "519872534547188"  # Nexora Suite page
 IMAGE_FOLDER = "images"
 POST_INTERVAL = 30 * 60
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
@@ -26,6 +26,7 @@ def post_on_facebook(message, image_filename):
         print("✅ Posted" if "id" in res else "❌ Failed:", res)
 
 def run_tour():
+    """Run Nexora Suite posting"""
     posts = load_posts()
     random.shuffle(posts)
     while not stop_event.is_set():
@@ -36,4 +37,5 @@ def run_tour():
             time.sleep(POST_INTERVAL)
 
 def stop_tour():
+    """Stop Nexora Suite posting"""
     stop_event.set()
