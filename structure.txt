@@ -1,0 +1,11 @@
+PostPilot/
+├── main.py               # Kivy GUI app
+├── insta.py       # Instagram logic wrapped
+├── visa.py          # Visa logic wrapped
+├── tour.py        # Tour logic wrapped
+├── posts/
+│   ├── visa_posts.json
+│   ├── tour_posts.json
+├── images/
+├── posted.txt
+├── buildozer.spec
