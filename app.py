@@ -21,7 +21,13 @@ posting_state = {
     'tour_running': False,
     'nz_running': False,
     'insta_running': False,
-    'threads': {}
+    'threads': {},
+    'tour_status': '',
+    'nz_status': '',
+    'insta_status': '',
+    'tour_current_post': None,
+    'nz_current_post': None,
+    'insta_current_post': None
 }
 
 def load_posts(filepath):
@@ -37,6 +43,21 @@ def save_posts(filepath, posts):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, 'w') as f:
         json.dump(posts, f, indent=2)
+
+def update_posting_status(post_type, is_running, message='', current_post=None):
+    """Update posting status for a specific post type"""
+    if post_type == 'tour':
+        posting_state['tour_running'] = is_running
+        posting_state['tour_status'] = message
+        posting_state['tour_current_post'] = current_post
+    elif post_type == 'nz':
+        posting_state['nz_running'] = is_running
+        posting_state['nz_status'] = message
+        posting_state['nz_current_post'] = current_post
+    elif post_type == 'insta':
+        posting_state['insta_running'] = is_running
+        posting_state['insta_status'] = message
+        posting_state['insta_current_post'] = current_post
 
 @app.route('/')
 def index():
@@ -151,11 +172,13 @@ def upload_image():
 def start_tour():
     """Start tour posting"""
     if not posting_state['tour_running']:
+        tour.set_status_callback(update_posting_status)
         tour.stop_event.clear()
         thread = threading.Thread(target=tour.run_tour, daemon=True)
         thread.start()
         posting_state['threads']['tour'] = thread
         posting_state['tour_running'] = True
+        update_posting_status('tour', True, 'Starting...', None)
         return jsonify({'status': 'Tour posting started'}), 200
     return jsonify({'status': 'Tour already running'}), 200
 
@@ -165,6 +188,7 @@ def stop_tour():
     if posting_state['tour_running']:
         tour.stop_tour()
         posting_state['tour_running'] = False
+        update_posting_status('tour', False, '', None)
         return jsonify({'status': 'Tour posting stopped'}), 200
     return jsonify({'status': 'Tour not running'}), 200
 
@@ -172,11 +196,13 @@ def stop_tour():
 def start_nz():
     """Start NZ visa posting"""
     if not posting_state['nz_running']:
+        visa.set_status_callback(update_posting_status)
         visa.stop_event.clear()
         thread = threading.Thread(target=visa.run_nz, daemon=True)
         thread.start()
         posting_state['threads']['nz'] = thread
         posting_state['nz_running'] = True
+        update_posting_status('nz', True, 'Starting...', None)
         return jsonify({'status': 'NZ posting started'}), 200
     return jsonify({'status': 'NZ already running'}), 200
 
@@ -186,6 +212,7 @@ def stop_nz():
     if posting_state['nz_running']:
         visa.stop_nz()
         posting_state['nz_running'] = False
+        update_posting_status('nz', False, '', None)
         return jsonify({'status': 'NZ posting stopped'}), 200
     return jsonify({'status': 'NZ not running'}), 200
 
@@ -193,11 +220,13 @@ def stop_nz():
 def start_insta():
     """Start Instagram sync"""
     if not posting_state['insta_running']:
+        insta.set_status_callback(update_posting_status)
         insta.stop_event.clear()
         thread = threading.Thread(target=insta.run_insta_sync, daemon=True)
         thread.start()
         posting_state['threads']['insta'] = thread
         posting_state['insta_running'] = True
+        update_posting_status('insta', True, 'Starting...', None)
         return jsonify({'status': 'Instagram sync started'}), 200
     return jsonify({'status': 'Instagram already running'}), 200
 
@@ -207,6 +236,7 @@ def stop_insta():
     if posting_state['insta_running']:
         insta.stop_insta_sync()
         posting_state['insta_running'] = False
+        update_posting_status('insta', False, '', None)
         return jsonify({'status': 'Instagram sync stopped'}), 200
     return jsonify({'status': 'Instagram not running'}), 200
 
@@ -232,7 +262,13 @@ def get_status():
     return jsonify({
         'tour_running': posting_state['tour_running'],
         'nz_running': posting_state['nz_running'],
-        'insta_running': posting_state['insta_running']
+        'insta_running': posting_state['insta_running'],
+        'tour_status': posting_state['tour_status'],
+        'nz_status': posting_state['nz_status'],
+        'insta_status': posting_state['insta_status'],
+        'tour_current_post': posting_state['tour_current_post'],
+        'nz_current_post': posting_state['nz_current_post'],
+        'insta_current_post': posting_state['insta_current_post']
     })
 
 # Serve images

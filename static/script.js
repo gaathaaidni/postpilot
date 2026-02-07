@@ -354,9 +354,24 @@ function updateStatus() {
             updateButtonState('NZ', status.nz_running);
             updateButtonState('Insta', status.insta_running);
             
-            const globalStatus = status.tour_running || status.nz_running || status.insta_running ?
-                '🟢 Some tasks running' : '🔴 All Stopped';
-            document.getElementById('globalStatus').textContent = globalStatus;
+            // Build status messages
+            let statusMessages = [];
+            if (status.tour_running) {
+                statusMessages.push(`📍 Tour: ${status.tour_status || 'Running'} ${status.tour_current_post ? ' - ' + status.tour_current_post : ''}`);
+            }
+            if (status.nz_running) {
+                statusMessages.push(`📍 NZ: ${status.nz_status || 'Running'} ${status.nz_current_post ? ' - ' + status.nz_current_post : ''}`);
+            }
+            if (status.insta_running) {
+                statusMessages.push(`📍 Insta: ${status.insta_status || 'Running'} ${status.insta_current_post ? ' - ' + status.insta_current_post : ''}`);
+            }
+            
+            const globalElement = document.getElementById('globalStatus');
+            if (statusMessages.length > 0) {
+                globalElement.innerHTML = `🟢 ${statusMessages.join(' | ')}`;
+            } else {
+                globalElement.textContent = '🔴 All Stopped';
+            }
         })
         .catch(error => console.error('Error updating status:', error));
 }
