@@ -6,15 +6,37 @@ stop_event = Event()
 status_callback = None
 current_interval = 30 * 60  # Default to 30 minutes
 
-ACCESS_TOKEN = "EAAT3Q4oZCLo0BQrLKpgjZBdzs7u6ZBPB6YbGuHpQtcLCBCxarH7YOaphe4mQFkTvklDiQFzKppMwmfIZB3Kj61OLwLquw19eZAAatKoXSdT8WpXedmqrgo3kApwLIhd3varkTFyVR2V3SdYnEvFeKKZAZC9tMdWjlbJZBnnimryyclki49nZBhkTldTK4iIOklAZDZD"
+ACCESS_TOKEN = "EAAT3Q4oZCLo0BQqNPuapZCoam6LKGvBADkWgjO8KrERUGesMfO6rzPWUbcI0V06J2FwlJTUa51P0jmwZByszQtBiqmkxweXAMhGbmcZB6UHAzSynPlZCEI3R1alalFfvN5qJWHeOKAH1McUP3FFEvJuRUWU0BlAO9W7wmhZABII3QcZCRLeY2o12I9k5p4QswZDZD"
 PAGE_ID = "954901604381882"  # Nexora by Phoenix International page
 IMAGE_FOLDER = "images"
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
 POSTS_FILE = "posts/visa_posts.json"
 
+def get_page_token():
+    """Fetch page token from user token"""
+    try:
+        url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={ACCESS_TOKEN}"
+        res = requests.get(url).json()
+        if 'data' in res:
+            for page in res['data']:
+                if page.get('id') == PAGE_ID:
+                    return page.get('access_token')
+        return None
+    except:
+        return None
+
 def load_posts():
     with open(POSTS_FILE, 'r') as f:
         return json.load(f)
+
+
+def get_static_base_url():
+    """Base URL where images are served. Override with env STATIC_BASE_URL."""
+    return os.environ.get('STATIC_BASE_URL', 'http://localhost:5000').rstrip('/')
+
+
+def get_image_url(filename):
+    return f"{get_static_base_url()}/images/{filename}"
 
 def set_status_callback(callback):
     """Set callback for status updates"""
@@ -30,16 +52,32 @@ def post_on_facebook(message, image_filename):
     path = os.path.join(IMAGE_FOLDER, image_filename)
     if not os.path.exists(path):
         print(f"Image not found: {path}")
-        return
+        return False
 
-    with open(path, 'rb') as img:
-        files = {'source': (image_filename, img, 'image/jpeg')}
-        data = {"message": message, "access_token": ACCESS_TOKEN}
-        res = requests.post(FB_API_URL, files=files, data=data).json()
+    try:
+        # Use static URL for image (Facebook /photos endpoint supports a public URL via the 'url' field)
+        page_token = get_page_token()
+        if not page_token:
+            print("❌ Failed: Could not get page token")
+            return False
+
+        image_url = get_image_url(image_filename)
+        data = {"url": image_url, "caption": message, "access_token": page_token}
+        res = requests.post(FB_API_URL, data=data).json()
+
+        if 'error' in res:
+            # Handle API errors
+            error_msg = res['error'].get('message', 'Unknown error')
+            print(f"❌ Failed: {error_msg}")
+            return False
+
         success = "id" in res
         status = "✅ Posted" if success else "❌ Failed"
         print(status + ":", res)
         return success
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        return False
 
 def run_nz():
     """Run Nexora Investments posting"""
