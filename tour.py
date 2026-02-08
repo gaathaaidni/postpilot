@@ -15,7 +15,7 @@ def get_access_token():
         return None
 
 ACCESS_TOKEN = get_access_token()
-PAGE_ID = "519872534547188"  # Nexora Suite page
+PAGE_ID = "967550829768297"  # Nexora Suite page
 IMAGE_FOLDER = "images"
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
 POSTS_FILE = "posts/tour_posts.json"
