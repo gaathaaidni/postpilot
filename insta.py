@@ -14,9 +14,9 @@ def get_access_token():
     except:
         return None
 
-FB_PAGE_ID = '519872534547188'
+FB_PAGE_ID = '967550829768297'  # Nexora Suite - syncs to Instagram
 FB_ACCESS_TOKEN = get_access_token()
-IG_USER_ID = '17841472248438802'
+IG_USER_ID = '17841472248438802'  # Nexora by Phoenix Instagram
 POSTED_FILE = 'posted.txt'
 
 def set_status_callback(callback):
