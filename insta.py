@@ -6,8 +6,16 @@ stop_event = Event()
 status_callback = None
 current_interval = 3 * 60  # Default to 3 minutes for Instagram sync
 
+def get_access_token():
+    """Read access token from token.txt file"""
+    try:
+        with open('token.txt', 'r') as f:
+            return f.read().strip()
+    except:
+        return None
+
 FB_PAGE_ID = '519872534547188'
-FB_ACCESS_TOKEN = 'EAAT3Q4oZCLo0BO5C8QjWvvtOXLE9gT4g0F8i2hU9Snpf6c8T2hWul5BXsmgOi8wQGapJE41NkspbRxDhO21E9G1jv9yRr2WVeA7uJ5RVm73bR5IUHfts98FZAgzqp61HeM2G3s3xDdYXEL98ZBsXrIZCZCGHMdE0H98T1oiWOI1SwsTCZBS23sBxcB8SdZAZA1Yr3D5sQDWxAviOJFaEgQZDZD'
+FB_ACCESS_TOKEN = get_access_token()
 IG_USER_ID = '17841472248438802'
 POSTED_FILE = 'posted.txt'
 

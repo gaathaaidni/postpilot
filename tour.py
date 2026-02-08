@@ -6,7 +6,15 @@ stop_event = Event()
 status_callback = None
 current_interval = 30 * 60  # Default to 30 minutes
 
-ACCESS_TOKEN = "EAAT3Q4oZCLo0BQqNPuapZCoam6LKGvBADkWgjO8KrERUGesMfO6rzPWUbcI0V06J2FwlJTUa51P0jmwZByszQtBiqmkxweXAMhGbmcZB6UHAzSynPlZCEI3R1alalFfvN5qJWHeOKAH1McUP3FFEvJuRUWU0BlAO9W7wmhZABII3QcZCRLeY2o12I9k5p4QswZDZD"
+def get_access_token():
+    """Read access token from token.txt file"""
+    try:
+        with open('token.txt', 'r') as f:
+            return f.read().strip()
+    except:
+        return None
+
+ACCESS_TOKEN = get_access_token()
 PAGE_ID = "519872534547188"  # Nexora Suite page
 IMAGE_FOLDER = "images"
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
