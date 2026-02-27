@@ -1,4 +1,3 @@
-# nz_thread.py
 import requests, time, random, os, json
 from threading import Event
 import insta
@@ -16,10 +15,10 @@ def get_access_token():
         return None
 
 ACCESS_TOKEN = get_access_token()
-PAGE_ID = "954901604381882"  # Nexora by Phoenix International page
+PAGE_ID = "967550829768297"  # Nexora Suite page
 IMAGE_FOLDER = "images"
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
-POSTS_FILE = "posts/visa_posts.json"
+POSTS_FILE = "posts/tour_posts.json"
 
 def get_page_token():
     """Fetch page token from user token"""
@@ -102,8 +101,8 @@ def post_on_facebook(message, image_filename):
         print(f"❌ Error: {str(e)}")
         return False
 
-def run_nz():
-    """Run Nexora Investments posting"""
+def run_nexora_suite():
+    """Run Nexora Suite posting"""
     posts = load_posts()
     random.shuffle(posts)
     post_count = 0
@@ -114,13 +113,14 @@ def run_nz():
             post_count += 1
             current_post_summary = f"{post['message'][:50]}..." if len(post.get('message', '')) > 50 else post.get('message', 'No message')
             if status_callback:
-                status_callback('nz', True, f"Posting... (Post #{post_count})", current_post_summary)
+                # use a descriptive key for callbacks
+                status_callback('nexora_suite', True, f"Posting... (Post #{post_count})", current_post_summary)
             success = post_on_facebook(post["message"], post["image_filename"])
             if status_callback:
                 status = "Posted" if success else "Failed"
-                status_callback('nz', True, status, None)
+                status_callback('nexora_suite', True, status, None)
             time.sleep(current_interval)
 
-def stop_nz():
-    """Stop Nexora Investments posting"""
+def stop_nexora_suite():
+    """Stop Nexora Suite posting"""
     stop_event.set()
