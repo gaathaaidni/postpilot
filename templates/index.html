@@ -34,6 +34,7 @@
                 <button class="tab-button active" data-tab="tour">Nexora Suite</button>
                 <button class="tab-button" data-tab="nz">Nexora Investments</button>
                 <button class="tab-button" data-tab="insta">Insta Posts</button>
+                <button class="tab-button" data-tab="grahak">GrahakChetna Newsroom</button>
             </div>
 
             <!-- Tour Posts Tab -->
@@ -93,6 +94,44 @@
                 </div>
                 <div id="instaPostsList" class="posts-list">
                     <p class="loading">Loading...</p>
+                </div>
+            </div>
+
+            <!-- Grahak Newsroom Tab -->
+            <div id="grahak" class="tab-content">
+                <div class="tab-header">
+                    <h2>GrahakChetna Auto News System</h2>
+                    <div class="tab-controls">
+                        <button id="startNewsBtn" class="btn btn-primary">▶ Start News Automation</button>
+                        <button id="stopNewsBtn" class="btn btn-secondary">⏹ Stop News Automation</button>
+                        <button id="runNewsBtn" class="btn btn-success">▶ Run News Now</button>
+                        <button id="runYTBtn" class="btn btn-success">▶ Run YouTube Now</button>
+                    </div>
+                </div>
+                <div class="status-card">
+                    <p>News: <span id="newsStatus" class="badge">OFF</span></p>
+                    <p>YouTube: <span id="ytStatus" class="badge">OFF</span></p>
+                    <p>Last News Run: <span id="lastNewsRun"></span></p>
+                    <p>Last YT Run: <span id="lastYTRun"></span></p>
+                    <p>Last News Post: <span id="lastNewsPost"></span></p>
+                    <p>Last YT Post: <span id="lastYTPost"></span></p>
+                </div>
+                <div class="feeds-manager">
+                    <h3>RSS Feed Manager</h3>
+                    <table class="feeds-table">
+                        <thead><tr><th>Feed Name</th><th>URL</th><th>Action</th></tr></thead>
+                        <tbody id="feedsTableBody"></tbody>
+                    </table>
+                    <div class="feeds-controls">
+                        <input type="text" id="newFeedName" placeholder="Feed Name">
+                        <input type="text" id="newFeedUrl" placeholder="Feed URL">
+                        <button id="addFeedBtn" class="btn btn-info">Add Feed</button>
+                        <button id="saveFeedsBtn" class="btn btn-secondary">Save Changes</button>
+                    </div>
+                </div>
+                <div class="logs-section">
+                    <div class="log-box" id="newsLogBox"></div>
+                    <div class="log-box" id="ytLogBox"></div>
                 </div>
             </div>
         </div>
