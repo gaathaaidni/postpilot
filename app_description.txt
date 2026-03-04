@@ -1,0 +1,38 @@
+PostPilot is a lightweight Flask web application that automates the creation and local storage of social media content. It was built as an educational demonstration of Flask routing, template rendering, and modular Python scripting. The project focuses on travel-related posts and provides three primary content categories:
+
+• **Instagram updates** – quick captions with emojis and hashtags.
+• **Tour advertisements** – descriptive text about travel tours.
+• **Visa information posts** – guidance and tips for obtaining travel visas.
+
+### Architecture & Key Components
+
+- **app.py**: The central Flask application. It defines routes (`/`, `/post`) which serve the HTML form and handle POST requests respectively. Incoming form data determines which content module is invoked and where the generated post text is saved.
+- **insta.py**, **tour.py**, **visa.py**: Each module exposes a `format_post(data)` function that takes a dictionary and returns a formatted string. These modules encapsulate category-specific templates and logic.
+- **templates/index.html**: Jinja2 template rendering the submission form. Users select a post type, enter relevant details (e.g. destination, description), and submit.
+- **static/**: Contains `style.css` and `script.js` for basic styling and front-end validation.
+- **posts/**: Output directory where generated posts are appended to JSON files (`insta_posts.json`, `tour_posts.json`, `visa_posts.json`).
+- **requirements.txt**: Lists Python dependencies (`Flask`, etc.) required to run the app.
+
+### Usage
+
+1. **Setup**: create a virtual environment and install packages with `pip install -r requirements.txt`.
+2. **Running**: start the server using `python app.py` or via the included shell scripts (`run.sh` for development, `run-production.sh` for production environment). The app listens on `http://localhost:5000` by default.
+3. **Creating a Post**: Access the homepage, choose a category, fill out the form fields, and submit. The server will generate formatted text and append it to the appropriate JSON file under `posts/`. The updated post list is displayed on the page.
+
+### Additional Scripts
+
+- `setup.sh`: Bootstraps the environment by installing dependencies and preparing directories.
+- `docker-compose.yml` / `Dockerfile`: Provides containerization support if deploying via Docker.
+- `insta.py`, `tour.py`, `visa.py` each include helper functions for building standardized post text.
+
+### Notes & Extensions
+
+This repository is intentionally simple. It can be extended with features such as:
+- Database storage instead of local JSON files.
+- Authentication and user accounts.
+- Deployment to cloud services with proper environment configuration.
+- Integration with real social media APIs for automatic posting.
+
+The codebase is oriented around readability and learning; comments and markdown files (`README.md`, `QUICKSTART.md`, etc.) provide further guidance.
+
+Use this description as a reference when sharing the project with others or with an AI assistant for assistance.
