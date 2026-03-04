@@ -16,17 +16,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Tab functionality
 function initializeTabs() {
-    const buttons = Array.from(document.getElementsByClassName('tab-button'));
+    const container = document.querySelector('.tabs');
     const contents = Array.from(document.getElementsByClassName('tab-content'));
-    buttons.forEach(btn => {
-        btn.addEventListener('click', () => {
-            buttons.forEach(b => b.classList.remove('active'));
-            contents.forEach(c => c.classList.remove('active'));
-            btn.classList.add('active');
-            const id = btn.dataset.tab;
-            const panel = document.getElementById(id);
-            if (panel) panel.classList.add('active');
-        });
+    if (!container) return;
+    container.addEventListener('click', event => {
+        const btn = event.target.closest('.tab-button');
+        if (!btn) return;
+        // deactivate all
+        container.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+        contents.forEach(c => c.classList.remove('active'));
+        // activate clicked
+        btn.classList.add('active');
+        const id = btn.dataset.tab;
+        const panel = document.getElementById(id);
+        if (panel) panel.classList.add('active');
     });
 }
 
