@@ -16,29 +16,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Tab functionality
 function initializeTabs() {
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.addEventListener('click', function() {
-            switchTab(this.dataset.tab);
+    const buttons = Array.from(document.getElementsByClassName('tab-button'));
+    const contents = Array.from(document.getElementsByClassName('tab-content'));
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            buttons.forEach(b => b.classList.remove('active'));
+            contents.forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            const id = btn.dataset.tab;
+            const panel = document.getElementById(id);
+            if (panel) panel.classList.add('active');
         });
     });
 }
 
 function switchTab(tabName) {
-    // Hide all tabs
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    
-    // Remove active from all buttons
-    document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
-    // Show selected tab
-    document.getElementById(tabName).classList.add('active');
-    
-    // Mark button as active
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    // kept for backwards compatibility
+    const btn = document.querySelector(`[data-tab="${tabName}"]`);
+    if (btn) btn.click();
 }
 
 // Button initialization
