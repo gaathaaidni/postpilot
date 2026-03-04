@@ -302,6 +302,99 @@ function startPosting(postType) {
 }
 
 function stopPosting(postType) {
+    fetch(`/api/control/${postType}/stop`, { method: 'POST' })
+    .then(response => response.json())
+    .then(data => { showSuccess(`${postType.toUpperCase()} posting stopped`); updateStatus(); })
+    .catch(error => { console.error('Error stopping posting:', error); showError('Error stopping posting'); });
+}
+
+// existing startAll/stopAll functions remain
+
+// Grahak Newsroom functions
+function loadGrahakStatus() {
+    fetch('/api/grahak/status')
+        .then(r=>r.json())
+        .then(s=>{
+            document.getElementById('newsStatus').textContent = s.news_enabled ? 'ON' : 'OFF';
+            document.getElementById('newsStatus').className = 'badge ' + (s.news_enabled ? 'ON' : 'OFF');
+            document.getElementById('ytStatus').textContent = s.youtube_enabled ? 'ON' : 'OFF';
+            document.getElementById('ytStatus').className = 'badge ' + (s.youtube_enabled ? 'ON' : 'OFF');
+            document.getElementById('lastNewsRun').textContent = s.last_news_run || '-';
+            document.getElementById('lastYTRun').textContent = s.last_youtube_run || '-';
+            document.getElementById('lastNewsPost').textContent = s.last_news_post || '-';
+            document.getElementById('lastYTPost').textContent = s.last_youtube_post || '-';
+        }).catch(e=>console.error(e));
+}
+
+function startNews() {fetch('/api/grahak/start_news',{method:'POST'}).then(loadGrahakStatus).catch(e=>{});}
+function stopNews() {fetch('/api/grahak/stop_news',{method:'POST'}).then(loadGrahakStatus).catch(e=>{});}
+function runNews() {fetch('/api/grahak/run_news',{method:'POST'}).then(loadGrahakStatus).catch(e=>{});}
+function runYT() {fetch('/api/grahak/run_youtube',{method:'POST'}).then(loadGrahakStatus).catch(e=>{});}
+
+function loadFeeds() {
+    fetch('/api/grahak/feeds')
+        .then(r=>r.json())
+        .then(data=>{
+            const tbody=document.getElementById('feedsTableBody'); tbody.innerHTML='';
+            data.forEach((f,i)=>{
+                const tr=document.createElement('tr');
+                tr.innerHTML=`<td>${escapeHtml(f.name)}</td><td>${escapeHtml(f.url)}</td><td><button class="btn btn-danger btn-small" onclick="deleteFeed(${i})">Delete</button></td>`;
+                tbody.appendChild(tr);
+            });
+        });
+}
+
+function addFeed() {
+    const name=document.getElementById('newFeedName').value.trim();
+    const url=document.getElementById('newFeedUrl').value.trim();
+    if(!name||!url){showError('Name and URL required');return;}
+    fetch('/api/grahak/add_feed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,url})})
+        .then(()=>{loadFeeds();document.getElementById('newFeedName').value='';document.getElementById('newFeedUrl').value='';})
+        .catch(e=>console.error(e));
+}
+
+function deleteFeed(index) {
+    fetch('/api/grahak/delete_feed',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index})})
+        .then(()=>loadFeeds())
+        .catch(e=>console.error(e));
+}
+
+function loadLogs() {
+    fetch('/api/grahak/logs')
+        .then(r=>r.json())
+        .then(data=>{
+            document.getElementById('newsLogBox').textContent = data.news.join('\n');
+            document.getElementById('ytLogBox').textContent = data.youtube.join('\n');
+        });
+}
+
+// new tab buttons listeners
+function initializeGrahakButtons(){
+    document.getElementById('startNewsBtn').addEventListener('click', startNews);
+    document.getElementById('stopNewsBtn').addEventListener('click', stopNews);
+    document.getElementById('runNewsBtn').addEventListener('click', runNews);
+    document.getElementById('runYTBtn').addEventListener('click', runYT);
+    document.getElementById('addFeedBtn').addEventListener('click', addFeed);
+    document.getElementById('saveFeedsBtn').addEventListener('click', loadFeeds); // reload after potential save on server
+}
+
+// extend initialization
+var _origInit = initializeButtons;
+initializeButtons = function(){
+    _origInit();
+    initializeGrahakButtons();
+};
+
+// call status and feeds/logs periodically when grahak active
+setInterval(()=>{
+    if(document.querySelector(`[data-tab="grahak"]`).classList.contains('active')){
+        loadGrahakStatus();loadFeeds();loadLogs();
+    }
+},5000);
+    });
+}
+
+function stopPosting(postType) {
     fetch(`/api/control/${postType}/stop`, {
         method: 'POST'
     })

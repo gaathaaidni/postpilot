@@ -1,6 +1,7 @@
 import json
 import threading
 import os
+from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from pathlib import Path
 # modules for posting logic (renamed files)
@@ -282,6 +283,119 @@ def get_status():
         'nz_interval': posting_state['nz_interval'],
         'insta_interval': posting_state['insta_interval']
     })
+
+
+# --- GrahakChetna endpoints ---
+
+def _read_config(path, default):
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(default, f, indent=2)
+        return default
+
+@app.route('/api/grahak/status', methods=['GET'])
+def grahak_status():
+    status = _read_config(os.path.join('config','automation_status.json'), {
+        "news_enabled": True,
+        "youtube_enabled": True,
+        "last_news_run": "",
+        "last_youtube_run": "",
+        "last_news_post": "",
+        "last_youtube_post": ""
+    })
+    return jsonify(status)
+
+@app.route('/api/grahak/start_news', methods=['POST'])
+def grahak_start_news():
+    status = _read_config(os.path.join('config','automation_status.json'), {})
+    status['news_enabled'] = True
+    status['last_news_run'] = datetime.utcnow().isoformat()
+    with open(os.path.join('config','automation_status.json'),'w') as f:
+        json.dump(status, f, indent=2)
+    return jsonify({'status':'ok'})
+
+@app.route('/api/grahak/stop_news', methods=['POST'])
+def grahak_stop_news():
+    status = _read_config(os.path.join('config','automation_status.json'), {})
+    status['news_enabled'] = False
+    with open(os.path.join('config','automation_status.json'),'w') as f:
+        json.dump(status, f, indent=2)
+    return jsonify({'status':'ok'})
+
+@app.route('/api/grahak/run_news', methods=['POST'])
+def grahak_run_news():
+    # run script directly
+    threading.Thread(target=lambda: os.system('python3 grahak_news_auto.py'), daemon=True).start()
+    status = _read_config(os.path.join('config','automation_status.json'), {})
+    status['last_news_run'] = datetime.utcnow().isoformat()
+    with open(os.path.join('config','automation_status.json'),'w') as f:
+        json.dump(status, f, indent=2)
+    return jsonify({'status':'started'})
+
+@app.route('/api/grahak/run_youtube', methods=['POST'])
+def grahak_run_youtube():
+    threading.Thread(target=lambda: os.system('python3 grahak_youtube_auto.py'), daemon=True).start()
+    status = _read_config(os.path.join('config','automation_status.json'), {})
+    status['last_youtube_run'] = datetime.utcnow().isoformat()
+    with open(os.path.join('config','automation_status.json'),'w') as f:
+        json.dump(status, f, indent=2)
+    return jsonify({'status':'started'})
+
+@app.route('/api/grahak/feeds', methods=['GET'])
+def grahak_feeds():
+    data = _read_config(os.path.join('config','rss_feeds.json'), {"feeds": []})
+    return jsonify(data.get('feeds', []))
+
+@app.route('/api/grahak/add_feed', methods=['POST'])
+def grahak_add_feed():
+    payload = request.get_json() or {}
+    name = payload.get('name','').strip()
+    url = payload.get('url','').strip()
+    if not name or not url:
+        return jsonify({'error':'invalid'}),400
+    data = _read_config(os.path.join('config','rss_feeds.json'), {"feeds": []})
+    feeds = data.get('feeds',[])
+    feeds.append({'name':name,'url':url})
+    data['feeds']=feeds
+    with open(os.path.join('config','rss_feeds.json'),'w') as f:
+        json.dump(data, f, indent=2)
+    return jsonify({'status':'ok'})
+
+@app.route('/api/grahak/delete_feed', methods=['POST'])
+def grahak_delete_feed():
+    payload = request.get_json() or {}
+    idx = payload.get('index')
+    data = _read_config(os.path.join('config','rss_feeds.json'), {"feeds": []})
+    feeds = data.get('feeds',[])
+    if isinstance(idx,int) and 0<=idx<len(feeds):
+        feeds.pop(idx)
+        data['feeds']=feeds
+        with open(os.path.join('config','rss_feeds.json'),'w') as f:
+            json.dump(data,f,indent=2)
+        return jsonify({'status':'ok'})
+    return jsonify({'error':'invalid'}),400
+
+@app.route('/api/grahak/logs', methods=['GET'])
+def grahak_logs():
+    def tail(path, n=50):
+        try:
+            with open(path,'r') as f:
+                lines=f.readlines()
+            return lines[-n:]
+        except:
+            return []
+    return jsonify({
+        'news': [l.rstrip() for l in tail('news.log')],
+        'youtube': [l.rstrip() for l in tail('yt.log')]
+    })
+
+@app.route('/grahak-dashboard')
+def grahak_dashboard():
+    return render_template('index.html')
 
 # Interval management endpoints
 @app.route('/api/interval/<post_type>', methods=['GET'])
