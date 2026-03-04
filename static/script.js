@@ -389,23 +389,6 @@ setInterval(()=>{
         loadGrahakStatus();loadFeeds();loadLogs();
     }
 },5000);
-    });
-}
-
-function stopPosting(postType) {
-    fetch(`/api/control/${postType}/stop`, {
-        method: 'POST'
-    })
-    .then(response => response.json())
-    .then(data => {
-        showSuccess(`${postType.toUpperCase()} posting stopped!`);
-        updateStatus();
-    })
-    .catch(error => {
-        console.error('Error stopping posting:', error);
-        showError('Error stopping posting');
-    });
-}
 
 function startAllPosting() {
     fetch('/api/control/all/start', {
