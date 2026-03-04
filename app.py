@@ -3,8 +3,9 @@ import threading
 import os
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from pathlib import Path
-import tour
-import visa
+# modules for posting logic (renamed files)
+import nexora_suite as tour
+import nexora_by_phoenix_international as visa
 import insta
 
 app = Flask(__name__)
@@ -178,7 +179,8 @@ def start_tour():
         tour.set_status_callback(update_posting_status)
         tour.set_interval(posting_state['tour_interval'])
         tour.stop_event.clear()
-        thread = threading.Thread(target=tour.run_tour, daemon=True)
+        # module renamed; use updated function name
+        thread = threading.Thread(target=tour.run_nexora_suite, daemon=True)
         thread.start()
         posting_state['threads']['tour'] = thread
         posting_state['tour_running'] = True
@@ -190,7 +192,7 @@ def start_tour():
 def stop_tour():
     """Stop tour posting"""
     if posting_state['tour_running']:
-        tour.stop_tour()
+        tour.stop_nexora_suite()
         posting_state['tour_running'] = False
         update_posting_status('tour', False, '', None)
         return jsonify({'status': 'Tour posting stopped'}), 200
@@ -203,7 +205,8 @@ def start_nz():
         visa.set_status_callback(update_posting_status)
         visa.set_interval(posting_state['nz_interval'])
         visa.stop_event.clear()
-        thread = threading.Thread(target=visa.run_nz, daemon=True)
+        # module renamed; use updated function name
+        thread = threading.Thread(target=visa.run_nexora_by_phoenix, daemon=True)
         thread.start()
         posting_state['threads']['nz'] = thread
         posting_state['nz_running'] = True
@@ -215,7 +218,7 @@ def start_nz():
 def stop_nz():
     """Stop NZ visa posting"""
     if posting_state['nz_running']:
-        visa.stop_nz()
+        visa.stop_nexora_by_phoenix()
         posting_state['nz_running'] = False
         update_posting_status('nz', False, '', None)
         return jsonify({'status': 'NZ posting stopped'}), 200
