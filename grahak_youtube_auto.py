@@ -22,9 +22,9 @@ CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "UC...replace_with_id")
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 
 POSTED_FILE = "posted_videos.txt"
-FB_PAGE_ID = os.getenv("FB_PAGE_ID")
+FB_PAGE_ID = os.getenv("FB_PAGE_ID_GRAHAK_CHETNA") or os.getenv("GRAHAK_PAGE_ID") or os.getenv("FB_PAGE_ID")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
-IG_USER_ID = os.getenv("IG_USER_ID")
+IG_USER_ID = os.getenv("INSTA_ID_GRAHAK_CHETNA") or os.getenv("IG_USER_ID")
 DEFAULT_GRAHAK_PAGE_ID = "954901604381882"
 
 # logging to console and file

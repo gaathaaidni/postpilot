@@ -22,9 +22,9 @@ CONFIG_FEEDS = os.path.join("config", "rss_feeds.json")
 STATUS_FILE = os.path.join("config", "automation_status.json")
 
 POSTED_FILE = "posted_news.txt"
-FB_PAGE_ID = os.getenv("FB_PAGE_ID")
+FB_PAGE_ID = os.getenv("FB_PAGE_ID_GRAHAK_CHETNA") or os.getenv("GRAHAK_PAGE_ID") or os.getenv("FB_PAGE_ID")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
-IG_USER_ID = os.getenv("IG_USER_ID")
+IG_USER_ID = os.getenv("INSTA_ID_GRAHAK_CHETNA") or os.getenv("IG_USER_ID")
 DEFAULT_GRAHAK_PAGE_ID = "954901604381882"
 
 # ensure config directory exists
