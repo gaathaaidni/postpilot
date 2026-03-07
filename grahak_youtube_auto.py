@@ -155,33 +155,59 @@ def create_video_image(title: str) -> str:
 
     
     # centered headline block
-    lines = textwrap.wrap(title, width=30)
+    
+    # ===== PROFESSIONAL HEADLINE ENGINE =====
 
-    line_heights=[]
-    line_widths=[]
+    # Load background image
+    if os.path.exists("/workspaces/postpilot/static/bg.png"):
+        bg = Image.open("/workspaces/postpilot/static/bg.png").resize((width, height))
+        img.paste(bg)
+    else:
+        draw.rectangle([0,0,width,height], fill=(80,10,10))
 
-    for line in lines:
-        lw, lh = _text_size(draw, line, font)
-        line_widths.append(lw)
-        line_heights.append(lh)
+    # auto font scaling
+    max_font = 90
+    min_font = 40
 
-    total_text_height = sum(line_heights) + (len(lines)-1)*12
+    for size in range(max_font, min_font, -2):
+        try:
+            test_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+        except:
+            test_font = ImageFont.load_default()
 
-    center_y = int(height * 0.60)
+        lines = textwrap.wrap(title, width=20)
 
-    y = center_y - total_text_height//2
+        total_h = 0
+        widths=[]
+        heights=[]
 
-    for i, line in enumerate(lines):
+        for line in lines:
+            bbox = draw.textbbox((0,0), line, font=test_font)
+            w=bbox[2]-bbox[0]
+            h=bbox[3]-bbox[1]
+            widths.append(w)
+            heights.append(h)
+            total_h+=h+10
 
-        lw = line_widths[i]
-        lh = line_heights[i]
+        if total_h < height*0.5:
+            font=test_font
+            break
 
-        x = (width - lw)//2
+    center_y = int(height*0.60)
+    y = center_y - total_h//2
 
-        draw.text((x+3, y+3), line, font=font, fill=(0,0,0))
-        draw.text((x, y), line, font=font, fill=text_color)
+    for i,line in enumerate(lines):
 
-        y += lh + 12
+        w=widths[i]
+        h=heights[i]
+
+        x=(width-w)//2
+
+        draw.text((x+4,y+4),line,font=font,fill=(0,0,0))
+        draw.text((x,y),line,font=font,fill=(255,255,255))
+
+        y+=h+12
+
 
 
     bottom_text = "Watch on YouTube @grahakchetna"
@@ -263,7 +289,7 @@ def run():
             if TEST_MODE:
                 logger.info(f"[TEST] would post video: {title}")
                 with open(ytlog,'a') as lf:
-                    lf.write(f"[{datetime.utcnow().isoformat()}] TEST - VIDEO - {title}\n")
+                    lf.write(f"[{datetime.now(datetime.UTC).isoformat()}] TEST - VIDEO - {title}\n")
                 mark_as_posted(vid)
             else:
                 fb_url = post_to_facebook_photo(img, caption)
