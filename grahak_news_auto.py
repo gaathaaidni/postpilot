@@ -224,17 +224,36 @@ def create_news_image(title: str, source: str) -> str:
     bdw, bdh = _text_size(draw, "BREAKING", font)
     draw.text((20+(badge_w-bdw)/2, 20+(badge_h-bdh)/2), "BREAKING", font=font, fill=(255,255,255))
 
-    # headline with shadow
+    
+    # centered headline block
     lines = textwrap.wrap(title, width=30)
-    y = banner_h + 40
+
+    line_heights = []
+    line_widths = []
+
     for line in lines:
-        if y > height - 120:
-            break
-        # shadow
-        draw.text((40+2, y+2), line, font=font, fill=(0,0,0))
-        draw.text((40, y), line, font=font, fill=(255,255,255))
-        _, lh = _text_size(draw, line, font)
-        y += lh + 10
+        lw, lh = _text_size(draw, line, font)
+        line_widths.append(lw)
+        line_heights.append(lh)
+
+    total_text_height = sum(line_heights) + (len(lines) - 1) * 12
+
+    center_y = int(height * 0.60)
+
+    y = center_y - total_text_height // 2
+
+    for i, line in enumerate(lines):
+
+        lw = line_widths[i]
+        lh = line_heights[i]
+
+        x = (width - lw) // 2
+
+        draw.text((x + 3, y + 3), line, font=font, fill=(0,0,0))
+        draw.text((x, y), line, font=font, fill=(255,255,255))
+
+        y += lh + 12
+
 
     # watermark
     wm_text = "GRAHAK CHETNA"

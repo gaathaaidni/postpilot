@@ -153,13 +153,36 @@ def create_video_image(title: str) -> str:
     _, th = _text_size(draw, top_label, font)
     y += th + 20
 
+    
+    # centered headline block
     lines = textwrap.wrap(title, width=30)
+
+    line_heights=[]
+    line_widths=[]
+
     for line in lines:
-        if y > height - bottom_h - 100:
-            break
-        draw.text((40, y), line, font=font, fill=text_color)
-        _, lh = _text_size(draw, line, font)
-        y += lh + 10
+        lw, lh = _text_size(draw, line, font)
+        line_widths.append(lw)
+        line_heights.append(lh)
+
+    total_text_height = sum(line_heights) + (len(lines)-1)*12
+
+    center_y = int(height * 0.60)
+
+    y = center_y - total_text_height//2
+
+    for i, line in enumerate(lines):
+
+        lw = line_widths[i]
+        lh = line_heights[i]
+
+        x = (width - lw)//2
+
+        draw.text((x+3, y+3), line, font=font, fill=(0,0,0))
+        draw.text((x, y), line, font=font, fill=text_color)
+
+        y += lh + 12
+
 
     bottom_text = "Watch on YouTube @grahakchetna"
     w, h = draw.textsize(bottom_text, font=font)
