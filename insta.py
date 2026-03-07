@@ -1,5 +1,5 @@
 # insta_thread.py
-import requests, time, json
+import requests, time, json, os
 from threading import Event
 
 stop_event = Event()
@@ -7,17 +7,21 @@ status_callback = None
 current_interval = 3 * 60  # Default to 3 minutes for Instagram sync
 
 def get_access_token():
-    """Read access token from token.txt file"""
+    """Read user access token from env, then token.txt fallback."""
+    return os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN') or _read_token_file()
+
+
+def _read_token_file():
     try:
         with open('token.txt', 'r') as f:
             return f.read().strip()
     except:
         return None
 
-FB_PAGE_ID = '967550829768297'  # Nexora Suite - syncs to Instagram (fallback)
-FB_PAGE_NAME = 'Nexora Investment'  # friendly page name to resolve if ID not correct
+FB_PAGE_ID = os.getenv('FB_PAGE_ID_NEXORA_SUITE') or os.getenv('FB_PAGE_ID') or '967550829768297'  # Nexora Suite - syncs to Instagram
+FB_PAGE_NAME = os.getenv('FB_PAGE_NAME', 'Nexora Investment')  # friendly page name fallback
 FB_ACCESS_TOKEN = get_access_token()
-IG_USER_ID = '17841472248438802'  # Nexora by Phoenix Instagram (fallback)
+IG_USER_ID = os.getenv('INSTA_ID_NEXORA_SUITE') or os.getenv('IG_USER_ID') or '17841472248438802'  # Instagram business id
 IG_USERNAME = 'nexora.phoenix'    # Instagram username (for clarity / logging)
 POSTED_FILE = 'posted.txt'
 
