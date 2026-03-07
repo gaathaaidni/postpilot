@@ -25,6 +25,7 @@ POSTED_FILE = "posted_videos.txt"
 FB_PAGE_ID = os.getenv("FB_PAGE_ID")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
 IG_USER_ID = os.getenv("IG_USER_ID")
+DEFAULT_GRAHAK_PAGE_ID = "954901604381882"
 
 # logging to console and file
 ytlog = os.getenv("YT_LOG","yt.log")
@@ -37,6 +38,47 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+
+def _read_user_access_token() -> str | None:
+    """Read long-lived user token from env or token.txt fallback."""
+    env_token = os.getenv("FB_ACCESS_TOKEN")
+    if env_token:
+        return env_token.strip()
+    try:
+        with open("token.txt", "r", encoding="utf-8") as f:
+            token = f.read().strip()
+            return token or None
+    except Exception:
+        return None
+
+
+def _resolve_page_access_token() -> None:
+    """Resolve page token so Grahak scripts work like Nexora scripts."""
+    global FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN
+
+    if FB_PAGE_ACCESS_TOKEN and FB_PAGE_ID:
+        return
+
+    FB_PAGE_ID = FB_PAGE_ID or os.getenv("GRAHAK_PAGE_ID") or DEFAULT_GRAHAK_PAGE_ID
+    user_token = _read_user_access_token()
+    if not user_token:
+        return
+
+    try:
+        url = "https://graph.facebook.com/v19.0/me/accounts"
+        resp = requests.get(url, params={"access_token": user_token}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        for page in data:
+            if page.get("id") == FB_PAGE_ID and page.get("access_token"):
+                FB_PAGE_ACCESS_TOKEN = page["access_token"]
+                return
+    except Exception as e:
+        logger.warning(f"unable to resolve page access token from user token: {e}")
+
+
+_resolve_page_access_token()
 
 # test mode
 TEST_MODE = os.getenv("TEST_MODE","False").lower() in ("1","true","yes")
