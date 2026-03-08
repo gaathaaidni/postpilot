@@ -40,6 +40,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _resolve_asset_path(*relative_parts: str) -> str | None:
+    """Resolve static asset path across local/codespace environments."""
+    filename = os.path.join(*relative_parts)
+    candidates = [
+        filename,
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join("/workspace/postpilot", filename),
+        os.path.join("/workspaces/postpilot", filename),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def _read_user_access_token() -> str | None:
     """Read long-lived user token from env or token.txt fallback."""
     env_token = os.getenv("FB_ACCESS_TOKEN")
@@ -92,6 +107,34 @@ def _text_size(draw, text, font):
     return bbox[2]-bbox[0], bbox[3]-bbox[1]
 
 
+def _load_font(size: int, bold: bool = False):
+    candidates = [
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_logo_corner(img: Image.Image, draw: ImageDraw.ImageDraw, logo_path: str, width: int) -> None:
+    if not os.path.exists(logo_path):
+        return
+    logo = Image.open(logo_path).convert("RGBA")
+    target_w = int(width * 0.18)
+    ratio = target_w / logo.width
+    logo = logo.resize((target_w, int(logo.height * ratio)), Image.Resampling.LANCZOS)
+    pad = 24
+    x = width - logo.width - pad
+    y = pad
+    draw.rounded_rectangle([x - 12, y - 12, x + logo.width + 12, y + logo.height + 12], radius=16, fill=(0, 0, 0, 160))
+    img.paste(logo, (x, y), logo)
+
+
 def already_posted(video_id: str) -> bool:
     if not os.path.exists(POSTED_FILE):
         return False
@@ -136,47 +179,44 @@ def fetch_latest_videos() -> list:
 
 def create_video_image(title: str) -> str:
     width, height = 1080, 1080
-    bg_color = (80, 10, 10)
     text_color = (255, 255, 255)
-    bottom_h = 80
-    try:
-        font = ImageFont.truetype("arial.ttf", 48)
-    except Exception:
-        font = ImageFont.load_default()
+    bottom_h = 98
+    img = Image.new("RGBA", (width, height), color=(8, 8, 12, 255))
 
-    img = Image.new("RGB", (width, height), color=bg_color)
-    draw = ImageDraw.Draw(img)
+    bg_path = _resolve_asset_path("static", "bg.png")
+    if bg_path:
+        bg = Image.open(bg_path).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+        img.paste(bg, (0, 0))
+
+    draw = ImageDraw.Draw(img, "RGBA")
+    top_font = _load_font(48, bold=True)
+    label_font = _load_font(52, bold=True)
+    bottom_font = _load_font(42, bold=True)
 
     top_label = "GRAHAK CHETNA NEWS"
-    y = 40
-    draw.text((40, y), top_label, font=font, fill=text_color)
-    _, th = _text_size(draw, top_label, font)
-    y += th + 20
+    tw, th = _text_size(draw, top_label, top_font)
+    draw.text((44, 80), top_label, font=top_font, fill=(255, 255, 255, 235))
 
-    
-    # centered headline block
-    
-    # ===== PROFESSIONAL HEADLINE ENGINE =====
+    badge_text = "NEWS TODAY"
+    badge_w, badge_h = 430, 120
+    badge_x, badge_y = (width - badge_w) // 2, int(height * 0.33)
+    draw.rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], fill=(220, 36, 40))
+    bdw, bdh = _text_size(draw, badge_text, label_font)
+    draw.text((badge_x + (badge_w - bdw) / 2, badge_y + (badge_h - bdh) / 2 - 4), badge_text, font=label_font, fill=(255, 255, 255))
 
-    # Load background image
-    if os.path.exists("/workspaces/postpilot/static/bg.png"):
-        bg = Image.open("/workspaces/postpilot/static/bg.png").resize((width, height))
-        img.paste(bg)
-    else:
-        draw.rectangle([0,0,width,height], fill=(80,10,10))
+    logo_path = _resolve_asset_path("static", "logo.png")
+    if logo_path:
+        _draw_logo_corner(img, draw, logo_path, width)
 
     # auto font scaling
-    max_font = 90
-    min_font = 40
+    max_font = 122
+    min_font = 62
+    lines = textwrap.wrap(title.strip(), width=15)[:4] or ["LATEST VIDEO"]
 
+    font = _load_font(min_font, bold=True)
+    widths, heights, total_h = [], [], 0
     for size in range(max_font, min_font, -2):
-        try:
-            test_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size)
-        except:
-            test_font = ImageFont.load_default()
-
-        lines = textwrap.wrap(title, width=20)
-
+        test_font = _load_font(size, bold=True)
         total_h = 0
         widths=[]
         heights=[]
@@ -187,9 +227,9 @@ def create_video_image(title: str) -> str:
             h=bbox[3]-bbox[1]
             widths.append(w)
             heights.append(h)
-            total_h+=h+10
+            total_h+=h+14
 
-        if total_h < height*0.5:
+        if total_h < height*0.38 and max(widths) < width * 0.92:
             font=test_font
             break
 
@@ -206,16 +246,17 @@ def create_video_image(title: str) -> str:
         draw.text((x+4,y+4),line,font=font,fill=(0,0,0))
         draw.text((x,y),line,font=font,fill=(255,255,255))
 
-        y+=h+12
+        y+=h+14
 
 
 
     bottom_text = "Watch on YouTube @grahakchetna"
-    w, h = draw.textsize(bottom_text, font=font)
-    draw.text(((width - w) / 2, height - bottom_h + (bottom_h - h) / 2), bottom_text, font=font, fill=text_color)
+    draw.rectangle([0, height - bottom_h, width, height], fill=(20, 20, 28, 230))
+    w, h = _text_size(draw, bottom_text, bottom_font)
+    draw.text(((width - w) / 2, height - bottom_h + (bottom_h - h) / 2), bottom_text, font=bottom_font, fill=text_color)
 
     filename = f"temp_video_{int(datetime.utcnow().timestamp())}.jpg"
-    img.save(filename, "JPEG")
+    img.convert("RGB").save(filename, "JPEG", quality=95)
     return filename
 
 
