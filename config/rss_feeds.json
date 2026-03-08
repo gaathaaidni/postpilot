@@ -1,12 +1,12 @@
 {
   "feeds": [
     {
-      "name": "Google News India",
-      "url": "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en"
+      "name": "Divya Bhaskar",
+      "url": "https://www.divyabhaskar.co.in/rss-v1--category-1035.xml"
     },
     {
-      "name": "ANI News",
-      "url": "https://www.aninews.in/rss/"
+      "name": "Gujarat Samachar",
+      "url": "https://www.gujaratsamachar.com/rss/category/gujarat"
     }
   ]
 }

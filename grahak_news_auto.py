@@ -52,6 +52,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _resolve_asset_path(*relative_parts: str) -> str | None:
+    """Resolve static asset path across local/codespace environments."""
+    filename = os.path.join(*relative_parts)
+    candidates = [
+        filename,
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join("/workspace/postpilot", filename),
+        os.path.join("/workspaces/postpilot", filename),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def _read_user_access_token() -> str | None:
     """Read long-lived user token from env or token.txt fallback."""
     env_token = os.getenv("FB_ACCESS_TOKEN")
@@ -199,72 +214,84 @@ def _text_size(draw, text, font):
     return bbox[2]-bbox[0], bbox[3]-bbox[1]
 
 
+def _load_font(size: int, bold: bool = False):
+    candidates = [
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_logo_corner(img: Image.Image, draw: ImageDraw.ImageDraw, logo_path: str, width: int) -> None:
+    if not os.path.exists(logo_path):
+        return
+    logo = Image.open(logo_path).convert("RGBA")
+    target_w = int(width * 0.18)
+    ratio = target_w / logo.width
+    logo = logo.resize((target_w, int(logo.height * ratio)), Image.Resampling.LANCZOS)
+    pad = 24
+    x = width - logo.width - pad
+    y = pad
+    draw.rounded_rectangle([x - 12, y - 12, x + logo.width + 12, y + logo.height + 12], radius=16, fill=(0, 0, 0, 160))
+    img.paste(logo, (x, y), logo)
+
+
 def create_news_image(title: str, source: str) -> str:
     width, height = 1080, 1080
-    # gradient background
-    img = Image.new("RGB", (width, height), color=0)
-    _draw_gradient(img, (80,10,10), (0,0,0))  # dark red -> black
-    draw = ImageDraw.Draw(img)
-
-    try:
-        font = ImageFont.truetype("arial.ttf", 48)
-    except Exception:
-        font = ImageFont.load_default()
-
-    # top banner
-    banner_h = 100
-    draw.rectangle([0,0,width,banner_h], fill=(20,20,20))
-    banner_text = "GRAHAK CHETNA NEWS"
-    bw, bh = _text_size(draw, banner_text, font)
-    draw.text(((width-bw)/2, (banner_h-bh)/2), banner_text, font=font, fill=(255,255,255))
-
-    # breaking badge
-    badge_w, badge_h = 140, 40
-    draw.rectangle([20, 20, 20+badge_w, 20+badge_h], fill=(200,0,0))
-    bdw, bdh = _text_size(draw, "BREAKING", font)
-    draw.text((20+(badge_w-bdw)/2, 20+(badge_h-bdh)/2), "BREAKING", font=font, fill=(255,255,255))
-
-    
-    # centered headline block
-    
-    # ===== PROFESSIONAL HEADLINE ENGINE =====
-
-    # Load background image
-    if os.path.exists("/workspaces/postpilot/static/bg.png"):
-        bg = Image.open("/workspaces/postpilot/static/bg.png").resize((width, height))
-        img.paste(bg)
+    img = Image.new("RGBA", (width, height), color=(8, 8, 12, 255))
+    bg_path = _resolve_asset_path("static", "bg.png")
+    if bg_path:
+        bg = Image.open(bg_path).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+        img.paste(bg, (0, 0))
     else:
-        draw.rectangle([0,0,width,height], fill=(80,10,10))
+        _draw_gradient(img, (25, 25, 30), (8, 8, 12))
+    draw = ImageDraw.Draw(img, "RGBA")
 
-    # auto font scaling
-    max_font = 90
-    min_font = 40
+    top_font = _load_font(48, bold=True)
+    label_font = _load_font(52, bold=True)
+    bottom_font = _load_font(42, bold=True)
 
+    # reference-style red label
+    badge_text = "NEWS TODAY"
+    badge_w, badge_h = 430, 120
+    badge_x, badge_y = (width - badge_w) // 2, int(height * 0.33)
+    draw.rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], fill=(220, 36, 40))
+    bdw, bdh = _text_size(draw, badge_text, label_font)
+    draw.text((badge_x + (badge_w - bdw) / 2, badge_y + (badge_h - bdh) / 2 - 4), badge_text, font=label_font, fill=(255, 255, 255))
+
+    logo_path = _resolve_asset_path("static", "logo.png")
+    if logo_path:
+        _draw_logo_corner(img, draw, logo_path, width)
+
+    # auto font scaling for readable title
+    max_font = 122
+    min_font = 62
+    lines = textwrap.wrap(title.strip(), width=15)[:4] or ["LATEST UPDATE"]
+
+    font = _load_font(min_font, bold=True)
+    widths, heights, total_h = [], [], 0
     for size in range(max_font, min_font, -2):
-        try:
-            test_font = ImageFont.truetype("DejaVuSans-Bold.ttf", size)
-        except:
-            test_font = ImageFont.load_default()
-
-        lines = textwrap.wrap(title, width=20)
-
-        total_h = 0
-        widths=[]
-        heights=[]
-
+        test_font = _load_font(size, bold=True)
+        total_h, widths, heights = 0, [], []
         for line in lines:
             bbox = draw.textbbox((0,0), line, font=test_font)
             w=bbox[2]-bbox[0]
             h=bbox[3]-bbox[1]
             widths.append(w)
             heights.append(h)
-            total_h+=h+10
+            total_h+=h+14
 
-        if total_h < height*0.5:
+        if total_h < height*0.38 and max(widths) < width * 0.92:
             font=test_font
             break
 
-    center_y = int(height*0.60)
+    center_y = int(height*0.56)
     y = center_y - total_h//2
 
     for i,line in enumerate(lines):
@@ -277,24 +304,22 @@ def create_news_image(title: str, source: str) -> str:
         draw.text((x+4,y+4),line,font=font,fill=(0,0,0))
         draw.text((x,y),line,font=font,fill=(255,255,255))
 
-        y+=h+12
+        y+=h+14
 
-
-
-    # watermark
-    wm_text = "GRAHAK CHETNA"
-    wmw, wmh = _text_size(draw, wm_text, font)
-    draw.text((width-wmw-20, height-wmh-120), wm_text, font=font, fill=(255,255,255,50))
+    # top heading
+    top_text = "GRAHAK CHETNA NEWS"
+    tw, th = _text_size(draw, top_text, top_font)
+    draw.text((44, 80), top_text, font=top_font, fill=(255, 255, 255, 235))
 
     # bottom strip
-    bottom_strip_h = 80
-    draw.rectangle([0, height - bottom_strip_h, width, height], fill=(30,30,30))
+    bottom_strip_h = 98
+    draw.rectangle([0, height - bottom_strip_h, width, height], fill=(20, 20, 28, 230))
     source_text = f"Courtesy: {source}"
-    w, h = _text_size(draw, source_text, font)
-    draw.text(((width - w) / 2, height - bottom_strip_h + (bottom_strip_h - h) / 2), source_text, font=font, fill=(255,255,255))
+    w, h = _text_size(draw, source_text, bottom_font)
+    draw.text(((width - w) / 2, height - bottom_strip_h + (bottom_strip_h - h) / 2), source_text, font=bottom_font, fill=(255,255,255))
 
     filename = f"temp_{uuid.uuid4().hex}.jpg"
-    img.save(filename, "JPEG")
+    img.convert("RGB").save(filename, "JPEG", quality=95)
     return filename
 
 
