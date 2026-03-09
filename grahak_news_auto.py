@@ -213,7 +213,6 @@ def _text_size(draw, text, font):
     bbox = draw.textbbox((0,0), text, font=font)
     return bbox[2]-bbox[0], bbox[3]-bbox[1]
 
-
 def _load_font(size: int, bold: bool = False):
     candidates = [
         "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
@@ -227,19 +226,24 @@ def _load_font(size: int, bold: bool = False):
             continue
     return ImageFont.load_default()
 
-
 def _draw_logo_corner(img: Image.Image, draw: ImageDraw.ImageDraw, logo_path: str, width: int) -> None:
     if not os.path.exists(logo_path):
         return
     logo = Image.open(logo_path).convert("RGBA")
-    target_w = int(width * 0.18)
-    ratio = target_w / logo.width
-    logo = logo.resize((target_w, int(logo.height * ratio)), Image.Resampling.LANCZOS)
+    diameter = int(width * 0.16)
+    logo = logo.resize((diameter, diameter), Image.Resampling.LANCZOS)
+
+    # circular crop for logo
+    mask = Image.new("L", (diameter, diameter), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, diameter, diameter), fill=255)
+    circle_logo = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
+    circle_logo.paste(logo, (0, 0), mask)
+
     pad = 24
-    x = width - logo.width - pad
+    x = width - diameter - pad
     y = pad
-    draw.rounded_rectangle([x - 12, y - 12, x + logo.width + 12, y + logo.height + 12], radius=16, fill=(0, 0, 0, 160))
-    img.paste(logo, (x, y), logo)
+    draw.ellipse([x - 10, y - 10, x + diameter + 10, y + diameter + 10], fill=(0, 0, 0, 170))
+    img.paste(circle_logo, (x, y), circle_logo)
 
 
 def create_news_image(title: str, source: str) -> str:
@@ -258,20 +262,20 @@ def create_news_image(title: str, source: str) -> str:
     bottom_font = _load_font(42, bold=True)
 
     # reference-style red label
-    badge_text = "NEWS TODAY"
-    badge_w, badge_h = 430, 120
-    badge_x, badge_y = (width - badge_w) // 2, int(height * 0.33)
+    badge_text = "GRAHAK CHETNA"
+    badge_w, badge_h = 620, 96
+    badge_x, badge_y = (width - badge_w) // 2, 26
     draw.rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], fill=(220, 36, 40))
     bdw, bdh = _text_size(draw, badge_text, label_font)
     draw.text((badge_x + (badge_w - bdw) / 2, badge_y + (badge_h - bdh) / 2 - 4), badge_text, font=label_font, fill=(255, 255, 255))
 
-    logo_path = _resolve_asset_path("static", "logo.png")
+    logo_path = _resolve_asset_path("static", "gclogo.jpg") or _resolve_asset_path("static", "logo.png")
     if logo_path:
         _draw_logo_corner(img, draw, logo_path, width)
 
     # auto font scaling for readable title
-    max_font = 122
-    min_font = 62
+    max_font = 84
+    min_font = 40
     lines = textwrap.wrap(title.strip(), width=15)[:4] or ["LATEST UPDATE"]
 
     font = _load_font(min_font, bold=True)
@@ -301,22 +305,29 @@ def create_news_image(title: str, source: str) -> str:
 
         x=(width-w)//2
 
-        draw.text((x+4,y+4),line,font=font,fill=(0,0,0))
+        draw.rounded_rectangle([x - 22, y - 8, x + w + 22, y + h + 10], radius=14, fill=(0, 0, 0, 120))
+        draw.text((x+3,y+3),line,font=font,fill=(0,0,0,200))
         draw.text((x,y),line,font=font,fill=(255,255,255))
 
-        y+=h+14
+        y+=h+18
 
     # top heading
-    top_text = "GRAHAK CHETNA NEWS"
+    top_text = "News Update"
     tw, th = _text_size(draw, top_text, top_font)
-    draw.text((44, 80), top_text, font=top_font, fill=(255, 255, 255, 235))
+    draw.text((44, 140), top_text, font=top_font, fill=(255, 255, 255, 220))
 
     # bottom strip
-    bottom_strip_h = 98
+    bottom_strip_h = 150
     draw.rectangle([0, height - bottom_strip_h, width, height], fill=(20, 20, 28, 230))
     source_text = f"Courtesy: {source}"
-    w, h = _text_size(draw, source_text, bottom_font)
-    draw.text(((width - w) / 2, height - bottom_strip_h + (bottom_strip_h - h) / 2), source_text, font=bottom_font, fill=(255,255,255))
+    ai_note = "AI note: generated with AI"
+    source_w, source_h = _text_size(draw, source_text, bottom_font)
+    note_font = _load_font(34, bold=False)
+    note_w, note_h = _text_size(draw, ai_note, note_font)
+    source_y = height - bottom_strip_h + 22
+    note_y = source_y + source_h + 10
+    draw.text(((width - source_w) / 2, source_y), source_text, font=bottom_font, fill=(255,255,255))
+    draw.text(((width - note_w) / 2, note_y), ai_note, font=note_font, fill=(228,228,228))
 
     filename = f"temp_{uuid.uuid4().hex}.jpg"
     img.convert("RGB").save(filename, "JPEG", quality=95)
