@@ -1,12 +1,3 @@
 {
-  "feeds": [
-    {
-      "name": "Divya Bhaskar",
-      "url": "https://www.divyabhaskar.co.in/rss-v1--category-1035.xml"
-    },
-    {
-      "name": "Gujarat Samachar",
-      "url": "https://www.gujaratsamachar.com/rss/category/gujarat"
-    }
-  ]
+  "feeds": []
 }
