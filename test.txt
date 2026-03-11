@@ -1,0 +1,3 @@
+GRAHAK_FONT_PATH=/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf \
+GRAHAK_FONT_PATH_BOLD=/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf \
+./test_news.sh

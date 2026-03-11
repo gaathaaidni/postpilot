@@ -90,7 +90,11 @@ def _resolve_page_access_token() -> None:
                 FB_PAGE_ACCESS_TOKEN = page["access_token"]
                 return
     except Exception as e:
-        logger.warning(f"unable to resolve page access token from user token: {e}")
+                logger.warning(
+            "unable to resolve page access token from user token (%s)",
+            type(e).__name__,
+        )
+
 
 
 _resolve_page_access_token()
@@ -108,16 +112,27 @@ def _text_size(draw, text, font):
 
 
 def _load_font(size: int, bold: bool = False):
+    """Load a scalable TrueType font, including Termux-friendly fallbacks."""
+    env_font = os.getenv("GRAHAK_FONT_PATH_BOLD" if bold else "GRAHAK_FONT_PATH")
     candidates = [
+        env_font,
         "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf" if bold else "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSans-Bold.ttf" if bold else "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSans-Regular.ttf",
         "arialbd.ttf" if bold else "arial.ttf",
     ]
     for path in candidates:
+        if not path:
+            continue
         try:
             return ImageFont.truetype(path, size)
         except Exception:
             continue
+    global _FONT_WARNING_EMITTED
+    if not _FONT_WARNING_EMITTED:
+        logger.warning("no scalable font found; using PIL default bitmap font")
+        _FONT_WARNING_EMITTED = True
     return ImageFont.load_default()
 
 
