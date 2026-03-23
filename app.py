@@ -6,7 +6,9 @@ from pathlib import Path
 # modules for posting logic (renamed files)
 import nexora_suite as tour
 import nexora_by_phoenix_international as visa
+import gaatha_loop as gaatha
 import insta
+
 
 app = Flask(__name__)
 
@@ -21,12 +23,16 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 NZ_FILE = POSTS_DIR / "visa_posts.json"
 TOUR_FILE = POSTS_DIR / "tour_posts.json"
 INSTA_FILE = POSTS_DIR / "insta_posts.json"
+GAATHA_FILE = POSTS_DIR / "gaatha_posts.json"
 
 # Global state for running tasks
 posting_state = {
     'tour_running': False,
     'nz_running': False,
-    'insta_running': False,
+    'gaatha_running': False,
+    'insta_suite_running': False,
+    'insta_phoenix_running': False,
+    # Threads store
     'threads': {},
     'tour_status': '',
     'nz_status': '',
@@ -34,10 +40,18 @@ posting_state = {
     'tour_current_post': None,
     'nz_current_post': None,
     'insta_current_post': None,
+    'gaatha_status': '',
+    'gaatha_current_post': None,
+    # Intervals
     'tour_interval': 30 * 60,  # 30 minutes in seconds
     'nz_interval': 30 * 60,
-    'insta_interval': 3 * 60  # 3 minutes for Instagram sync
+    'gaatha_interval': 30 * 60,
+    'insta_interval': 3 * 60
 }
+
+# Initialize Insta Sync Objects
+insta_suite = insta.InstaSync('967550829768297', '17841449080283492', 'insta_suite')
+insta_phoenix = insta.InstaSync('954901604381882', '17841472248438802', 'insta_phoenix')
 
 def load_posts(filepath):
     """Load posts from JSON file"""
@@ -67,6 +81,10 @@ def update_posting_status(post_type, is_running, message='', current_post=None):
         posting_state['insta_running'] = is_running
         posting_state['insta_status'] = message
         posting_state['insta_current_post'] = current_post
+    elif post_type == 'gaatha':
+        posting_state['gaatha_running'] = is_running
+        posting_state['gaatha_status'] = message
+        posting_state['gaatha_current_post'] = current_post
 
 @app.route('/')
 def index():
@@ -83,6 +101,8 @@ def get_posts(post_type):
         posts = load_posts(NZ_FILE)
     elif post_type == 'insta':
         posts = load_posts(INSTA_FILE)
+    elif post_type == 'gaatha':
+        posts = load_posts(GAATHA_FILE)
     else:
         return jsonify({'error': 'Invalid post type'}), 400
     
@@ -97,6 +117,8 @@ def add_post(post_type):
         filepath = NZ_FILE
     elif post_type == 'insta':
         filepath = INSTA_FILE
+    elif post_type == 'gaatha':
+        filepath = GAATHA_FILE
     else:
         return jsonify({'error': 'Invalid post type'}), 400
     
@@ -121,6 +143,8 @@ def update_post(post_type, index):
         filepath = NZ_FILE
     elif post_type == 'insta':
         filepath = INSTA_FILE
+    elif post_type == 'gaatha':
+        filepath = GAATHA_FILE
     else:
         return jsonify({'error': 'Invalid post type'}), 400
     
@@ -144,6 +168,8 @@ def delete_post(post_type, index):
         filepath = NZ_FILE
     elif post_type == 'insta':
         filepath = INSTA_FILE
+    elif post_type == 'gaatha':
+        filepath = GAATHA_FILE
     else:
         return jsonify({'error': 'Invalid post type'}), 400
     
@@ -229,36 +255,78 @@ def stop_nz():
         return jsonify({'status': 'NZ posting stopped'}), 200
     return jsonify({'status': 'NZ not running'}), 200
 
+# --- GAATHA ENDPOINTS ---
+@app.route('/api/control/gaatha/start', methods=['POST'])
+def start_gaatha():
+    """Start Gaatha AI posting"""
+    if not posting_state['gaatha_running']:
+        gaatha.set_status_callback(update_posting_status)
+        gaatha.set_interval(posting_state['gaatha_interval'])
+        gaatha.stop_event.clear()
+        thread = threading.Thread(target=gaatha.run_gaatha_loop, daemon=True)
+        thread.start()
+        posting_state['threads']['gaatha'] = thread
+        posting_state['gaatha_running'] = True
+        update_posting_status('gaatha', True, 'Starting...', None)
+        return jsonify({'status': 'Gaatha posting started'}), 200
+    return jsonify({'status': 'Gaatha already running'}), 200
+
+@app.route('/api/control/gaatha/stop', methods=['POST'])
+def stop_gaatha():
+    """Stop Gaatha AI posting"""
+    if posting_state['gaatha_running']:
+        gaatha.stop_gaatha_loop()
+        posting_state['gaatha_running'] = False
+        update_posting_status('gaatha', False, '', None)
+        return jsonify({'status': 'Gaatha posting stopped'}), 200
+    return jsonify({'status': 'Gaatha not running'}), 200
+
+
+# --- INSTA SYNC ENDPOINTS (Split) ---
+
 @app.route('/api/control/insta/start', methods=['POST'])
 def start_insta():
-    """Start Instagram sync"""
-    if not posting_state['insta_running']:
-        insta.set_status_callback(update_posting_status)
-        insta.set_interval(posting_state['insta_interval'])
-        insta.stop_event.clear()
-        thread = threading.Thread(target=insta.run_insta_sync, daemon=True)
+    """Start Both Instagram syncs"""
+    msg = []
+    insta.set_status_callback(update_posting_status)
+    
+    if not posting_state['insta_suite_running']:
+        insta_suite.stop_event.clear()
+        thread = threading.Thread(target=insta_suite.run, daemon=True)
         thread.start()
-        posting_state['threads']['insta'] = thread
-        posting_state['insta_running'] = True
-        update_posting_status('insta', True, 'Starting...', None)
-        return jsonify({'status': 'Instagram sync started'}), 200
-    return jsonify({'status': 'Instagram already running'}), 200
+        posting_state['threads']['insta_suite'] = thread
+        posting_state['insta_suite_running'] = True
+        msg.append("Suite Started")
+
+    if not posting_state['insta_phoenix_running']:
+        insta_phoenix.stop_event.clear()
+        thread2 = threading.Thread(target=insta_phoenix.run, daemon=True)
+        thread2.start()
+        posting_state['threads']['insta_phoenix'] = thread2
+        posting_state['insta_phoenix_running'] = True
+        msg.append("Phoenix Started")
+        
+    return jsonify({'status': ', '.join(msg) or 'Already running'}), 200
 
 @app.route('/api/control/insta/stop', methods=['POST'])
 def stop_insta():
     """Stop Instagram sync"""
-    if posting_state['insta_running']:
-        insta.stop_insta_sync()
-        posting_state['insta_running'] = False
-        update_posting_status('insta', False, '', None)
-        return jsonify({'status': 'Instagram sync stopped'}), 200
-    return jsonify({'status': 'Instagram not running'}), 200
+    if posting_state['insta_suite_running']:
+        insta_suite.stop()
+        posting_state['insta_suite_running'] = False
+    
+    if posting_state['insta_phoenix_running']:
+        insta_phoenix.stop()
+        posting_state['insta_phoenix_running'] = False
+        
+    return jsonify({'status': 'Instagram syncs stopped'}), 200
 
 @app.route('/api/control/all/start', methods=['POST'])
 def start_all():
     """Start all posting tasks"""
     start_tour()
     start_nz()
+    start_gaatha()
     start_insta()
     return jsonify({'status': 'All tasks started'}), 200
 
@@ -267,6 +335,7 @@ def stop_all():
     """Stop all posting tasks"""
     stop_tour()
     stop_nz()
+    stop_gaatha()
     stop_insta()
     return jsonify({'status': 'All tasks stopped'}), 200
 
@@ -276,16 +345,19 @@ def get_status():
     return jsonify({
         'tour_running': posting_state['tour_running'],
         'nz_running': posting_state['nz_running'],
-        'insta_running': posting_state['insta_running'],
+        'gaatha_running': posting_state['gaatha_running'],
+        'insta_running': posting_state['insta_suite_running'] or posting_state['insta_phoenix_running'],
         'tour_status': posting_state['tour_status'],
         'nz_status': posting_state['nz_status'],
+        'gaatha_status': posting_state['gaatha_status'],
         'insta_status': posting_state['insta_status'],
         'tour_current_post': posting_state['tour_current_post'],
         'nz_current_post': posting_state['nz_current_post'],
+        'gaatha_current_post': posting_state['gaatha_current_post'],
         'insta_current_post': posting_state['insta_current_post'],
         'tour_interval': posting_state['tour_interval'],
         'nz_interval': posting_state['nz_interval'],
-        'insta_interval': posting_state['insta_interval']
+        'gaatha_interval': posting_state['gaatha_interval']
     })
 
 
@@ -430,8 +502,12 @@ def set_interval(post_type):
         tour.set_interval(interval)
     elif post_type == 'nz':
         visa.set_interval(interval)
+    elif post_type == 'gaatha':
+        gaatha.set_interval(interval)
     elif post_type == 'insta':
-        insta.set_interval(interval)
+        # Update both
+        insta_suite.set_interval(interval)
+        insta_phoenix.set_interval(interval)
     
     return jsonify({'success': True, 'interval': interval})
 

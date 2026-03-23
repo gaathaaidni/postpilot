@@ -3,170 +3,215 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nexora PostPilot</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>POSTPILOT // COMMAND CENTER</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <div class="header-content">
-                <img src="{{ url_for('static', filename='logo.png') }}" alt="PostPilot" class="logo-small">
-                <h1>
-                    <span class="logo-text">Nexora PostPilot</span>
-                </h1>
-                <p class="subtitle">Facebook Auto Poster & Instagram Sync</p>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar glass-panel">
+            <div class="brand">
+                <i class="fa-solid fa-rocket brand-icon"></i>
+                <h1>POSTPILOT</h1>
             </div>
-        </header>
+            
+            <div class="nav-menu">
+                <button class="nav-btn active" data-tab="dashboard">
+                    <i class="fa-solid fa-gauge-high"></i> Dashboard
+                </button>
+                <div class="nav-header">AGENTS</div>
+                <button class="nav-btn" data-tab="tour">
+                    <i class="fa-solid fa-hotel"></i> Nexora Suite
+                </button>
+                <button class="nav-btn" data-tab="nz">
+                    <i class="fa-solid fa-passport"></i> Nexora Phoenix
+                </button>
+                <button class="nav-btn" data-tab="gaatha">
+                    <i class="fa-solid fa-brain"></i> Gaatha AI
+                </button>
+                <button class="nav-btn" data-tab="grahak">
+                    <i class="fa-solid fa-newspaper"></i> Grahak Chetna
+                </button>
+                <div class="nav-header">SYSTEM</div>
+                <button class="nav-btn" data-tab="insta">
+                    <i class="fa-brands fa-instagram"></i> Insta Sync
+                </button>
+            </div>
 
-        <div class="controls-section">
-            <h2>Quick Controls</h2>
-            <div class="control-buttons">
-                <button id="runAllBtn" class="btn btn-success">▶ Run All</button>
-                <button id="stopAllBtn" class="btn btn-danger">⏹ Stop All</button>
+            <div class="status-footer">
+                <div class="connection-status online">
+                    <span class="dot"></span> SYSTEM ONLINE
+                </div>
             </div>
-            <div class="status-info">
-                <p>Live Status: <span id="globalStatus">🔴 All Stopped</span></p>
-            </div>
-        </div>
+        </nav>
 
-        <div class="tabs-container">
-            <div class="tabs">
-                <button class="tab-button active" data-tab="tour">Nexora Suite</button>
-                <button class="tab-button" data-tab="nz">Nexora Investments</button>
-                <button class="tab-button" data-tab="insta">Insta Posts</button>
-                <button class="tab-button" data-tab="grahak">GrahakChetna Newsroom</button>
-            </div>
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- Dashboard View -->
+            <div id="dashboard" class="view-section active">
+                <header class="section-header">
+                    <h2><i class="fa-solid fa-gauge-high"></i> MISSION CONTROL</h2>
+                    <div class="global-controls">
+                        <button onclick="controlAll('start')" class="btn btn-success glow-green">
+                            <i class="fa-solid fa-power-off"></i> ENGAGE ALL
+                        </button>
+                        <button onclick="controlAll('stop')" class="btn btn-danger glow-red">
+                            <i class="fa-solid fa-stop"></i> HALT ALL
+                        </button>
+                    </div>
+                </header>
 
-            <!-- Tour Posts Tab -->
-            <div id="tour" class="tab-content active">
-                <div class="tab-header">
-                    <h2>Nexora Suite</h2>
-                    <div class="tab-controls">
-                        <button id="startTourBtn" class="btn btn-primary">▶ Start Nexora Suite</button>
-                        <button id="stopTourBtn" class="btn btn-secondary">⏹ Stop Nexora Suite</button>
-                        <button class="btn btn-info" onclick="openAddPostModal('tour')">➕ Add Post</button>
+                <div class="stats-grid">
+                    <!-- Dynamically populated by JS -->
+                    <div class="stat-card glass-panel" id="stat-tour">
+                        <h3>Nexora Suite</h3>
+                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
+                        <div class="current-activity">--</div>
+                    </div>
+                    <div class="stat-card glass-panel" id="stat-nz">
+                        <h3>Nexora Phoenix</h3>
+                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
+                        <div class="current-activity">--</div>
+                    </div>
+                    <div class="stat-card glass-panel" id="stat-gaatha">
+                        <h3>Gaatha AI</h3>
+                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
+                        <div class="current-activity">--</div>
+                    </div>
+                    <div class="stat-card glass-panel" id="stat-insta">
+                        <h3>Insta Sync</h3>
+                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
+                        <div class="current-activity">--</div>
                     </div>
                 </div>
-                <div class="interval-control">
-                    <label for="tourInterval">Interval (minutes):</label>
-                    <input type="number" id="tourInterval" min="1" value="30">
-                    <button class="btn btn-secondary btn-small" onclick="updateInterval('tour')">Update</button>
+            </div>
+
+            <!-- Generic Post Manager View (Tour, NZ, Gaatha) -->
+            <div id="post-manager" class="view-section">
+                <header class="section-header">
+                    <h2 id="manager-title">AGENT CONTROL</h2>
+                    <div class="controls-row">
+                        <div class="toggle-switch">
+                            <label class="switch">
+                                <input type="checkbox" id="agent-toggle">
+                                <span class="slider round"></span>
+                            </label>
+                            <span id="agent-status-text">OFFLINE</span>
+                        </div>
+                        <button class="btn btn-primary" onclick="openModal()"><i class="fa-solid fa-plus"></i> New Transmission</button>
+                    </div>
+                </header>
+
+                <div class="interval-control glass-panel">
+                    <label>Transmission Interval (Seconds):</label>
+                    <input type="number" id="interval-input" min="60">
+                    <button onclick="updateInterval()" class="btn btn-sm btn-outline">Set</button>
                 </div>
-                <div id="tourPostsList" class="posts-list">
-                    <p class="loading">Loading...</p>
+
+                <div id="posts-grid" class="posts-grid">
+                    <!-- Posts injected here -->
                 </div>
             </div>
 
-            <!-- NZ Posts Tab -->
-            <div id="nz" class="tab-content">
-                <div class="tab-header">
-                    <h2>Nexora Investments</h2>
-                    <div class="tab-controls">
-                        <button id="startNZBtn" class="btn btn-primary">▶ Start Nexora Investments</button>
-                        <button id="stopNZBtn" class="btn btn-secondary">⏹ Stop Nexora Investments</button>
-                        <button class="btn btn-info" onclick="openAddPostModal('nz')">➕ Add Post</button>
+            <!-- Grahak View -->
+            <div id="grahak" class="view-section">
+                <header class="section-header">
+                    <h2><i class="fa-solid fa-newspaper"></i> GRAHAK CHETNA AUTOMATION</h2>
+                </header>
+                
+                <div class="grahak-grid">
+                    <div class="glass-panel control-panel">
+                        <h3>News Automation</h3>
+                        <p>Auto-generates news cards with viral hashtags.</p>
+                        <div class="action-buttons">
+                            <button onclick="triggerGrahak('run_news')" class="btn btn-primary"><i class="fa-solid fa-bolt"></i> Run Once</button>
+                        </div>
+                        <div class="status-row">
+                            <span>Last Run:</span>
+                            <span id="grahak-last-news" class="mono">Never</span>
+                        </div>
+                    </div>
+
+                    <div class="glass-panel control-panel">
+                        <h3>YouTube Sync</h3>
+                        <p>Converts RSS feed videos to branded images.</p>
+                        <div class="action-buttons">
+                            <button onclick="triggerGrahak('run_youtube')" class="btn btn-primary"><i class="fa-brands fa-youtube"></i> Sync Now</button>
+                        </div>
+                        <div class="status-row">
+                            <span>Last Run:</span>
+                            <span id="grahak-last-yt" class="mono">Never</span>
+                        </div>
                     </div>
                 </div>
-                <div class="interval-control">
-                    <label for="nzInterval">Interval (minutes):</label>
-                    <input type="number" id="nzInterval" min="1" value="30">
-                    <button class="btn btn-secondary btn-small" onclick="updateInterval('nz')">Update</button>
-                </div>
-                <div id="nzPostsList" class="posts-list">
-                    <p class="loading">Loading...</p>
+
+                <div class="logs-container glass-panel">
+                    <h3><i class="fa-solid fa-terminal"></i> SYSTEM LOGS</h3>
+                    <div class="log-window" id="grahak-logs">
+                        <div class="log-line">Waiting for data...</div>
+                    </div>
+                    <button onclick="fetchGrahakLogs()" class="btn btn-sm btn-outline"><i class="fa-solid fa-rotate"></i> Refresh Logs</button>
                 </div>
             </div>
 
-            <!-- Instagram Posts Tab -->
-            <div id="insta" class="tab-content">
-                <div class="tab-header">
-                    <h2>Instagram Sync</h2>
-                    <div class="tab-controls">
-                        <button id="startInstaBtn" class="btn btn-primary">▶ Start Insta</button>
-                        <button id="stopInstaBtn" class="btn btn-secondary">⏹ Stop Insta</button>
-                        <button class="btn btn-info" onclick="openAddPostModal('insta')">➕ Add Post</button>
+            <!-- Insta View -->
+             <div id="insta" class="view-section">
+                <header class="section-header">
+                    <h2><i class="fa-brands fa-instagram"></i> INSTAGRAM SYNC</h2>
+                </header>
+                <div class="glass-panel text-center">
+                    <p>Synchronizes Facebook Photos to Instagram automatically.</p>
+                    <div class="big-toggle">
+                        <button id="btn-insta-start" onclick="controlAgent('insta', 'start')" class="btn btn-success btn-lg">START SYNC</button>
+                        <button id="btn-insta-stop" onclick="controlAgent('insta', 'stop')" class="btn btn-danger btn-lg">STOP SYNC</button>
                     </div>
-                </div>
-                <div class="interval-control">
-                    <label for="instaInterval">Interval (minutes):</label>
-                    <input type="number" id="instaInterval" min="1" value="3">
-                    <button class="btn btn-secondary btn-small" onclick="updateInterval('insta')">Update</button>
-                </div>
-                <div id="instaPostsList" class="posts-list">
-                    <p class="loading">Loading...</p>
+                    <div class="status-large" id="insta-large-status">
+                        STATUS: <span class="mono">IDLE</span>
+                    </div>
                 </div>
             </div>
 
-            <!-- Grahak Newsroom Tab -->
-            <div id="grahak" class="tab-content">
-                <div class="tab-header">
-                    <h2>GrahakChetna Auto News System</h2>
-                    <div class="tab-controls">
-                        <button id="startNewsBtn" class="btn btn-primary">▶ Start News Automation</button>
-                        <button id="stopNewsBtn" class="btn btn-secondary">⏹ Stop News Automation</button>
-                        <button id="runNewsBtn" class="btn btn-success">▶ Run News Now</button>
-                        <button id="runYTBtn" class="btn btn-success">▶ Run YouTube Now</button>
-                    </div>
-                </div>
-                <div class="status-card">
-                    <p>News: <span id="newsStatus" class="badge">OFF</span></p>
-                    <p>YouTube: <span id="ytStatus" class="badge">OFF</span></p>
-                    <p>Last News Run: <span id="lastNewsRun"></span></p>
-                    <p>Last YT Run: <span id="lastYTRun"></span></p>
-                    <p>Last News Post: <span id="lastNewsPost"></span></p>
-                    <p>Last YT Post: <span id="lastYTPost"></span></p>
-                </div>
-                <div class="feeds-manager">
-                    <h3>RSS Feed Manager</h3>
-                    <table class="feeds-table">
-                        <thead><tr><th>Feed Name</th><th>URL</th><th>Action</th></tr></thead>
-                        <tbody id="feedsTableBody"></tbody>
-                    </table>
-                    <div class="feeds-controls">
-                        <input type="text" id="newFeedName" placeholder="Feed Name">
-                        <input type="text" id="newFeedUrl" placeholder="Feed URL">
-                        <button id="addFeedBtn" class="btn btn-info">Add Feed</button>
-                        <button id="saveFeedsBtn" class="btn btn-secondary">Save Changes</button>
-                    </div>
-                </div>
-                <div class="logs-section">
-                    <div class="log-box" id="newsLogBox"></div>
-                    <div class="log-box" id="ytLogBox"></div>
-                </div>
-            </div>
-        </div>
+        </main>
     </div>
 
-    <!-- Add/Edit Post Modal -->
+    <!-- Modal for Edit/Add -->
     <div id="postModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeAddPostModal()">&times;</span>
-            <h2>Add/Edit Post</h2>
-            <form id="postForm">
+        <div class="modal-content glass-panel">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modalTitle">Edit Transmission</h2>
+            <form id="postForm" onsubmit="handleFormSubmit(event)">
+                <input type="hidden" id="postIndex">
+                
                 <div class="form-group">
-                    <label for="postMessage">Message:</label>
-                    <textarea id="postMessage" placeholder="Enter post message..." required></textarea>
+                    <label>Message Payload</label>
+                    <textarea id="postMessage" rows="5" required></textarea>
                 </div>
+
                 <div class="form-group">
-                    <label for="postImage">Image:</label>
-                    <input type="file" id="postImage" accept="image/*">
-                    <p class="help-text">Or select existing image:</p>
-                    <select id="existingImage">
-                        <option value="">-- Select image --</option>
-                    </select>
+                    <label>Visual Asset</label>
+                    <div class="file-upload-wrapper">
+                        <input type="text" id="postImage" placeholder="filename.jpg" readonly>
+                        <input type="file" id="fileInput" onchange="handleFileUpload(this)" style="display: none;">
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('fileInput').click()">
+                            <i class="fa-solid fa-upload"></i> Upload
+                        </button>
+                    </div>
+                    <div id="imagePreview" class="image-preview"></div>
                 </div>
-                <div class="form-group">
-                    <label for="imagePreview">Image Preview:</label>
-                    <img id="imagePreview" src="" alt="Preview" style="max-width: 200px;">
-                </div>
+
                 <div class="form-actions">
-                    <button type="submit" class="btn btn-success">Save Post</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeAddPostModal()">Cancel</button>
+                    <button type="button" class="btn btn-text" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-success glow-green">Save Data</button>
                 </div>
             </form>
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <div id="notification-area"></div>
+
+    <script src="/static/script.js"></script>
 </body>
 </html>
