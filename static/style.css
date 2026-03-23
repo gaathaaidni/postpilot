@@ -340,3 +340,61 @@ textarea, input[type="text"], input[type="number"] {
 }
 
 .file-upload-wrapper { display: flex; gap: 10px; }
+
+/* --- Mobile Responsiveness --- */
+
+@media (max-width: 1024px) {
+    .stats-grid, .posts-grid {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    .grahak-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    body {
+        overflow-y: auto; /* Allow scrolling on mobile */
+    }
+
+    .app-container {
+        flex-direction: column;
+        height: auto; /* Allow content to determine height */
+    }
+
+    .sidebar {
+        width: 100%;
+        height: auto;
+        border-right: none;
+        border-bottom: var(--border);
+    }
+
+    .nav-menu {
+        flex-direction: row;
+        overflow-x: auto;
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+    }
+    .nav-menu::-webkit-scrollbar {
+        display: none; /* Chrome, Safari, Opera */
+    }
+
+    .nav-btn {
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .main-content {
+        padding: 1.5rem 1rem;
+    }
+
+    .stats-grid, .posts-grid, .grahak-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .modal-content {
+        width: 95vw;
+        margin: 5vh auto;
+        padding: 1.5rem;
+    }
+}

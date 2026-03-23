@@ -377,11 +377,8 @@ def _read_config(path, default):
 def grahak_status():
     status = _read_config(os.path.join('config','automation_status.json'), {
         "news_enabled": True,
-        "youtube_enabled": True,
         "last_news_run": "",
-        "last_youtube_run": "",
         "last_news_post": "",
-        "last_youtube_post": ""
     })
     return jsonify(status)
 
@@ -408,15 +405,6 @@ def grahak_run_news():
     threading.Thread(target=lambda: os.system('python3 grahak_news_auto.py'), daemon=True).start()
     status = _read_config(os.path.join('config','automation_status.json'), {})
     status['last_news_run'] = datetime.utcnow().isoformat()
-    with open(os.path.join('config','automation_status.json'),'w') as f:
-        json.dump(status, f, indent=2)
-    return jsonify({'status':'started'})
-
-@app.route('/api/grahak/run_youtube', methods=['POST'])
-def grahak_run_youtube():
-    threading.Thread(target=lambda: os.system('python3 grahak_youtube_auto.py'), daemon=True).start()
-    status = _read_config(os.path.join('config','automation_status.json'), {})
-    status['last_youtube_run'] = datetime.utcnow().isoformat()
     with open(os.path.join('config','automation_status.json'),'w') as f:
         json.dump(status, f, indent=2)
     return jsonify({'status':'started'})
@@ -465,8 +453,7 @@ def grahak_logs():
         except:
             return []
     return jsonify({
-        'news': [l.rstrip() for l in tail('news.log')],
-        'youtube': [l.rstrip() for l in tail('yt.log')]
+        'news': [l.rstrip() for l in tail('news.log')]
     })
 
 @app.route('/grahak-dashboard')
