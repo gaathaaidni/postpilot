@@ -51,8 +51,13 @@ posting_state = {
 }
 
 # Initialize Insta Sync Objects
-insta_suite = insta.InstaSync('967550829768297', '17841449080283492', 'insta_suite')
-insta_phoenix = insta.InstaSync('954901604381882', '17841472248438802', 'insta_phoenix')
+SUITE_PAGE_ID = os.getenv('FB_PAGE_ID_SUITE', '967550829768297')
+SUITE_IG_ID = os.getenv('INSTA_ID_SUITE', '17841449080283492')
+insta_suite = insta.InstaSync(SUITE_PAGE_ID, SUITE_IG_ID, 'insta_suite')
+
+PHOENIX_PAGE_ID = os.getenv('FB_PAGE_ID_PHOENIX', '954901604381882')
+PHOENIX_IG_ID = os.getenv('INSTA_ID_PHOENIX', '17841472248438802')
+insta_phoenix = insta.InstaSync(PHOENIX_PAGE_ID, PHOENIX_IG_ID, 'insta_phoenix')
 
 def load_posts(filepath):
     """Load posts from JSON file"""
