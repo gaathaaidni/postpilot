@@ -22,9 +22,10 @@ CONFIG_FEEDS = os.path.join("config", "rss_feeds.json")
 STATUS_FILE = os.path.join("config", "automation_status.json")
 
 POSTED_FILE = "posted_news.txt"
-FB_PAGE_ID = os.getenv("FB_PAGE_ID")
+FB_PAGE_ID = os.getenv("FB_PAGE_ID_GRAHAK_CHETNA") or os.getenv("GRAHAK_PAGE_ID") or os.getenv("FB_PAGE_ID")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
-IG_USER_ID = os.getenv("IG_USER_ID")
+IG_USER_ID = os.getenv("INSTA_ID_GRAHAK_CHETNA") or os.getenv("IG_USER_ID")
+DEFAULT_GRAHAK_PAGE_ID = "954901604381882"
 
 # ensure config directory exists
 os.makedirs(os.path.dirname(CONFIG_FEEDS), exist_ok=True)
@@ -49,6 +50,70 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+
+def _resolve_asset_path(*relative_parts: str) -> str | None:
+    """Resolve static asset path across local/codespace environments."""
+    filename = os.path.join(*relative_parts)
+    candidates = [
+        filename,
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join("/workspace/postpilot", filename),
+        os.path.join("/workspaces/postpilot", filename),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _read_user_access_token() -> str | None:
+    """Read long-lived user token from env or token.txt fallback."""
+    env_token = os.getenv("FB_ACCESS_TOKEN")
+    if env_token:
+        return env_token.strip()
+    try:
+        with open("token.txt", "r", encoding="utf-8") as f:
+            token = f.read().strip()
+            return token or None
+    except Exception:
+        return None
+
+
+def _resolve_page_access_token() -> None:
+    """Resolve page token so Grahak scripts work like Nexora scripts.
+
+    Fallback chain:
+    1) FB_PAGE_ACCESS_TOKEN env
+    2) token.txt/FB_ACCESS_TOKEN + Graph /me/accounts lookup by page id
+    """
+    global FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN
+
+    if FB_PAGE_ACCESS_TOKEN and FB_PAGE_ID:
+        return
+
+    FB_PAGE_ID = FB_PAGE_ID or os.getenv("GRAHAK_PAGE_ID") or DEFAULT_GRAHAK_PAGE_ID
+    user_token = _read_user_access_token()
+    if not user_token:
+        return
+
+    try:
+        url = "https://graph.facebook.com/v19.0/me/accounts"
+        resp = requests.get(url, params={"access_token": user_token}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        for page in data:
+            if page.get("id") == FB_PAGE_ID and page.get("access_token"):
+                FB_PAGE_ACCESS_TOKEN = page["access_token"]
+                return
+    except Exception as e:
+                logger.warning(
+            "unable to resolve page access token from user token (%s)",
+            type(e).__name__,
+        )
+
+
+_resolve_page_access_token()
 
 
 def _normalize(text: str) -> str:
@@ -151,58 +216,135 @@ def _text_size(draw, text, font):
     bbox = draw.textbbox((0,0), text, font=font)
     return bbox[2]-bbox[0], bbox[3]-bbox[1]
 
+def _load_font(size: int, bold: bool = False):
+    """Load a scalable TrueType font, including Termux-friendly fallbacks."""
+    env_font = os.getenv("GRAHAK_FONT_PATH_BOLD" if bold else "GRAHAK_FONT_PATH")
+    candidates = [
+        env_font,
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf" if bold else "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSans-Bold.ttf" if bold else "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSans-Regular.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    global _FONT_WARNING_EMITTED
+    if not _FONT_WARNING_EMITTED:
+        logger.warning("no scalable font found; using PIL default bitmap font")
+        _FONT_WARNING_EMITTED = True
+    return ImageFont.load_default()
+
+def _draw_logo_corner(img: Image.Image, draw: ImageDraw.ImageDraw, logo_path: str, width: int) -> None:
+    if not os.path.exists(logo_path):
+        return
+    logo = Image.open(logo_path).convert("RGBA")
+    diameter = int(width * 0.16)
+    logo = logo.resize((diameter, diameter), Image.Resampling.LANCZOS)
+
+    # circular crop for logo
+    mask = Image.new("L", (diameter, diameter), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, diameter, diameter), fill=255)
+    circle_logo = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
+    circle_logo.paste(logo, (0, 0), mask)
+
+    pad = 24
+    x = width - diameter - pad
+    y = pad
+    draw.ellipse([x - 10, y - 10, x + diameter + 10, y + diameter + 10], fill=(0, 0, 0, 170))
+    img.paste(circle_logo, (x, y), circle_logo)
+
 
 def create_news_image(title: str, source: str) -> str:
     width, height = 1080, 1080
-    # gradient background
-    img = Image.new("RGB", (width, height), color=0)
-    _draw_gradient(img, (80,10,10), (0,0,0))  # dark red -> black
-    draw = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (width, height), color=(8, 8, 12, 255))
+    bg_path = _resolve_asset_path("static", "bg.png")
+    if bg_path:
+        bg = Image.open(bg_path).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+        img.paste(bg, (0, 0))
+    else:
+        _draw_gradient(img, (25, 25, 30), (8, 8, 12))
+    draw = ImageDraw.Draw(img, "RGBA")
 
-    try:
-        font = ImageFont.truetype("arial.ttf", 48)
-    except Exception:
-        font = ImageFont.load_default()
+    top_font = _load_font(48, bold=True)
+    label_font = _load_font(52, bold=True)
+    bottom_font = _load_font(42, bold=True)
 
-    # top banner
-    banner_h = 100
-    draw.rectangle([0,0,width,banner_h], fill=(20,20,20))
-    banner_text = "GRAHAK CHETNA NEWS"
-    bw, bh = _text_size(draw, banner_text, font)
-    draw.text(((width-bw)/2, (banner_h-bh)/2), banner_text, font=font, fill=(255,255,255))
+    # reference-style red label
+    badge_text = "GRAHAK CHETNA"
+    badge_w, badge_h = 620, 96
+    badge_x, badge_y = (width - badge_w) // 2, 26
+    draw.rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], fill=(220, 36, 40))
+    bdw, bdh = _text_size(draw, badge_text, label_font)
+    draw.text((badge_x + (badge_w - bdw) / 2, badge_y + (badge_h - bdh) / 2 - 4), badge_text, font=label_font, fill=(255, 255, 255))
 
-    # breaking badge
-    badge_w, badge_h = 140, 40
-    draw.rectangle([20, 20, 20+badge_w, 20+badge_h], fill=(200,0,0))
-    bdw, bdh = _text_size(draw, "BREAKING", font)
-    draw.text((20+(badge_w-bdw)/2, 20+(badge_h-bdh)/2), "BREAKING", font=font, fill=(255,255,255))
+    logo_path = _resolve_asset_path("static", "gclogo.jpg") or _resolve_asset_path("static", "logo.png")
+    if logo_path:
+        _draw_logo_corner(img, draw, logo_path, width)
 
-    # headline with shadow
-    lines = textwrap.wrap(title, width=30)
-    y = banner_h + 40
-    for line in lines:
-        if y > height - 120:
+    # auto font scaling for readable title
+    max_font = 84
+    min_font = 40
+    lines = textwrap.wrap(title.strip(), width=15)[:4] or ["LATEST UPDATE"]
+
+    font = _load_font(min_font, bold=True)
+    widths, heights, total_h = [], [], 0
+    for size in range(max_font, min_font, -2):
+        test_font = _load_font(size, bold=True)
+        total_h, widths, heights = 0, [], []
+        for line in lines:
+            bbox = draw.textbbox((0,0), line, font=test_font)
+            w=bbox[2]-bbox[0]
+            h=bbox[3]-bbox[1]
+            widths.append(w)
+            heights.append(h)
+            total_h+=h+14
+
+        if total_h < height*0.38 and max(widths) < width * 0.92:
+            font=test_font
             break
-        # shadow
-        draw.text((40+2, y+2), line, font=font, fill=(0,0,0))
-        draw.text((40, y), line, font=font, fill=(255,255,255))
-        _, lh = _text_size(draw, line, font)
-        y += lh + 10
 
-    # watermark
-    wm_text = "GRAHAK CHETNA"
-    wmw, wmh = _text_size(draw, wm_text, font)
-    draw.text((width-wmw-20, height-wmh-120), wm_text, font=font, fill=(255,255,255,50))
+    center_y = int(height*0.56)
+    y = center_y - total_h//2
+
+    for i,line in enumerate(lines):
+
+        w=widths[i]
+        h=heights[i]
+
+        x=(width-w)//2
+
+        draw.rounded_rectangle([x - 22, y - 8, x + w + 22, y + h + 10], radius=14, fill=(0, 0, 0, 120))
+        draw.text((x+3,y+3),line,font=font,fill=(0,0,0,200))
+        draw.text((x,y),line,font=font,fill=(255,255,255))
+
+        y+=h+18
+
+    # top heading
+    top_text = "News Update"
+    tw, th = _text_size(draw, top_text, top_font)
+    draw.text((44, 140), top_text, font=top_font, fill=(255, 255, 255, 220))
 
     # bottom strip
-    bottom_strip_h = 80
-    draw.rectangle([0, height - bottom_strip_h, width, height], fill=(30,30,30))
+    bottom_strip_h = 150
+    draw.rectangle([0, height - bottom_strip_h, width, height], fill=(20, 20, 28, 230))
     source_text = f"Courtesy: {source}"
-    w, h = _text_size(draw, source_text, font)
-    draw.text(((width - w) / 2, height - bottom_strip_h + (bottom_strip_h - h) / 2), source_text, font=font, fill=(255,255,255))
+    ai_note = "AI note: generated with AI"
+    source_w, source_h = _text_size(draw, source_text, bottom_font)
+    note_font = _load_font(34, bold=False)
+    note_w, note_h = _text_size(draw, ai_note, note_font)
+    source_y = height - bottom_strip_h + 22
+    note_y = source_y + source_h + 10
+    draw.text(((width - source_w) / 2, source_y), source_text, font=bottom_font, fill=(255,255,255))
+    draw.text(((width - note_w) / 2, note_y), ai_note, font=note_font, fill=(228,228,228))
 
     filename = f"temp_{uuid.uuid4().hex}.jpg"
-    img.save(filename, "JPEG")
+    img.convert("RGB").save(filename, "JPEG", quality=95)
     return filename
 
 
@@ -256,7 +398,7 @@ def post_to_instagram_photo(image_url: str) -> bool:
 
 def run():
     status = load_status()
-    status["last_news_run"] = datetime.utcnow().isoformat()
+    status["last_news_run"] = datetime.now().astimezone().isoformat()
     save_status(status)
 
     items = fetch_rss_news()
@@ -281,7 +423,7 @@ def run():
             if TEST_MODE:
                 logger.info(f"[TEST] would post news: {title}")
                 with open(logfile, 'a') as lf:
-                    lf.write(f"[{datetime.utcnow().isoformat()}] TEST - NEWS - {title}\n")
+                    lf.write(f"[{datetime.now().astimezone().isoformat()}] TEST - NEWS - {title}\n")
                 posted += 1
                 last_title = title
             else:

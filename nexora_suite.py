@@ -7,7 +7,11 @@ status_callback = None
 current_interval = 30 * 60  # Default to 30 minutes
 
 def get_access_token():
-    """Read access token from token.txt file"""
+    """Read user access token from env, then token.txt fallback."""
+    return os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN') or _read_token_file()
+
+
+def _read_token_file():
     try:
         with open('token.txt', 'r') as f:
             return f.read().strip()
@@ -15,7 +19,7 @@ def get_access_token():
         return None
 
 ACCESS_TOKEN = get_access_token()
-PAGE_ID = "967550829768297"  # Nexora Suite page
+PAGE_ID = os.getenv('FB_PAGE_ID_NEXORA_SUITE', '967550829768297')  # Nexora Suite page
 IMAGE_FOLDER = "images"
 FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
 POSTS_FILE = "posts/tour_posts.json"

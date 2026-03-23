@@ -1,7 +1,7 @@
 {
-  "news_enabled": true,
+  "news_enabled": false,
   "youtube_enabled": true,
-  "last_news_run": "2026-03-04T17:34:56.969121",
+  "last_news_run": "2026-03-11T02:54:53.955242+00:00",
   "last_youtube_run": "",
   "last_news_post": "",
   "last_youtube_post": ""

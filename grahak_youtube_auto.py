@@ -22,9 +22,10 @@ CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "UC...replace_with_id")
 RSS_URL = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
 
 POSTED_FILE = "posted_videos.txt"
-FB_PAGE_ID = os.getenv("FB_PAGE_ID")
+FB_PAGE_ID = os.getenv("FB_PAGE_ID_GRAHAK_CHETNA") or os.getenv("GRAHAK_PAGE_ID") or os.getenv("FB_PAGE_ID")
 FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN")
-IG_USER_ID = os.getenv("IG_USER_ID")
+IG_USER_ID = os.getenv("INSTA_ID_GRAHAK_CHETNA") or os.getenv("IG_USER_ID")
+DEFAULT_GRAHAK_PAGE_ID = "954901604381882"
 
 # logging to console and file
 ytlog = os.getenv("YT_LOG","yt.log")
@@ -38,6 +39,66 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _resolve_asset_path(*relative_parts: str) -> str | None:
+    """Resolve static asset path across local/codespace environments."""
+    filename = os.path.join(*relative_parts)
+    candidates = [
+        filename,
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join("/workspace/postpilot", filename),
+        os.path.join("/workspaces/postpilot", filename),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _read_user_access_token() -> str | None:
+    """Read long-lived user token from env or token.txt fallback."""
+    env_token = os.getenv("FB_ACCESS_TOKEN")
+    if env_token:
+        return env_token.strip()
+    try:
+        with open("token.txt", "r", encoding="utf-8") as f:
+            token = f.read().strip()
+            return token or None
+    except Exception:
+        return None
+
+
+def _resolve_page_access_token() -> None:
+    """Resolve page token so Grahak scripts work like Nexora scripts."""
+    global FB_PAGE_ID, FB_PAGE_ACCESS_TOKEN
+
+    if FB_PAGE_ACCESS_TOKEN and FB_PAGE_ID:
+        return
+
+    FB_PAGE_ID = FB_PAGE_ID or os.getenv("GRAHAK_PAGE_ID") or DEFAULT_GRAHAK_PAGE_ID
+    user_token = _read_user_access_token()
+    if not user_token:
+        return
+
+    try:
+        url = "https://graph.facebook.com/v19.0/me/accounts"
+        resp = requests.get(url, params={"access_token": user_token}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        for page in data:
+            if page.get("id") == FB_PAGE_ID and page.get("access_token"):
+                FB_PAGE_ACCESS_TOKEN = page["access_token"]
+                return
+    except Exception as e:
+                logger.warning(
+            "unable to resolve page access token from user token (%s)",
+            type(e).__name__,
+        )
+
+
+
+_resolve_page_access_token()
+
 # test mode
 TEST_MODE = os.getenv("TEST_MODE","False").lower() in ("1","true","yes")
 
@@ -48,6 +109,51 @@ def _normalize(text: str) -> str:
 def _text_size(draw, text, font):
     bbox = draw.textbbox((0,0), text, font=font)
     return bbox[2]-bbox[0], bbox[3]-bbox[1]
+
+
+def _load_font(size: int, bold: bool = False):
+    """Load a scalable TrueType font, including Termux-friendly fallbacks."""
+    env_font = os.getenv("GRAHAK_FONT_PATH_BOLD" if bold else "GRAHAK_FONT_PATH")
+    candidates = [
+        env_font,
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans-Bold.ttf" if bold else "/data/data/com.termux/files/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSans-Bold.ttf" if bold else "/data/data/com.termux/files/usr/share/fonts/TTF/NotoSans-Regular.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    global _FONT_WARNING_EMITTED
+    if not _FONT_WARNING_EMITTED:
+        logger.warning("no scalable font found; using PIL default bitmap font")
+        _FONT_WARNING_EMITTED = True
+    return ImageFont.load_default()
+
+
+def _draw_logo_corner(img: Image.Image, draw: ImageDraw.ImageDraw, logo_path: str, width: int) -> None:
+    if not os.path.exists(logo_path):
+        return
+    logo = Image.open(logo_path).convert("RGBA")
+    diameter = int(width * 0.16)
+    logo = logo.resize((diameter, diameter), Image.Resampling.LANCZOS)
+
+    # circular crop for logo
+    mask = Image.new("L", (diameter, diameter), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, diameter, diameter), fill=255)
+    circle_logo = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
+    circle_logo.paste(logo, (0, 0), mask)
+
+    pad = 24
+    x = width - diameter - pad
+    y = pad
+    draw.ellipse([x - 10, y - 10, x + diameter + 10, y + diameter + 10], fill=(0, 0, 0, 170))
+    img.paste(circle_logo, (x, y), circle_logo)
 
 
 def already_posted(video_id: str) -> bool:
@@ -94,37 +200,92 @@ def fetch_latest_videos() -> list:
 
 def create_video_image(title: str) -> str:
     width, height = 1080, 1080
-    bg_color = (80, 10, 10)
     text_color = (255, 255, 255)
-    bottom_h = 80
-    try:
-        font = ImageFont.truetype("arial.ttf", 48)
-    except Exception:
-        font = ImageFont.load_default()
+    bottom_h = 98
+    img = Image.new("RGBA", (width, height), color=(8, 8, 12, 255))
 
-    img = Image.new("RGB", (width, height), color=bg_color)
-    draw = ImageDraw.Draw(img)
+    bg_path = _resolve_asset_path("static", "bg.png")
+    if bg_path:
+        bg = Image.open(bg_path).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+        img.paste(bg, (0, 0))
 
-    top_label = "GRAHAK CHETNA NEWS"
-    y = 40
-    draw.text((40, y), top_label, font=font, fill=text_color)
-    _, th = _text_size(draw, top_label, font)
-    y += th + 20
+    draw = ImageDraw.Draw(img, "RGBA")
+    top_font = _load_font(48, bold=True)
+    label_font = _load_font(52, bold=True)
+    bottom_font = _load_font(42, bold=True)
 
-    lines = textwrap.wrap(title, width=30)
-    for line in lines:
-        if y > height - bottom_h - 100:
+    top_label = "News Updates"
+    tw, th = _text_size(draw, top_label, top_font)
+    draw.text((44, 140), top_label, font=top_font, fill=(255, 255, 255, 220))
+
+    badge_text = "GRAHAK CHETNA"
+    badge_w, badge_h = 620, 96
+    badge_x, badge_y = (width - badge_w) // 2, 26
+    draw.rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], fill=(220, 36, 40))
+    bdw, bdh = _text_size(draw, badge_text, label_font)
+    draw.text((badge_x + (badge_w - bdw) / 2, badge_y + (badge_h - bdh) / 2 - 4), badge_text, font=label_font, fill=(255, 255, 255))
+
+    logo_path = _resolve_asset_path("static", "gclogo.jpg") or _resolve_asset_path("static", "logo.png")
+    if logo_path:
+        _draw_logo_corner(img, draw, logo_path, width)
+
+    # auto font scaling
+    max_font = 84
+    min_font = 40
+    lines = textwrap.wrap(title.strip(), width=15)[:4] or ["LATEST VIDEO"]
+
+    font = _load_font(min_font, bold=True)
+    widths, heights, total_h = [], [], 0
+    for size in range(max_font, min_font, -2):
+        test_font = _load_font(size, bold=True)
+        total_h = 0
+        widths=[]
+        heights=[]
+
+        for line in lines:
+            bbox = draw.textbbox((0,0), line, font=test_font)
+            w=bbox[2]-bbox[0]
+            h=bbox[3]-bbox[1]
+            widths.append(w)
+            heights.append(h)
+            total_h+=h+14
+
+        if total_h < height*0.38 and max(widths) < width * 0.92:
+            font=test_font
             break
-        draw.text((40, y), line, font=font, fill=text_color)
-        _, lh = _text_size(draw, line, font)
-        y += lh + 10
+
+    center_y = int(height*0.60)
+    y = center_y - total_h//2
+
+    for i,line in enumerate(lines):
+
+        w=widths[i]
+        h=heights[i]
+
+        x=(width-w)//2
+
+        draw.rounded_rectangle([x - 22, y - 8, x + w + 22, y + h + 10], radius=14, fill=(0, 0, 0, 120))
+        draw.text((x+3,y+3),line,font=font,fill=(0,0,0,200))
+        draw.text((x,y),line,font=font,fill=(255,255,255))
+
+        y+=h+18
+
+
 
     bottom_text = "Watch on YouTube @grahakchetna"
-    w, h = draw.textsize(bottom_text, font=font)
-    draw.text(((width - w) / 2, height - bottom_h + (bottom_h - h) / 2), bottom_text, font=font, fill=text_color)
+    ai_note = "AI note: generated with AI"
+    bottom_h = 150
+    draw.rectangle([0, height - bottom_h, width, height], fill=(20, 20, 28, 230))
+    w, h = _text_size(draw, bottom_text, bottom_font)
+    note_font = _load_font(34, bold=False)
+    note_w, note_h = _text_size(draw, ai_note, note_font)
+    y1 = height - bottom_h + 22
+    y2 = y1 + h + 10
+    draw.text(((width - w) / 2, y1), bottom_text, font=bottom_font, fill=text_color)
+    draw.text(((width - note_w) / 2, y2), ai_note, font=note_font, fill=(228,228,228))
 
     filename = f"temp_video_{int(datetime.utcnow().timestamp())}.jpg"
-    img.save(filename, "JPEG")
+    img.convert("RGB").save(filename, "JPEG", quality=95)
     return filename
 
 
@@ -198,7 +359,7 @@ def run():
             if TEST_MODE:
                 logger.info(f"[TEST] would post video: {title}")
                 with open(ytlog,'a') as lf:
-                    lf.write(f"[{datetime.utcnow().isoformat()}] TEST - VIDEO - {title}\n")
+                    lf.write(f"[{datetime.now(datetime.UTC).isoformat()}] TEST - VIDEO - {title}\n")
                 mark_as_posted(vid)
             else:
                 fb_url = post_to_facebook_photo(img, caption)
