@@ -49,7 +49,7 @@ def generate_audio(text, lang='en', filename='temp_audio.mp3'):
         return None
 
 # --- 1. Video Generation (Your Code Integration) ---
-def generate_video_from_text(title, description, lang='en'):
+def generate_video_from_text(title, script, lang='en'):
     """
     Generates a reel-style video from title and description.
     Returns the local file path of the generated video.
@@ -57,7 +57,7 @@ def generate_video_from_text(title, description, lang='en'):
     print(f"🎬 Starting Video Generation: {title} [{lang}]")
     
     # 1. Generate Audio (Proof of Multi-Language Support)
-    audio_file = generate_audio(f"{title}. {description}", lang=lang)
+    audio_file = generate_audio(f"{title}. {script}", lang=lang)
     if audio_file:
         print(f"✅ Audio generated: {audio_file}")
     
@@ -65,7 +65,7 @@ def generate_video_from_text(title, description, lang='en'):
     
     # =================================================================================
     # TODO: INTEGRATE YOUR EXISTING VIDEO GENERATION CODE HERE
-    # Use 'title' and 'description' variables.
+    # Use 'title' and 'script' variables.
     # Save the final video to 'output_filename'.
     # Use 'lang' to switch fonts or styles.
     # =================================================================================
@@ -73,7 +73,7 @@ def generate_video_from_text(title, description, lang='en'):
     # Example structure (pseudo-code):
     # my_video_lib.create_reel(
     #     heading=title,
-    #     body=description,
+    #     body=script,
     #     language=lang,
     #     background="news_bg.mp4",
     #     output=output_filename
@@ -166,20 +166,20 @@ def post_video_to_instagram(fb_video_id, caption):
         return False
 
 # --- Workflow Orchestrator ---
-def run_video_news_workflow(title, description, lang='en'):
+def run_video_news_workflow(title, script, caption, hashtags, lang='en'):
     # 1. Generate
-    video_path = generate_video_from_text(title, description, lang)
+    video_path = generate_video_from_text(title, script, lang)
     if not video_path:
         return False
         
-    caption = f"📢 {title}\n\n{description}\n\n#GrahakChetna #News #Update"
+    full_caption = f"📢 {title}\n\n{caption}\n\n{hashtags}"
     
     # 2. Post to FB
-    fb_id = post_video_to_facebook(video_path, caption)
+    fb_id = post_video_to_facebook(video_path, full_caption)
     
     # 3. Post to Insta (if FB success)
     if fb_id:
-        post_video_to_instagram(fb_id, caption)
+        post_video_to_instagram(fb_id, full_caption)
     
     # Cleanup
     try:

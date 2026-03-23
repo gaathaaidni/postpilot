@@ -413,22 +413,79 @@ function injectGrahakControls() {
 }
 
 // --- Video News ---
-window.createNewsVideo = async () => {
-    const title = prompt("Enter News Headline:");
-    if(!title) return;
+window.createNewsVideo = () => {
+    // Open Custom Modal for Video Generation
+    let modal = document.getElementById('videoGenModal');
     
-    const desc = prompt("Enter News Body/Description:");
-    if(!desc) return;
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'videoGenModal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 600px;">
+                <span class="close" onclick="document.getElementById('videoGenModal').style.display='none'">&times;</span>
+                <h2><i class="fa-solid fa-video"></i> Video News Generator</h2>
+                
+                <div class="form-group">
+                    <label>Title (Headline)</label>
+                    <input type="text" id="vid-title" placeholder="E.g., Breaking News: Update on Solar...">
+                </div>
+                
+                <div class="form-group">
+                    <label>Script (Voice Over / TTS)</label>
+                    <textarea id="vid-script" rows="4" placeholder="Enter the text that the AI voice should read..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Social Caption</label>
+                    <textarea id="vid-caption" rows="3" placeholder="Text for Facebook/Instagram caption..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label>Hashtags</label>
+                    <input type="text" id="vid-hashtags" value="#GrahakChetna #News #Update #Trending">
+                </div>
+                
+                <div class="form-group">
+                    <label>Language</label>
+                    <select id="vid-lang" style="width:100%;padding:10px;background:rgba(0,0,0,0.3);color:#fff;border:1px solid #333;border-radius:4px;">
+                        <option value="en">English</option>
+                        <option value="hi">Hindi (हिंदी)</option>
+                        <option value="gu">Gujarati (ગુજરાતી)</option>
+                    </select>
+                </div>
+                
+                <div class="form-actions">
+                    <button class="btn btn-outline" onclick="document.getElementById('videoGenModal').style.display='none'">Cancel</button>
+                    <button class="btn btn-primary" onclick="submitVideoGen()">Generate & Post</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
     
-    const lang = prompt("Enter Language Code (en, hi, gu):", "en");
-    if(!lang) return;
+    modal.style.display = 'block';
+};
+
+window.submitVideoGen = async () => {
+    const title = document.getElementById('vid-title').value;
+    const script = document.getElementById('vid-script').value;
+    const caption = document.getElementById('vid-caption').value;
+    const hashtags = document.getElementById('vid-hashtags').value;
+    const lang = document.getElementById('vid-lang').value;
     
+    if (!title || !script) {
+        showNotification("Title and Script are required!");
+        return;
+    }
+    
+    document.getElementById('videoGenModal').style.display = 'none';
     showNotification("Generating Video... This may take time.");
     
     const res = await fetch(`${API_ROOT}/grahak/create_video`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ title: title, description: desc, language: lang })
+        body: JSON.stringify({ title, script, caption, hashtags, language: lang })
     });
     
     const data = await res.json();
@@ -457,7 +514,8 @@ function showNotification(msg) {
 // Close modal on outside click
 window.onclick = function(event) {
     const modal = document.getElementById('postModal');
-    if (event.target == modal) {
-        closeModal();
-    }
+    const vidModal = document.getElementById('videoGenModal');
+    
+    if (event.target == modal) closeModal();
+    if (event.target == vidModal) vidModal.style.display = 'none';
 }
