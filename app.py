@@ -1,7 +1,6 @@
 import json
 import threading
 import os
-from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from pathlib import Path
 # modules for posting logic (renamed files)
@@ -10,13 +9,18 @@ import nexora_by_phoenix_international as visa
 import insta
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'images'
+
+# Use absolute paths for robustness
+APP_ROOT = Path(__file__).parent
+UPLOAD_FOLDER = APP_ROOT / 'images'
+POSTS_DIR = APP_ROOT / "posts"
+
+app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
-POSTS_DIR = "posts"
-NZ_FILE = os.path.join(POSTS_DIR, "visa_posts.json")
-TOUR_FILE = os.path.join(POSTS_DIR, "tour_posts.json")
-INSTA_FILE = os.path.join(POSTS_DIR, "insta_posts.json")
+NZ_FILE = POSTS_DIR / "visa_posts.json"
+TOUR_FILE = POSTS_DIR / "tour_posts.json"
+INSTA_FILE = POSTS_DIR / "insta_posts.json"
 
 # Global state for running tasks
 posting_state = {
@@ -435,7 +439,7 @@ def set_interval(post_type):
 @app.route('/images/<filename>')
 def serve_image(filename):
     """Serve image files"""
-    return send_from_directory('images', filename)
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
