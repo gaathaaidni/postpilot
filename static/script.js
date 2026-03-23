@@ -437,6 +437,15 @@ window.createNewsVideo = () => {
                 </div>
                 
                 <div class="form-group">
+                    <label>Background Image (Optional)</label>
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="file" id="vid-bg-input" accept="image/*" onchange="uploadVideoBg(this)" class="form-control" style="width:auto; flex-grow:1;">
+                        <input type="hidden" id="vid-bg-filename">
+                    </div>
+                    <div id="vid-bg-preview" style="margin-top:10px; max-height:150px; overflow:hidden; border-radius:4px;"></div>
+                </div>
+                
+                <div class="form-group">
                     <label>Social Caption</label>
                     <textarea id="vid-caption" rows="3" placeholder="Text for Facebook/Instagram caption..."></textarea>
                 </div>
@@ -467,12 +476,29 @@ window.createNewsVideo = () => {
     modal.style.display = 'block';
 };
 
+window.uploadVideoBg = async (input) => {
+    const file = input.files[0];
+    if (!file) return;
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const res = await fetch(`${API_ROOT}/upload`, { method: 'POST', body: formData });
+    const data = await res.json();
+    
+    if (data.filename) {
+        document.getElementById('vid-bg-filename').value = data.filename;
+        document.getElementById('vid-bg-preview').innerHTML = `<img src="/images/${data.filename}" style="width:100%; object-fit:cover;">`;
+    }
+};
+
 window.submitVideoGen = async () => {
     const title = document.getElementById('vid-title').value;
     const script = document.getElementById('vid-script').value;
     const caption = document.getElementById('vid-caption').value;
     const hashtags = document.getElementById('vid-hashtags').value;
     const lang = document.getElementById('vid-lang').value;
+    const image_filename = document.getElementById('vid-bg-filename').value;
     
     if (!title || !script) {
         showNotification("Title and Script are required!");
@@ -485,7 +511,7 @@ window.submitVideoGen = async () => {
     const res = await fetch(`${API_ROOT}/grahak/create_video`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ title, script, caption, hashtags, language: lang })
+        body: JSON.stringify({ title, script, caption, hashtags, language: lang, image_filename })
     });
     
     const data = await res.json();

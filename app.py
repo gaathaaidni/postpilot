@@ -423,9 +423,10 @@ def grahak_create_video():
     caption = data.get('caption')
     hashtags = data.get('hashtags')
     lang = data.get('language', 'en')
+    image_filename = data.get('image_filename')
     
     # Run the workflow
-    threading.Thread(target=grahak_video_factory.run_video_news_workflow, args=(title, script, caption, hashtags, lang), daemon=True).start()
+    threading.Thread(target=grahak_video_factory.run_video_news_workflow, args=(title, script, caption, hashtags, lang, image_filename), daemon=True).start()
     return jsonify({'status': 'success', 'message': 'Video generation started in background'})
 
 @app.route('/api/grahak/feeds', methods=['GET'])

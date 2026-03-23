@@ -11,6 +11,13 @@ try:
 except ImportError:
     print("⚠️ gTTS library not found. Install with: pip install gTTS")
     gTTS = None
+import textwrap
+from PIL import Image, ImageDraw, ImageFont
+try:
+    from moviepy.editor import AudioFileClip, ImageClip
+except ImportError:
+    print("⚠️ MoviePy library not found. Install with: pip install moviepy")
+    AudioFileClip = None
 
 # --- Configuration ---
 PAGE_ID = os.getenv('FB_PAGE_ID_GRAHAK_CHETNA') or '374211199112915'
@@ -24,14 +31,63 @@ def get_access_token():
     return token
 
 # --- Language Helpers ---
-def get_font_for_lang(lang):
-    """Returns a recommended font path for the given language."""
-    # You must ensure these fonts exist in your environment/container
-    if lang == 'hi': # Hindi
-        return "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf" 
-    elif lang == 'gu': # Gujarati
-        return "/usr/share/fonts/truetype/noto/NotoSansGujarati-Bold.ttf"
-    return "arial.ttf" # English/Default
+def _resolve_asset_path(*relative_parts):
+    """Resolve static asset path across local/codespace environments."""
+    filename = os.path.join(*relative_parts)
+    candidates = [
+        filename,
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join("/workspace/postpilot", filename),
+        os.path.join("/workspaces/postpilot", filename),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+def _load_font(size, bold=False):
+    """Load a scalable TrueType font."""
+    # Common font paths
+    candidates = [
+        os.getenv("GRAHAK_FONT_PATH"),
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            try: return ImageFont.truetype(path, size)
+            except: continue
+        # Try loading by name if path fails
+        try: return ImageFont.truetype(path, size)
+        except: continue
+            
+    return ImageFont.load_default()
+
+def _text_size(draw, text, font):
+    bbox = draw.textbbox((0,0), text, font=font)
+    return bbox[2]-bbox[0], bbox[3]-bbox[1]
+
+def _draw_logo_corner(img, draw, width):
+    logo_path = _resolve_asset_path("static", "logo.png") or _resolve_asset_path("static", "gclogo.jpg")
+    if not logo_path or not os.path.exists(logo_path):
+        return
+
+    logo = Image.open(logo_path).convert("RGBA")
+    diameter = int(width * 0.16)
+    logo = logo.resize((diameter, diameter), Image.Resampling.LANCZOS)
+
+    # circular crop for logo
+    mask = Image.new("L", (diameter, diameter), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, diameter, diameter), fill=255)
+    circle_logo = Image.new("RGBA", (diameter, diameter), (0, 0, 0, 0))
+    circle_logo.paste(logo, (0, 0), mask)
+
+    pad = 24
+    x = width - diameter - pad
+    y = pad
+    draw.ellipse([x - 10, y - 10, x + diameter + 10, y + diameter + 10], fill=(0, 0, 0, 170))
+    img.paste(circle_logo, (x, y), circle_logo)
 
 def generate_audio(text, lang='en', filename='temp_audio.mp3'):
     """Generates audio from text using gTTS (Supports 'en', 'hi', 'gu')."""
@@ -49,7 +105,7 @@ def generate_audio(text, lang='en', filename='temp_audio.mp3'):
         return None
 
 # --- 1. Video Generation (Your Code Integration) ---
-def generate_video_from_text(title, script, lang='en'):
+def generate_video_from_text(title, script, lang='en', background_image=None):
     """
     Generates a reel-style video from title and description.
     Returns the local file path of the generated video.
@@ -58,26 +114,112 @@ def generate_video_from_text(title, script, lang='en'):
     
     # 1. Generate Audio (Proof of Multi-Language Support)
     audio_file = generate_audio(f"{title}. {script}", lang=lang)
-    if audio_file:
-        print(f"✅ Audio generated: {audio_file}")
+    if not audio_file:
+        print("❌ Failed to generate audio.")
+        return None
     
     output_filename = f"news_{int(time.time())}.mp4"
+    image_filename = f"temp_frame_{int(time.time())}.jpg"
     
-    # =================================================================================
-    # TODO: INTEGRATE YOUR EXISTING VIDEO GENERATION CODE HERE
-    # Use 'title' and 'script' variables.
-    # Save the final video to 'output_filename'.
-    # Use 'lang' to switch fonts or styles.
-    # =================================================================================
+    # 2. Generate Layout Image (Grahak Chetna Style)
+    width, height = 1080, 1080
+    img = Image.new("RGBA", (width, height), color=(8, 8, 12, 255))
+
+    # Background
+    if background_image and os.path.exists(background_image):
+        bg = Image.open(background_image).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+        img.paste(bg, (0, 0))
+    else:
+        # Prioritize shortbg, then fall back to bg
+        bg_path = _resolve_asset_path("static", "shortbg.png") or \
+                  _resolve_asset_path("static", "shortbg.jpg") or \
+                  _resolve_asset_path("static", "bg.png")
+        if bg_path:
+            bg = Image.open(bg_path).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+            img.paste(bg, (0, 0))
+
+    # Anchor Image (Overlay)
+    anchor_path = _resolve_asset_path("static", "anchor.png")
+    if anchor_path:
+        try:
+            anchor = Image.open(anchor_path).convert("RGBA")
+            # Resize anchor if too large (max 50% of height)
+            if anchor.height > height * 0.5:
+                ratio = (height * 0.5) / anchor.height
+                anchor = anchor.resize((int(anchor.width * ratio), int(height * 0.5)), Image.Resampling.LANCZOS)
+            # Position: Bottom Right
+            img.paste(anchor, (width - anchor.width, height - anchor.height), anchor)
+        except Exception as e:
+            print(f"⚠️ Could not load anchor image: {e}")
+
+    draw = ImageDraw.Draw(img, "RGBA")
     
-    # Example structure (pseudo-code):
-    # my_video_lib.create_reel(
-    #     heading=title,
-    #     body=script,
-    #     language=lang,
-    #     background="news_bg.mp4",
-    #     output=output_filename
-    # )
+    # Fonts
+    top_font = _load_font(48, bold=True)
+    label_font = _load_font(52, bold=True)
+    bottom_font = _load_font(42, bold=True)
+    
+    # Header
+    top_label = "News Updates"
+    draw.text((44, 140), top_label, font=top_font, fill=(255, 255, 255, 220))
+
+    # Badge
+    badge_text = "GRAHAK CHETNA"
+    badge_w, badge_h = 620, 96
+    badge_x, badge_y = (width - badge_w) // 2, 26
+    draw.rectangle([badge_x, badge_y, badge_x + badge_w, badge_y + badge_h], fill=(220, 36, 40))
+    bdw, bdh = _text_size(draw, badge_text, label_font)
+    draw.text((badge_x + (badge_w - bdw) / 2, badge_y + (badge_h - bdh) / 2 - 4), badge_text, font=label_font, fill=(255, 255, 255))
+
+    # Logo
+    _draw_logo_corner(img, draw, width)
+
+    # Title (Wrapped in Rounded Rects)
+    lines = textwrap.wrap(title.strip(), width=15)[:5]
+    
+    # Dynamic font sizing
+    font = _load_font(60, bold=True)
+    center_y = int(height * 0.60)
+    total_h = sum([_text_size(draw, line, font)[1] + 20 for line in lines])
+    y = center_y - total_h // 2
+
+    for line in lines:
+        w, h = _text_size(draw, line, font)
+        x = (width - w) // 2
+        draw.rounded_rectangle([x - 22, y - 8, x + w + 22, y + h + 10], radius=14, fill=(0, 0, 0, 160))
+        draw.text((x, y), line, font=font, fill=(255, 255, 255))
+        y += h + 24
+
+    # Footer
+    bottom_h = 150
+    draw.rectangle([0, height - bottom_h, width, height], fill=(20, 20, 28, 230))
+    bottom_text = "Watch @grahakchetna"
+    w, h = _text_size(draw, bottom_text, bottom_font)
+    draw.text(((width - w) / 2, height - bottom_h + 50), bottom_text, font=bottom_font, fill=(255, 255, 255))
+
+    # Save Image
+    img.convert("RGB").save(image_filename, "JPEG", quality=95)
+    
+    # 3. Create Video with MoviePy
+    if AudioFileClip:
+        try:
+            print("🎞️ Rendering video clip...")
+            audio_clip = AudioFileClip(audio_file)
+            image_clip = ImageClip(image_filename).set_duration(audio_clip.duration + 0.5)
+            
+            video = image_clip.set_audio(audio_clip)
+            video.write_videofile(output_filename, fps=1, codec="libx264", audio_codec="aac")
+            
+            # Cleanup
+            os.remove(image_filename)
+            os.remove(audio_file)
+            
+        except Exception as e:
+            print(f"❌ Video encoding failed: {e}")
+            return None
+    else:
+        print("⚠️ MoviePy missing, returning image only.")
+        return image_filename # Fallback to just image if no moviepy
     
     if not os.path.exists(output_filename):
         print("⚠️ Warning: Video file was not created by the generation script.")
@@ -166,9 +308,14 @@ def post_video_to_instagram(fb_video_id, caption):
         return False
 
 # --- Workflow Orchestrator ---
-def run_video_news_workflow(title, script, caption, hashtags, lang='en'):
+def run_video_news_workflow(title, script, caption, hashtags, lang='en', image_filename=None):
     # 1. Generate
-    video_path = generate_video_from_text(title, script, lang)
+    bg_path = None
+    if image_filename:
+        # Assumes images are in 'images/' folder relative to workspace root or script
+        bg_path = os.path.abspath(os.path.join("images", image_filename))
+        
+    video_path = generate_video_from_text(title, script, lang, bg_path)
     if not video_path:
         return False
         
