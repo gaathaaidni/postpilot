@@ -1,1 +1,6 @@
-[]
+[
+  {
+    "message": "test",
+    "image_filename": "test.png"
+  }
+]
