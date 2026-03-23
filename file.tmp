@@ -8,7 +8,6 @@ A web-based Facebook Auto Poster and Instagram Sync application built with Flask
 - **Facebook Integration**: Automatically post to Facebook using Graph API
 - **Instagram Sync**: Sync Facebook posts to Instagram
 - **News Automation**: Grahak Chetna RSS to Video/Image automation
-- **Video Factory**: Generate and post Reels/Videos from text for Grahak Chetna
 - **Web Interface**: Modern, responsive web UI for easy management
 - **Real-time Control**: Start/Stop posting tasks on demand
 - **Batch Operations**: Run all posting tasks simultaneously
@@ -57,9 +56,11 @@ gunicorn app:app
 ```
 postpilot/
 ├── app.py                  # Main Flask application
-├── tour.py                 # Tour posting module
-├── visa.py                 # NZ/Visa posting module
+├── nexora_suite.py         # Tour posting module (Nexora Suite)
+├── nexora_by_phoenix_international.py # Visa posting module (Phoenix)
+├── gaatha_loop.py          # Gaatha AI posting module
 ├── insta.py                # Instagram sync module
+├── grahak_youtube_auto.py  # Youtube/RSS automation
 ├── requirements.txt        # Python dependencies
 ├── templates/
 │   └── index.html         # Main HTML template
@@ -70,6 +71,7 @@ postpilot/
 ├── posts/
 │   ├── tour_posts.json    # Tour posts data
 │   ├── visa_posts.json    # Visa posts data
+│   ├── gaatha_posts.json  # Gaatha posts data
 │   └── insta_posts.json   # Instagram posts data
 └── images/                # Post images
 ```

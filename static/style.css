@@ -1,16 +1,16 @@
 :root {
-    --bg-dark: #0a0b14;
-    --bg-panel: #131521;
-    --primary: #00f3ff;
-    --primary-dim: rgba(0, 243, 255, 0.1);
-    --secondary: #7000ff;
-    --text-main: #e0e6ed;
+    --bg-dark: #0f172a;
+    --bg-panel: #1e293b;
+    --primary: #38bdf8;
+    --primary-dim: rgba(56, 189, 248, 0.15);
+    --secondary: #818cf8;
+    --text-main: #f8fafc;
     --text-muted: #94a3b8;
-    --success: #00ff9d;
-    --danger: #ff0055;
-    --warning: #ffbf00;
-    --glass: rgba(19, 21, 33, 0.7);
-    --border: 1px solid rgba(255, 255, 255, 0.1);
+    --success: #10b981;
+    --danger: #f43f5e;
+    --warning: #f59e0b;
+    --glass: rgba(30, 41, 59, 0.85);
+    --border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 * {
@@ -26,8 +26,8 @@ body {
     height: 100vh;
     overflow: hidden;
     background-image: 
-        radial-gradient(circle at 10% 20%, rgba(112, 0, 255, 0.1) 0%, transparent 20%),
-        radial-gradient(circle at 90% 80%, rgba(0, 243, 255, 0.05) 0%, transparent 20%);
+        radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.1) 0%, transparent 20%),
+        radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.05) 0%, transparent 20%);
 }
 
 h1, h2, h3 {
@@ -101,7 +101,7 @@ h1, h2, h3 {
     background: var(--primary-dim);
     color: var(--primary);
     border-left: 3px solid var(--primary);
-    box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);
+    box-shadow: none;
 }
 
 .status-footer {
@@ -123,7 +123,7 @@ h1, h2, h3 {
     height: 8px;
     background: var(--success);
     border-radius: 50%;
-    box-shadow: 0 0 10px var(--success);
+    box-shadow: 0 0 5px var(--success);
 }
 
 /* Main Content */
@@ -186,7 +186,7 @@ h1, h2, h3 {
     gap: 10px;
 }
 
-.status-indicator.running { color: var(--success); text-shadow: 0 0 10px rgba(0,255,157,0.3); }
+.status-indicator.running { color: var(--success); }
 .status-indicator.stopped { color: var(--danger); }
 
 .pulse {
@@ -217,7 +217,7 @@ h1, h2, h3 {
 }
 
 .btn-primary { background: var(--primary); color: #000; }
-.btn-primary:hover { box-shadow: 0 0 15px var(--primary); }
+.btn-primary:hover { opacity: 0.9; }
 
 .btn-success { background: rgba(0, 255, 157, 0.1); border: 1px solid var(--success); color: var(--success); }
 .btn-success:hover { background: var(--success); color: #000; box-shadow: 0 0 15px var(--success); }
@@ -313,8 +313,8 @@ input:checked + .slider:before { transform: translateX(26px); }
     margin: 10% auto;
     padding: 2rem;
     width: 500px;
-    border: 1px solid var(--primary);
-    box-shadow: 0 0 30px rgba(0, 243, 255, 0.1);
+    border: var(--border);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
 }
 
 .close { float: right; font-size: 28px; cursor: pointer; color: var(--text-muted); }
@@ -343,23 +343,23 @@ textarea, input[type="text"], input[type="number"] {
 
 /* --- Mobile Responsiveness --- */
 
+/* Mobile Nav Specifics */
+.mobile-nav-container { display: none; }
+
 @media (max-width: 1024px) {
     .stats-grid, .posts-grid {
         grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    }
-    .grahak-grid {
-        grid-template-columns: 1fr;
     }
 }
 
 @media (max-width: 768px) {
     body {
-        overflow-y: auto; /* Allow scrolling on mobile */
+        overflow-y: auto;
     }
 
     .app-container {
         flex-direction: column;
-        height: auto; /* Allow content to determine height */
+        height: auto;
     }
 
     .sidebar {
@@ -367,21 +367,35 @@ textarea, input[type="text"], input[type="number"] {
         height: auto;
         border-right: none;
         border-bottom: var(--border);
+        padding: 0;
     }
 
     .nav-menu {
-        flex-direction: row;
-        overflow-x: auto;
-        -ms-overflow-style: none;  /* IE and Edge */
-        scrollbar-width: none;  /* Firefox */
-    }
-    .nav-menu::-webkit-scrollbar {
-        display: none; /* Chrome, Safari, Opera */
+        display: none !important;
     }
 
-    .nav-btn {
-        white-space: nowrap;
-        flex-shrink: 0;
+    .mobile-nav-container { 
+        display: block; 
+        padding: 1rem;
+        background: var(--bg-panel);
+    }
+
+    .mobile-nav-select {
+        width: 100%;
+        padding: 12px;
+        background: var(--bg-dark);
+        color: var(--text-main);
+        border: var(--border);
+        border-radius: 6px;
+        font-size: 1rem;
+        outline: none;
+    }
+
+    .brand {
+        justify-content: center;
+        padding: 1rem;
+        margin-bottom: 0;
+        background: var(--bg-dark);
     }
 
     .main-content {

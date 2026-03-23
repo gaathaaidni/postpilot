@@ -8,6 +8,7 @@ import nexora_suite as tour
 import nexora_by_phoenix_international as visa
 import gaatha_loop as gaatha
 import insta
+import grahak_video_factory
 
 
 app = Flask(__name__)
@@ -408,6 +409,17 @@ def grahak_run_news():
     with open(os.path.join('config','automation_status.json'),'w') as f:
         json.dump(status, f, indent=2)
     return jsonify({'status':'started'})
+
+@app.route('/api/grahak/create_video', methods=['POST'])
+def grahak_create_video():
+    data = request.json
+    title = data.get('title')
+    desc = data.get('description')
+    lang = data.get('language', 'en')
+    
+    # Run the workflow
+    threading.Thread(target=grahak_video_factory.run_video_news_workflow, args=(title, desc, lang), daemon=True).start()
+    return jsonify({'status': 'success', 'message': 'Video generation started in background'})
 
 @app.route('/api/grahak/feeds', methods=['GET'])
 def grahak_feeds():

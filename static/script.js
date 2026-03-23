@@ -15,6 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             currentTab = btn.dataset.tab;
             
+            // Sync Mobile Dropdown if exists
+            const mobSelect = document.querySelector('.mobile-nav-select');
+            if(mobSelect) mobSelect.value = currentTab;
+
             // Switch View
             if (['tour', 'nz', 'gaatha'].includes(currentTab)) {
                 // These tabs use the generic Post Manager view
@@ -24,7 +28,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // These tabs have specific views (dashboard, grahak, insta)
                 const section = document.getElementById(currentTab);
                 if (section) section.classList.add('active');
-                if (currentTab === 'grahak') fetchGrahakStatus();
+                if (currentTab === 'grahak') {
+                    fetchGrahakStatus();
+                    injectGrahakControls();
+                }
             }
         });
     });
@@ -33,6 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
     updateStatus();
     setInterval(updateStatus, 3000);
     
+    // Create Mobile Dropdown (injected for corporate view)
+    createMobileDropdown();
+
     // Agent Toggle Listener (in Manager View)
     const agentToggle = document.getElementById('agent-toggle');
     if (agentToggle) {
@@ -43,6 +53,38 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+function createMobileDropdown() {
+    const sidebar = document.querySelector('.sidebar');
+    const navButtons = document.querySelectorAll('.nav-btn');
+    if (!sidebar || navButtons.length === 0) return;
+
+    const container = document.createElement('div');
+    container.className = 'mobile-nav-container';
+
+    const select = document.createElement('select');
+    select.className = 'mobile-nav-select';
+
+    navButtons.forEach(btn => {
+        const option = document.createElement('option');
+        option.value = btn.dataset.tab;
+        option.textContent = btn.innerText.trim();
+        if (btn.classList.contains('active')) option.selected = true;
+        select.appendChild(option);
+    });
+
+    select.addEventListener('change', (e) => {
+        const tab = e.target.value;
+        const targetBtn = document.querySelector(`.nav-btn[data-tab="${tab}"]`);
+        if (targetBtn) targetBtn.click();
+    });
+
+    container.appendChild(select);
+    // Append container after brand if possible
+    const brand = sidebar.querySelector('.brand');
+    if (brand) brand.after(container);
+    else sidebar.prepend(container);
+}
 
 // --- Dashboard & Global Status ---
 async function updateStatus() {
@@ -55,6 +97,9 @@ async function updateStatus() {
         updateStatCard('stat-nz', data.nz_running, data.nz_status);
         updateStatCard('stat-gaatha', data.gaatha_running, data.gaatha_status);
         updateStatCard('stat-insta', data.insta_running, data.insta_status);
+        
+        // Dynamically Update Grahak Card (injected if missing)
+        updateGrahakCard();
 
         // Update Insta View Status (Specific to the Insta tab)
         const instaStatusLarge = document.getElementById('insta-large-status');
@@ -301,6 +346,94 @@ window.fetchGrahakLogs = async () => {
             container.scrollTop = container.scrollHeight;
         }
     } catch(e) {}
+};
+
+async function updateGrahakCard() {
+    try {
+        const res = await fetch(`${API_ROOT}/grahak/status`);
+        const data = await res.json();
+        
+        const grid = document.querySelector('.stats-grid');
+        let card = document.getElementById('stat-grahak-chetna');
+        
+        // Inject card if missing
+        if (!card && grid) {
+            card = document.createElement('div');
+            card.id = 'stat-grahak-chetna';
+            card.className = 'stat-card glass-panel';
+            card.innerHTML = `
+                <h3>Grahak Chetna</h3>
+                <div class="status-indicator">
+                    <div class="pulse"></div>
+                    <span class="text"></span>
+                </div>
+                <div class="current-activity"></div>
+            `;
+            grid.appendChild(card);
+        }
+        
+        if (card) {
+            const indicator = card.querySelector('.status-indicator');
+            const activity = card.querySelector('.current-activity');
+            const isRunning = data.news_enabled;
+            
+            if (isRunning) {
+                indicator.className = 'status-indicator running';
+                indicator.querySelector('.text').textContent = 'ACTIVE';
+                activity.textContent = 'News Automation Running';
+                activity.style.color = 'var(--primary)';
+            } else {
+                indicator.className = 'status-indicator stopped';
+                indicator.querySelector('.text').textContent = 'IDLE';
+                activity.textContent = 'News Automation Stopped';
+                activity.style.color = 'var(--text-muted)';
+            }
+        }
+    } catch(e) {}
+}
+
+function injectGrahakControls() {
+    const section = document.getElementById('grahak');
+    if (!section || document.getElementById('btn-create-video')) return;
+    
+    let panel = section.querySelector('.control-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.className = 'control-panel glass-panel';
+        panel.style.marginBottom = '20px';
+        section.prepend(panel);
+    }
+    
+    const btn = document.createElement('button');
+    btn.id = 'btn-create-video';
+    btn.className = 'btn btn-primary';
+    btn.innerHTML = '<i class="fa-solid fa-video"></i> Create News Video';
+    btn.onclick = window.createNewsVideo;
+    panel.appendChild(btn);
+}
+
+// --- Video News ---
+window.createNewsVideo = async () => {
+    const title = prompt("Enter News Headline:");
+    if(!title) return;
+    
+    const desc = prompt("Enter News Body/Description:");
+    if(!desc) return;
+    
+    const lang = prompt("Enter Language Code (en, hi, gu):", "en");
+    if(!lang) return;
+    
+    showNotification("Generating Video... This may take time.");
+    
+    const res = await fetch(`${API_ROOT}/grahak/create_video`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ title: title, description: desc, language: lang })
+    });
+    
+    const data = await res.json();
+    if(data.status === 'success') showNotification("Video Posted Successfully!");
+    else showNotification("Video Failed: " + (data.message || 'Unknown error'));
 };
 
 // --- Notifications ---
