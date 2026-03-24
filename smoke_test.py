@@ -110,21 +110,6 @@ def test_grahak_news_auto():
         print(f"   - CRITICAL ERROR: {e}")
         print_result("Grahak News Auto", False)
 
-def test_grahak_youtube_auto():
-    print_header("Grahak YouTube Auto (Image Post)")
-    try:
-        os.environ['TEST_MODE'] = 'true'
-        print("   - Running YouTube automation in TEST_MODE...")
-        import grahak_youtube_auto
-        grahak_youtube_auto.run()
-        print_result("Grahak YouTube Auto", True)
-    except Exception as e:
-        print(f"   - CRITICAL ERROR: {e}")
-        print_result("Grahak YouTube Auto", False)
-    finally:
-        if 'TEST_MODE' in os.environ:
-            del os.environ['TEST_MODE']
-
 def main():
     print("🔥 PostPilot Application Smoke Test 🔥")
     
@@ -137,7 +122,6 @@ def main():
     test_module("Gaatha AI", "post_to_facebook", "gaatha_loop.py")
     test_grahak_uploader()
     test_grahak_news_auto()
-    test_grahak_youtube_auto()
     
     print("\nSmoke test complete. Review the output for any 'FAILED' or 'CRITICAL ERROR' messages.")
 

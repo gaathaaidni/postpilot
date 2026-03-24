@@ -19,6 +19,19 @@ stop_event = threading.Event()
 status_callback = None
 current_interval = 30 * 60
 
+def get_page_token():
+    """Fetch page token from user token"""
+    try:
+        url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={ACCESS_TOKEN}"
+        res = requests.get(url).json()
+        if 'data' in res:
+            for page in res['data']:
+                if page.get('id') == PAGE_ID:
+                    return page.get('access_token')
+    except:
+        pass
+    return None
+
 def set_status_callback(callback):
     global status_callback
     status_callback = callback
@@ -44,11 +57,16 @@ def post_to_facebook(message, image_filename):
         print(f"Image not found: {image_path}")
         return False
 
+    page_token = get_page_token()
+    if not page_token:
+        print("Gaatha Post Error: Could not get page token")
+        return False
+
     try:
         with open(image_path, 'rb') as img_file:
             payload = {
                 'message': message,
-                'access_token': ACCESS_TOKEN
+                'access_token': page_token
             }
             files = {
                 'source': img_file
