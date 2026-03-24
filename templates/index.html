@@ -3,202 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POSTPILOT // COMMAND CENTER</title>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+    <title>PostPilot Enterprise</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="app-container">
-        <!-- Sidebar Navigation -->
-        <nav class="sidebar glass-panel">
+        <!-- Sidebar -->
+        <aside class="sidebar">
             <div class="brand">
-                <i class="fa-solid fa-rocket brand-icon"></i>
-                <h1>POSTPILOT</h1>
+                <i class="fa-solid fa-paper-plane"></i>
+                <span>PostPilot</span>
             </div>
-            
-            <div class="nav-menu">
-                <button class="nav-btn active" data-tab="dashboard">
-                    <i class="fa-solid fa-gauge-high"></i> Dashboard
+            <nav class="nav-menu">
+                <button class="nav-item active" data-tab="dashboard">
+                    <i class="fa-solid fa-chart-line"></i> Dashboard
                 </button>
-                <div class="nav-header">AGENTS</div>
-                <button class="nav-btn" data-tab="tour">
-                    <i class="fa-solid fa-hotel"></i> Nexora Suite
+                <div class="nav-label">Modules</div>
+                <button class="nav-item" data-tab="tour">
+                    <i class="fa-solid fa-earth-americas"></i> Nexora Suite
                 </button>
-                <button class="nav-btn" data-tab="nz">
-                    <i class="fa-solid fa-passport"></i> Nexora Phoenix
+                <button class="nav-item" data-tab="nz">
+                    <i class="fa-solid fa-passport"></i> Phoenix Intl
                 </button>
-                <button class="nav-btn" data-tab="gaatha">
-                    <i class="fa-solid fa-brain"></i> Gaatha AI
+                <button class="nav-item" data-tab="gaatha">
+                    <i class="fa-solid fa-scroll"></i> Gaatha AI
                 </button>
-                <button class="nav-btn" data-tab="grahak">
-                    <i class="fa-solid fa-newspaper"></i> Grahak Chetna
+                <button class="nav-item" data-tab="insta">
+                    <i class="fa-brands fa-instagram"></i> Instagram Sync
                 </button>
-                <div class="nav-header">SYSTEM</div>
-                <button class="nav-btn" data-tab="insta">
-                    <i class="fa-brands fa-instagram"></i> Insta Sync
+                <div class="nav-label">Automation</div>
+                <button class="nav-item" data-tab="grahak">
+                    <i class="fa-solid fa-robot"></i> Grahak Chetna
                 </button>
-            </div>
-
-            <div class="status-footer">
-                <div class="connection-status online">
-                    <span class="dot"></span> SYSTEM ONLINE
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator" id="global-status-indicator">
+                    <span class="dot"></span> System Ready
                 </div>
             </div>
-        </nav>
+        </aside>
 
-        <!-- Main Content Area -->
+        <!-- Main Content -->
         <main class="main-content">
-            
-            <!-- Dashboard View -->
-            <div id="dashboard" class="view-section active">
-                <header class="section-header">
-                    <h2><i class="fa-solid fa-gauge-high"></i> MISSION CONTROL</h2>
-                    <div class="global-controls">
-                        <button onclick="controlAll('start')" class="btn btn-success glow-green">
-                            <i class="fa-solid fa-power-off"></i> ENGAGE ALL
-                        </button>
-                        <button onclick="controlAll('stop')" class="btn btn-danger glow-red">
-                            <i class="fa-solid fa-stop"></i> HALT ALL
-                        </button>
-                    </div>
-                </header>
-
-                <div class="stats-grid">
-                    <!-- Dynamically populated by JS -->
-                    <div class="stat-card glass-panel" id="stat-tour">
-                        <h3>Nexora Suite</h3>
-                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
-                        <div class="current-activity">--</div>
-                    </div>
-                    <div class="stat-card glass-panel" id="stat-nz">
-                        <h3>Nexora Phoenix</h3>
-                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
-                        <div class="current-activity">--</div>
-                    </div>
-                    <div class="stat-card glass-panel" id="stat-gaatha">
-                        <h3>Gaatha AI</h3>
-                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
-                        <div class="current-activity">--</div>
-                    </div>
-                    <div class="stat-card glass-panel" id="stat-insta">
-                        <h3>Insta Sync</h3>
-                        <div class="status-indicator"><span class="pulse"></span> <span class="text">IDLE</span></div>
-                        <div class="current-activity">--</div>
-                    </div>
+            <header class="top-bar">
+                <h1 id="page-title">Dashboard</h1>
+                <div class="global-actions">
+                    <button class="btn btn-outline-danger" onclick="controlAll('stop')">
+                        <i class="fa-solid fa-stop"></i> Stop All
+                    </button>
+                    <button class="btn btn-primary" onclick="controlAll('start')">
+                        <i class="fa-solid fa-play"></i> Run All
+                    </button>
                 </div>
+            </header>
+
+            <div id="content-area">
+                <!-- Content injected via JS -->
             </div>
-
-            <!-- Generic Post Manager View (Tour, NZ, Gaatha) -->
-            <div id="post-manager" class="view-section">
-                <header class="section-header">
-                    <h2 id="manager-title">AGENT CONTROL</h2>
-                    <div class="controls-row">
-                        <div class="toggle-switch">
-                            <label class="switch">
-                                <input type="checkbox" id="agent-toggle">
-                                <span class="slider round"></span>
-                            </label>
-                            <span id="agent-status-text">OFFLINE</span>
-                        </div>
-                        <button class="btn btn-primary" onclick="openModal()"><i class="fa-solid fa-plus"></i> New Transmission</button>
-                    </div>
-                </header>
-
-                <div class="interval-control glass-panel">
-                    <label>Transmission Interval (Seconds):</label>
-                    <input type="number" id="interval-input" min="60">
-                    <button onclick="updateInterval()" class="btn btn-sm btn-outline">Set</button>
-                </div>
-
-                <div id="posts-grid" class="posts-grid">
-                    <!-- Posts injected here -->
-                </div>
-            </div>
-
-            <!-- Grahak View -->
-            <div id="grahak" class="view-section">
-                <header class="section-header">
-                    <h2><i class="fa-solid fa-newspaper"></i> GRAHAK CHETNA AUTOMATION</h2>
-                </header>
-                
-                <div class="grahak-grid">
-                    <div class="glass-panel control-panel">
-                        <h3>News Automation</h3>
-                        <p>Auto-generates news cards with viral hashtags.</p>
-                        <div class="action-buttons">
-                            <button onclick="triggerGrahak('run_news')" class="btn btn-primary"><i class="fa-solid fa-bolt"></i> Run Once</button>
-                        </div>
-                        <div class="status-row">
-                            <span>Last Run:</span>
-                            <span id="grahak-last-news" class="mono">Never</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="logs-container glass-panel">
-                    <h3><i class="fa-solid fa-terminal"></i> SYSTEM LOGS</h3>
-                    <div class="log-window" id="grahak-logs">
-                        <div class="log-line">Waiting for data...</div>
-                    </div>
-                    <button onclick="fetchGrahakLogs()" class="btn btn-sm btn-outline"><i class="fa-solid fa-rotate"></i> Refresh Logs</button>
-                </div>
-            </div>
-
-            <!-- Insta View -->
-             <div id="insta" class="view-section">
-                <header class="section-header">
-                    <h2><i class="fa-brands fa-instagram"></i> INSTAGRAM SYNC</h2>
-                </header>
-                <div class="glass-panel text-center">
-                    <p>Synchronizes Facebook Photos to Instagram automatically.</p>
-                    <div class="big-toggle">
-                        <button id="btn-insta-start" onclick="controlAgent('insta', 'start')" class="btn btn-success btn-lg">START SYNC</button>
-                        <button id="btn-insta-stop" onclick="controlAgent('insta', 'stop')" class="btn btn-danger btn-lg">STOP SYNC</button>
-                    </div>
-                    <div class="status-large" id="insta-large-status">
-                        STATUS: <span class="mono">IDLE</span>
-                    </div>
-                </div>
-            </div>
-
         </main>
     </div>
 
-    <!-- Modal for Edit/Add -->
-    <div id="postModal" class="modal">
-        <div class="modal-content glass-panel">
-            <span class="close" onclick="closeModal()">&times;</span>
-            <h2 id="modalTitle">Edit Transmission</h2>
-            <form id="postForm" onsubmit="handleFormSubmit(event)">
-                <input type="hidden" id="postIndex">
-                
-                <div class="form-group">
-                    <label>Message Payload</label>
-                    <textarea id="postMessage" rows="5" required></textarea>
-                </div>
-
-                <div class="form-group">
-                    <label>Visual Asset</label>
-                    <div class="file-upload-wrapper">
-                        <input type="text" id="postImage" placeholder="filename.jpg" readonly>
-                        <input type="file" id="fileInput" onchange="handleFileUpload(this)" style="display: none;">
-                        <button type="button" class="btn btn-outline" onclick="document.getElementById('fileInput').click()">
-                            <i class="fa-solid fa-upload"></i> Upload
-                        </button>
+    <!-- Modal for Add/Edit Post -->
+    <div id="post-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Manage Post</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="post-form">
+                    <input type="hidden" id="post-index">
+                    <input type="hidden" id="post-type">
+                    
+                    <div class="form-group">
+                        <label>Caption / Message</label>
+                        <textarea id="post-message" rows="4" class="form-control" placeholder="Enter post content..."></textarea>
                     </div>
-                    <div id="imagePreview" class="image-preview"></div>
-                </div>
 
-                <div class="form-actions">
-                    <button type="button" class="btn btn-text" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-success glow-green">Save Data</button>
-                </div>
-            </form>
+                    <div class="form-group">
+                        <label>Image</label>
+                        <div class="file-upload-wrapper">
+                            <input type="file" id="post-file" accept="image/*,video/*" onchange="handleFileSelect(this)">
+                            <div class="file-upload-label">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                                <span id="file-name">Choose file or drag here</span>
+                            </div>
+                        </div>
+                        <input type="hidden" id="current-image-filename">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="savePost()">Save Post</button>
+            </div>
         </div>
     </div>
-
-    <div id="notification-area"></div>
 
     <script src="/static/script.js"></script>
 </body>
