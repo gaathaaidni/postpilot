@@ -328,6 +328,13 @@ window.fetchGrahakStatus = async () => {
         const data = await res.json();
         const newsEl = document.getElementById('grahak-last-news');
         if (newsEl) newsEl.innerText = data.last_news_run ? new Date(data.last_news_run).toLocaleString() : 'Never';
+        
+        // Populate Hashtags if not editing
+        const tagsInput = document.getElementById('gh-hashtags');
+        if(tagsInput && document.activeElement !== tagsInput) {
+             tagsInput.value = data.default_hashtags || '';
+        }
+        
         fetchGrahakLogs();
     } catch(e) {}
 };
@@ -394,129 +401,241 @@ async function updateGrahakCard() {
 
 function injectGrahakControls() {
     const section = document.getElementById('grahak');
-    if (!section || document.getElementById('btn-create-video')) return;
+    if (!section) return;
     
-    let panel = section.querySelector('.control-panel');
-    if (!panel) {
-        panel = document.createElement('div');
-        panel.className = 'control-panel glass-panel';
-        panel.style.marginBottom = '20px';
-        section.prepend(panel);
-    }
-    
-    const btn = document.createElement('button');
-    btn.id = 'btn-create-video';
-    btn.className = 'btn btn-primary';
-    btn.innerHTML = '<i class="fa-solid fa-video"></i> Create News Video';
-    btn.onclick = window.createNewsVideo;
-    panel.appendChild(btn);
-}
-
-// --- Video News ---
-window.createNewsVideo = () => {
-    // Open Custom Modal for Video Generation
-    let modal = document.getElementById('videoGenModal');
-    
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'videoGenModal';
-        modal.className = 'modal';
-        modal.innerHTML = `
-            <div class="modal-content" style="max-width: 600px;">
-                <span class="close" onclick="document.getElementById('videoGenModal').style.display='none'">&times;</span>
-                <h2><i class="fa-solid fa-video"></i> Video News Generator</h2>
-                
-                <div class="form-group">
-                    <label>Title (Headline)</label>
-                    <input type="text" id="vid-title" placeholder="E.g., Breaking News: Update on Solar...">
-                </div>
-                
-                <div class="form-group">
-                    <label>Script (Voice Over / TTS)</label>
-                    <textarea id="vid-script" rows="4" placeholder="Enter the text that the AI voice should read..."></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label>Background Image (Optional)</label>
-                    <div style="display:flex; gap:10px; align-items:center;">
-                        <input type="file" id="vid-bg-input" accept="image/*" onchange="uploadVideoBg(this)" class="form-control" style="width:auto; flex-grow:1;">
-                        <input type="hidden" id="vid-bg-filename">
+    // 1. Create Automation & Config Panel
+    if (!document.getElementById('grahak-config-panel')) {
+        const configPanel = document.createElement('div');
+        configPanel.id = 'grahak-config-panel';
+        configPanel.className = 'glass-panel';
+        configPanel.style.marginBottom = '20px';
+        configPanel.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:20px;">
+                <!-- Automation Controls -->
+                <div style="flex:1; min-width:280px;">
+                    <h3 style="margin-top:0"><i class="fa-solid fa-robot"></i> Automation Control</h3>
+                    <div class="btn-group" style="display:flex; gap:10px; margin-bottom:15px;">
+                        <button class="btn" onclick="controlGrahakNews('start_news')" style="background:var(--success); color:#000"><i class="fa-solid fa-play"></i> Start Auto</button>
+                        <button class="btn" onclick="controlGrahakNews('stop_news')" style="background:var(--danger); color:#fff"><i class="fa-solid fa-stop"></i> Stop Auto</button>
+                        <button class="btn btn-primary" onclick="controlGrahakNews('run_news')"><i class="fa-solid fa-bolt"></i> Run Once</button>
                     </div>
-                    <div id="vid-bg-preview" style="margin-top:10px; max-height:150px; overflow:hidden; border-radius:4px;"></div>
+                    <div class="form-group">
+                        <label>Default Hashtags</label>
+                        <textarea id="gh-hashtags" class="form-control" rows="2" placeholder="#News #Update..."></textarea>
+                        <button class="btn btn-sm btn-outline" style="margin-top:5px" onclick="saveGrahakSettings()">Save Settings</button>
+                    </div>
                 </div>
-                
-                <div class="form-group">
-                    <label>Social Caption</label>
-                    <textarea id="vid-caption" rows="3" placeholder="Text for Facebook/Instagram caption..."></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label>Hashtags</label>
-                    <input type="text" id="vid-hashtags" value="#GrahakChetna #News #Update #Trending">
-                </div>
-                
-                <div class="form-group">
-                    <label>Language</label>
-                    <select id="vid-lang" style="width:100%;padding:10px;background:rgba(0,0,0,0.3);color:#fff;border:1px solid #333;border-radius:4px;">
-                        <option value="en">English</option>
-                        <option value="hi">Hindi (हिंदी)</option>
-                        <option value="gu">Gujarati (ગુજરાતી)</option>
-                    </select>
-                </div>
-                
-                <div class="form-actions">
-                    <button class="btn btn-outline" onclick="document.getElementById('videoGenModal').style.display='none'">Cancel</button>
-                    <button class="btn btn-primary" onclick="submitVideoGen()">Generate & Post</button>
+
+                <!-- RSS Feeds -->
+                <div style="flex:1; min-width:280px;">
+                    <h3 style="margin-top:0"><i class="fa-solid fa-rss"></i> RSS Feeds</h3>
+                    <div id="gh-feed-list" style="max-height:150px; overflow-y:auto; margin-bottom:10px; background:rgba(0,0,0,0.2); padding:5px; border-radius:4px;">
+                        <div style="padding:10px; text-align:center; color:#666;">Loading feeds...</div>
+                    </div>
+                    <div style="display:flex; gap:5px;">
+                        <input type="text" id="gh-feed-name" placeholder="Name" class="form-control" style="width:30%">
+                        <input type="text" id="gh-feed-url" placeholder="RSS URL" class="form-control">
+                        <button class="btn btn-success" onclick="addGrahakFeed()"><i class="fa-solid fa-plus"></i></button>
+                    </div>
                 </div>
             </div>
         `;
-        document.body.appendChild(modal);
+        // Insert before upload panel if it exists, or just prepend to section
+        const uploadPanel = document.getElementById('grahak-upload-panel');
+        if (uploadPanel) section.insertBefore(configPanel, uploadPanel);
+        else {
+            const stats = section.querySelector('.stats-grid');
+            if(stats) stats.after(configPanel);
+            else section.prepend(configPanel);
+        }
+        
+        loadGrahakFeeds();
     }
     
-    modal.style.display = 'block';
-};
-
-window.uploadVideoBg = async (input) => {
-    const file = input.files[0];
-    if (!file) return;
-    
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const res = await fetch(`${API_ROOT}/upload`, { method: 'POST', body: formData });
-    const data = await res.json();
-    
-    if (data.filename) {
-        document.getElementById('vid-bg-filename').value = data.filename;
-        document.getElementById('vid-bg-preview').innerHTML = `<img src="/images/${data.filename}" style="width:100%; object-fit:cover;">`;
+    // 2. Create Upload Panel (if missing)
+    if (!document.getElementById('grahak-upload-panel')) {
+        const panel = document.createElement('div');
+        panel.id = 'grahak-upload-panel';
+        panel.className = 'glass-panel';
+        panel.style.marginBottom = '20px';
+        panel.innerHTML = `
+        <h3 style="margin-top:0"><i class="fa-solid fa-cloud-arrow-up"></i> Upload Content</h3>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div>
+                <div class="form-group">
+                    <label>Select Video or Image</label>
+                    <input type="file" id="gh-file" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Caption</label>
+                    <textarea id="gh-caption" class="form-control" rows="4" placeholder="Enter caption with hashtags..."></textarea>
+                </div>
+            </div>
+            
+            <div>
+                <label>Destinations</label>
+                <div style="background:rgba(0,0,0,0.3); padding:15px; border-radius:8px; display:flex; flex-direction:column; gap:10px;">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                        <input type="checkbox" id="gh-fb-feed" checked> <i class="fa-brands fa-facebook"></i> Facebook Feed
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                        <input type="checkbox" id="gh-fb-story"> <i class="fa-brands fa-facebook-square"></i> Facebook Story
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                        <input type="checkbox" id="gh-ig-feed"> <i class="fa-brands fa-instagram"></i> Instagram Post
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                        <input type="checkbox" id="gh-ig-reel" checked> <i class="fa-solid fa-film"></i> Instagram Reel
+                    </label>
+                </div>
+                <button class="btn btn-primary" onclick="submitGrahakUpload()" style="width:100%; margin-top:15px;">
+                    <i class="fa-solid fa-paper-plane"></i> Upload & Post
+                </button>
+            </div>
+        </div>
+        <div id="gh-upload-status" style="margin-top:15px; display:none;">
+            <div class="progress" style="height:5px; background:#333; border-radius:2px; overflow:hidden;">
+                <div class="bar" style="width:0%; height:100%; background:var(--primary); transition:width 0.3s;"></div>
+            </div>
+            <div class="status-text" style="font-size:0.9em; color:#aaa; margin-top:5px;">Uploading...</div>
+        </div>
+    `;
+        const configPanel = document.getElementById('grahak-config-panel');
+        if (configPanel) configPanel.after(panel);
+        else {
+            const stats = section.querySelector('.stats-grid');
+            if(stats) stats.after(panel);
+            else section.prepend(panel);
+        }
     }
-};
+}
 
-window.submitVideoGen = async () => {
-    const title = document.getElementById('vid-title').value;
-    const script = document.getElementById('vid-script').value;
-    const caption = document.getElementById('vid-caption').value;
-    const hashtags = document.getElementById('vid-hashtags').value;
-    const lang = document.getElementById('vid-lang').value;
-    const image_filename = document.getElementById('vid-bg-filename').value;
+window.submitGrahakUpload = async () => {
+    const fileInput = document.getElementById('gh-file');
+    const caption = document.getElementById('gh-caption').value;
     
-    if (!title || !script) {
-        showNotification("Title and Script are required!");
+    if (!fileInput.files[0]) {
+        alert("Please select a file first.");
         return;
     }
     
-    document.getElementById('videoGenModal').style.display = 'none';
-    showNotification("Generating Video... This may take time.");
+    const fbFeed = document.getElementById('gh-fb-feed').checked;
+    const fbStory = document.getElementById('gh-fb-story').checked;
+    const igFeed = document.getElementById('gh-ig-feed').checked;
+    const igReel = document.getElementById('gh-ig-reel').checked;
     
-    const res = await fetch(`${API_ROOT}/grahak/create_video`, {
+    if (!fbFeed && !fbStory && !igFeed && !igReel) {
+        alert("Please select at least one destination.");
+        return;
+    }
+    
+    // UI Feedback
+    const statusDiv = document.getElementById('gh-upload-status');
+    const bar = statusDiv.querySelector('.bar');
+    const text = statusDiv.querySelector('.status-text');
+    
+    statusDiv.style.display = 'block';
+    bar.style.width = '30%';
+    text.textContent = "Uploading media...";
+    
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('caption', caption);
+    formData.append('fb_feed', fbFeed);
+    formData.append('fb_story', fbStory);
+    formData.append('ig_feed', igFeed);
+    formData.append('ig_reel', igReel);
+    
+    try {
+        const res = await fetch(`${API_ROOT}/grahak/upload_post`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        bar.style.width = '90%';
+        text.textContent = "Processing response...";
+        
+        const data = await res.json();
+        
+        bar.style.width = '100%';
+        if (data.status === 'completed') {
+            text.textContent = "Done! Results: " + JSON.stringify(data.results);
+            text.style.color = 'var(--success)';
+        } else {
+            text.textContent = "Error: " + (data.error || 'Unknown');
+            text.style.color = 'var(--danger)';
+        }
+    } catch (e) {
+        text.textContent = "Upload Failed: " + e.message;
+        text.style.color = 'var(--danger)';
+    }
+};
+
+// --- Grahak Config & Feeds ---
+window.controlGrahakNews = async (action) => {
+    await window.triggerGrahak(action);
+    // Refresh status to update UI indicators
+    setTimeout(updateGrahakCard, 500);
+};
+
+window.saveGrahakSettings = async () => {
+    const tags = document.getElementById('gh-hashtags').value;
+    await fetch(`${API_ROOT}/grahak/update_settings`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ title, script, caption, hashtags, language: lang, image_filename })
+        body: JSON.stringify({ default_hashtags: tags })
+    });
+    showNotification("Settings Saved");
+};
+
+window.loadGrahakFeeds = async () => {
+    try {
+        const res = await fetch(`${API_ROOT}/grahak/feeds`);
+        const feeds = await res.json();
+        const list = document.getElementById('gh-feed-list');
+        if(!list) return;
+        
+        if(feeds.length === 0) {
+            list.innerHTML = '<div style="padding:10px; text-align:center; color:#666;">No feeds configured</div>';
+            return;
+        }
+        
+        list.innerHTML = feeds.map((f, i) => `
+            <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:8px; margin-bottom:5px; border-radius:4px;">
+                <div style="overflow:hidden; text-overflow:ellipsis;">
+                    <div style="font-weight:bold; font-size:0.9em;">${f.name}</div>
+                    <div style="font-size:0.75em; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${f.url}</div>
+                </div>
+                <button class="btn btn-sm btn-danger" onclick="deleteGrahakFeed(${i})" style="padding:2px 8px;"><i class="fa-solid fa-times"></i></button>
+            </div>
+        `).join('');
+    } catch(e) {}
+};
+
+window.addGrahakFeed = async () => {
+    const name = document.getElementById('gh-feed-name').value;
+    const url = document.getElementById('gh-feed-url').value;
+    if(!name || !url) return showNotification("Name and URL required");
+    
+    await fetch(`${API_ROOT}/grahak/add_feed`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, url })
     });
     
-    const data = await res.json();
-    if(data.status === 'success') showNotification("Video Posted Successfully!");
-    else showNotification("Video Failed: " + (data.message || 'Unknown error'));
+    document.getElementById('gh-feed-name').value = '';
+    document.getElementById('gh-feed-url').value = '';
+    loadGrahakFeeds();
+};
+
+window.deleteGrahakFeed = async (idx) => {
+    if(!confirm("Remove this feed?")) return;
+    await fetch(`${API_ROOT}/grahak/delete_feed`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ index: idx })
+    });
+    loadGrahakFeeds();
 };
 
 // --- Notifications ---
@@ -540,8 +659,6 @@ function showNotification(msg) {
 // Close modal on outside click
 window.onclick = function(event) {
     const modal = document.getElementById('postModal');
-    const vidModal = document.getElementById('videoGenModal');
     
     if (event.target == modal) closeModal();
-    if (event.target == vidModal) vidModal.style.display = 'none';
 }

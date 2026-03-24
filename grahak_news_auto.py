@@ -16,6 +16,19 @@ def get_token():
         with open('token.txt','r') as f: return f.read().strip()
     return os.getenv('FB_TOKEN')
 
+def get_page_token(user_token):
+    """Exchange User Token for Page Token to ensure we post AS THE PAGE"""
+    try:
+        url = f"https://graph.facebook.com/v19.0/me/accounts"
+        params = {"access_token": user_token}
+        resp = requests.get(url, params=params).json()
+        for page in resp.get("data", []):
+            if page.get("id") == PAGE_ID:
+                return page.get("access_token")
+    except Exception:
+        pass
+    return user_token  # Fallback to original if exchange fails
+
 VIRAL_HASHTAGS = """
 .
 .
@@ -35,8 +48,9 @@ def format_news_post(title, body, source="Grahak Chetna"):
 
 def post_text_to_fb(message):
     token = get_token()
+    page_token = get_page_token(token)
     url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
-    payload = {'message': message, 'access_token': token}
+    payload = {'message': message, 'access_token': page_token}
     try:
         r = requests.post(url, data=payload).json()
         if 'id' in r:

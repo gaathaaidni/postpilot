@@ -3,12 +3,13 @@ import threading
 import os
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from pathlib import Path
+from datetime import datetime
 # modules for posting logic (renamed files)
 import nexora_suite as tour
 import nexora_by_phoenix_international as visa
 import gaatha_loop as gaatha
 import insta
-import grahak_video_factory
+import grahak_uploader
 
 
 app = Flask(__name__)
@@ -385,6 +386,7 @@ def grahak_status():
         "news_enabled": True,
         "last_news_run": "",
         "last_news_post": "",
+        "default_hashtags": "#GrahakChetna #News"
     })
     return jsonify(status)
 
@@ -405,6 +407,16 @@ def grahak_stop_news():
         json.dump(status, f, indent=2)
     return jsonify({'status':'ok'})
 
+@app.route('/api/grahak/update_settings', methods=['POST'])
+def grahak_update_settings():
+    data = request.json or {}
+    status = _read_config(os.path.join('config','automation_status.json'), {})
+    if 'default_hashtags' in data:
+        status['default_hashtags'] = data['default_hashtags']
+    with open(os.path.join('config','automation_status.json'),'w') as f:
+        json.dump(status, f, indent=2)
+    return jsonify({'status':'updated'})
+
 @app.route('/api/grahak/run_news', methods=['POST'])
 def grahak_run_news():
     # run script directly
@@ -415,19 +427,32 @@ def grahak_run_news():
         json.dump(status, f, indent=2)
     return jsonify({'status':'started'})
 
-@app.route('/api/grahak/create_video', methods=['POST'])
-def grahak_create_video():
-    data = request.json
-    title = data.get('title')
-    script = data.get('script')
-    caption = data.get('caption')
-    hashtags = data.get('hashtags')
-    lang = data.get('language', 'en')
-    image_filename = data.get('image_filename')
+@app.route('/api/grahak/upload_post', methods=['POST'])
+def grahak_upload_post():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+        
+    file = request.files['file']
+    caption = request.form.get('caption', '')
     
-    # Run the workflow
-    threading.Thread(target=grahak_video_factory.run_video_news_workflow, args=(title, script, caption, hashtags, lang, image_filename), daemon=True).start()
-    return jsonify({'status': 'success', 'message': 'Video generation started in background'})
+    # Parse checkbox flags
+    targets = {
+        'fb_feed': request.form.get('fb_feed') == 'true',
+        'fb_story': request.form.get('fb_story') == 'true',
+        'ig_feed': request.form.get('ig_feed') == 'true',
+        'ig_reel': request.form.get('ig_reel') == 'true'
+    }
+    
+    if file.filename:
+        filename = f"upload_{int(time.time())}_{file.filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Process in background? For now, run sync to return results
+        results = grahak_uploader.process_upload(filepath, caption, targets)
+        return jsonify({'status': 'completed', 'results': results})
+    
+    return jsonify({'error': 'No filename'}), 400
 
 @app.route('/api/grahak/feeds', methods=['GET'])
 def grahak_feeds():
