@@ -2,6 +2,7 @@
 import requests, time, random, os, json
 from threading import Event
 import insta
+import grahak_uploader
 
 stop_event = Event()
 status_callback = None
@@ -67,44 +68,32 @@ def post_on_facebook(message, image_filename):
         print(f"Image not found: {path}")
         return False
 
-    try:
-        # Upload the image file directly to Facebook (multipart upload)
-        page_token = get_page_token()
-        if not page_token:
-            print("❌ Failed: Could not get page token")
-            return False
-
-        with open(path, 'rb') as img:
-            files = {'source': (image_filename, img, 'image/jpeg')}
-            data = {"caption": message, "access_token": page_token}
-            res = requests.post(FB_API_URL, files=files, data=data).json()
-
-        if 'error' in res:
-            error_msg = res['error'].get('message', 'Unknown error')
-            print(f"❌ Failed: {error_msg}")
-            return False
-
-        photo_id = res.get('id')
-        image_url = None
-        if photo_id:
-            info = requests.get(f"https://graph.facebook.com/v19.0/{photo_id}?fields=images&access_token={page_token}").json()
-            images = info.get('images') or []
-            if images:
-                image_url = images[0].get('source')
-
-        print("✅ Posted:", res)
-
-        # Cross-post to Instagram using the Facebook image URL if available
-        if image_url:
-            try:
-                insta.post_to_instagram(image_url, message)
-            except Exception:
-                pass
-
-        return {"photo_id": photo_id, "image_url": image_url, "response": res}
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
+    # Determine media type
+    is_video = image_filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv'))
+    
+    # Reuse robust logic from grahak_uploader
+    token = get_access_token()
+    page_token = grahak_uploader.get_page_token(token)
+    
+    if is_video:
+        res = grahak_uploader.upload_fb_video(path, message, True, page_token)
+    else:
+        res = grahak_uploader.upload_fb_photo(path, message, True, page_token)
+        
+    if 'id' not in res:
+        print(f"❌ FB Post Failed: {res}")
         return False
+        
+    fb_id = res['id']
+    print(f"✅ Posted to FB: {fb_id}")
+    
+    # Sync to Instagram
+    media_url = grahak_uploader.get_public_url(fb_id, is_video, page_token)
+    if media_url:
+        # Post as Reel if video, Feed if image
+        grahak_uploader.publish_instagram(media_url, message, is_video, is_video, page_token)
+        
+    return {"photo_id": fb_id, "response": res}
 
 def run_grahakchetna():
     """Run Grahak Chetna posting"""

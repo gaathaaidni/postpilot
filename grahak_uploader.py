@@ -71,7 +71,7 @@ def get_public_url(media_id, is_video, token=None):
     fields = 'source' if is_video else 'images'
     url = f"https://graph.facebook.com/v19.0/{media_id}?fields={fields}&access_token={token}"
     
-    for _ in range(5): # Retry loop for video processing
+    for _ in range(20): # Retry loop for video processing (up to 100s)
         try:
             res = requests.get(url).json()
             if is_video and 'source' in res:
@@ -79,7 +79,7 @@ def get_public_url(media_id, is_video, token=None):
             if not is_video and 'images' in res and res['images']:
                 return res['images'][0]['source']
         except: pass
-        time.sleep(3)
+        time.sleep(5)
     return None
 
 def publish_instagram(url, caption, is_video, is_reel, token=None):
@@ -106,7 +106,16 @@ def publish_instagram(url, caption, is_video, is_reel, token=None):
     container_id = res['id']
     
     # 2. Publish
-    time.sleep(3) # Wait for container readiness
+    # Poll for container readiness
+    status_url = f"https://graph.facebook.com/v19.0/{container_id}?fields=status_code&access_token={token}"
+    for _ in range(20):
+        time.sleep(3)
+        stat = requests.get(status_url).json()
+        if stat.get('status_code') == 'FINISHED':
+            break
+        if stat.get('status_code') == 'ERROR':
+            return {'error': f"Container Error: {stat}"}
+            
     publish_url = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish"
     pub_res = requests.post(publish_url, data={'creation_id': container_id, 'access_token': token}).json()
     return pub_res
