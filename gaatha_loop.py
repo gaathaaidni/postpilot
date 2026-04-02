@@ -3,7 +3,8 @@ import threading
 import random
 
 # Gaatha AI Settings
-PAGE_ID = '1028368893692590'
+PAGE_ID = os.getenv('FB_PAGE_ID_GAATHA_AI') or os.getenv('FB_PAGE_ID_GAATHA') or '1028368893692590'
+POSTS_FILE = os.path.join(os.path.dirname(__file__), "posts", "gaatha_posts.json")
 
 def get_access_token():
     token = os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN')
@@ -13,7 +14,6 @@ def get_access_token():
     return token
 
 ACCESS_TOKEN = get_access_token()
-POSTS_FILE = os.path.join("posts", "gaatha_posts.json")
 
 stop_event = threading.Event()
 status_callback = None
@@ -21,15 +21,21 @@ current_interval = 30 * 60
 
 def get_page_token():
     """Fetch page token from user token"""
+    token = get_access_token()
+    if not token:
+        print("Gaatha Error: No User Access Token found in .env or token.txt")
+        return None
+        
     try:
-        url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={ACCESS_TOKEN}"
+        url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={token}"
         res = requests.get(url).json()
         if 'data' in res:
             for page in res['data']:
-                if page.get('id') == PAGE_ID:
+                if str(page.get('id')) == str(PAGE_ID):
                     return page.get('access_token')
-    except:
-        pass
+        print(f"Gaatha Error: Page ID {PAGE_ID} not found in accounts or token lacks permissions. Response: {res}")
+    except Exception as e:
+        print(f"Gaatha Error fetching page token: {e}")
     return None
 
 def set_status_callback(callback):
@@ -65,7 +71,7 @@ def post_to_facebook(message, image_filename):
     try:
         with open(image_path, 'rb') as img_file:
             payload = {
-                'message': message,
+                'caption': message,
                 'access_token': page_token
             }
             files = {

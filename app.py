@@ -5,6 +5,9 @@ import time
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 # modules for posting logic (renamed files)
 import nexora_suite as tour
 import nexora_by_phoenix_international as visa
