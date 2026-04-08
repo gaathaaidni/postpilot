@@ -84,8 +84,10 @@ def run_gaatha_loop():
             if status_callback:
                 status_callback('gaatha', True, 'No posts defined', None)
                 
-        # Wait for interval or stop event
-        stop_event.wait(current_interval)
+        # Wait in small increments to remain responsive to stop_event
+        wait_until = time.time() + current_interval
+        while time.time() < wait_until and not stop_event.is_set():
+            time.sleep(5)
 
 def stop_gaatha_loop():
     stop_event.set()

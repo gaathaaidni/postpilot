@@ -4,8 +4,8 @@ Integrates video generation code with Facebook & Instagram Reels publishing.
 """
 import os
 import time
-import requests
 import json
+import facebook_api
 try:
     from gtts import gTTS
 except ImportError:
@@ -22,13 +22,6 @@ except ImportError:
 # --- Configuration ---
 PAGE_ID = os.getenv('FB_PAGE_ID_GRAHAK_CHETNA') or '374211199112915'
 IG_USER_ID = os.getenv('INSTA_ID_GRAHAK_CHETNA')
-
-def get_access_token():
-    token = os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN')
-    if not token and os.path.exists('token.txt'):
-        with open('token.txt', 'r') as f:
-            token = f.read().strip()
-    return token
 
 # --- Language Helpers ---
 def _resolve_asset_path(*relative_parts):
@@ -229,7 +222,7 @@ def generate_video_from_text(title, script, lang='en', background_image=None):
 
 # --- 2. Facebook Publishing ---
 def post_video_to_facebook(video_path, caption):
-    token = get_access_token()
+    token = facebook_api.get_access_token()
     url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/videos"
     
     print("📤 Uploading to Facebook...")
@@ -240,8 +233,7 @@ def post_video_to_facebook(video_path, caption):
                 'description': caption,
                 'access_token': token
             }
-            response = requests.post(url, files=files, data=data)
-            res_json = response.json()
+            res_json = facebook_api._request_with_retry("POST", url, files=files, data=data)
             
             if 'id' in res_json:
                 print(f"✅ Facebook Video Posted. ID: {res_json['id']}")
@@ -263,14 +255,14 @@ def post_video_to_instagram(fb_video_id, caption):
         print("⚠️ Instagram ID not set. Skipping Insta upload.")
         return False
         
-    token = get_access_token()
+    token = facebook_api.get_access_token()
     
     # Step A: Get Public URL from Facebook Video
     print("🔄 Fetching video URL for Instagram...")
     time.sleep(10) # Wait for FB processing
     
     vid_url = f"https://graph.facebook.com/v19.0/{fb_video_id}?fields=source&access_token={token}"
-    vid_info = requests.get(vid_url).json()
+    vid_info = facebook_api._request_with_retry("GET", vid_url)
     video_source_url = vid_info.get('source')
     
     if not video_source_url:
@@ -286,7 +278,7 @@ def post_video_to_instagram(fb_video_id, caption):
         'caption': caption,
         'access_token': token
     }
-    res = requests.post(create_url, data=payload).json()
+    res = facebook_api._request_with_retry("POST", create_url, data=payload)
     
     if 'id' not in res:
         print(f"❌ Insta Container Error: {res}")
@@ -298,7 +290,7 @@ def post_video_to_instagram(fb_video_id, caption):
     print("🚀 Publishing to Instagram...")
     time.sleep(5) # Wait for container readiness
     publish_url = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish"
-    pub_res = requests.post(publish_url, data={'creation_id': container_id, 'access_token': token}).json()
+    pub_res = facebook_api._request_with_retry("POST", publish_url, data={'creation_id': container_id, 'access_token': token})
     
     if 'id' in pub_res:
         print(f"✅ Instagram Reel Posted. ID: {pub_res['id']}")

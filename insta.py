@@ -86,7 +86,7 @@ def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
                     if attachments.get('type') != 'photo': continue
 
                     image_url = media.get('image', {}).get('src')
-                    if image_url and self.post_to_instagram(image_url, post.get('message', '')):
+                    if image_url and post_to_instagram(image_url, post.get('message', ''), self.ig_user_id, self.access_token):
                         post_count += 1
                         summary = f"{post.get('message', '')[:30]}..."
                         if status_callback:
@@ -97,5 +97,5 @@ def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
                     status_callback(self.name, True, 'Checking...', None)
                 time.sleep(self.interval)
             except Exception as e:
-                print(f"Error in {self.name} sync: {e}")
+                print(f"❌ Error in {self.name} sync: {e}")
                 time.sleep(60)

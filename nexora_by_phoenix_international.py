@@ -1,8 +1,8 @@
 # nz_thread.py
-import time, random, os, json
+import os
 from threading import Event
+import posting_utils
 import facebook_api
-import insta # Still used for cross-posting
 
 stop_event = Event()
 status_callback = None
@@ -10,21 +10,10 @@ current_interval = 30 * 60  # Default to 30 minutes
 
 ACCESS_TOKEN = facebook_api.get_access_token()
 PAGE_ID = os.getenv('FB_PAGE_ID_NEXORA_BY_PHOENIX_INTERNATIONAL') or os.getenv('FB_PAGE_ID_NEXORA_BY_PHOENIX') or '954901604381882'  # Nexora by Phoenix International page
-IMAGE_FOLDER = "images"
 POSTS_FILE = "posts/visa_posts.json"
 
 def load_posts():
-    with open(POSTS_FILE, 'r') as f:
-        return json.load(f)
-
-
-def get_static_base_url():
-    """Base URL where images are served. Override with env STATIC_BASE_URL."""
-    return os.environ.get('STATIC_BASE_URL', 'http://localhost:5000').rstrip('/')
-
-
-def get_image_url(filename):
-    return f"{get_static_base_url()}/images/{filename}"
+    return posting_utils.load_posts(POSTS_FILE)
 
 def set_status_callback(callback):
     """Set callback for status updates"""
@@ -37,69 +26,19 @@ def set_interval(interval):
     current_interval = interval
 
 def post_on_facebook(message, image_filename):
-    path = os.path.join(IMAGE_FOLDER, image_filename)
-    if not os.path.exists(path):
-        print(f"Image not found: {path}")
-        return False
-
-    try:
-        page_token = facebook_api.get_page_token(ACCESS_TOKEN, PAGE_ID)
-        if not page_token:
-            print("❌ Failed: Could not get page token")
-            return False
-
-        FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos" # Define here as it uses PAGE_ID
-        # Upload the image file directly to Facebook (multipart upload)
-        with open(path, 'rb') as img:
-            files = {'source': (image_filename, img, 'image/jpeg')}
-            data = {"caption": message, "access_token": page_token}
-            res = facebook_api._request_with_retry("POST", FB_API_URL, files=files, data=data)
-
-        if 'error' in res:
-            error_msg = res['error'].get('message', 'Unknown error')
-            print(f"❌ Failed: {error_msg}")
-            return False
-
-        photo_id = res.get('id')
-        image_url = None
-        if photo_id:
-            info = facebook_api._request_with_retry("GET", f"https://graph.facebook.com/v19.0/{photo_id}?fields=images&access_token={page_token}")
-            images = info.get('images') or []
-            if images:
-                image_url = images[0].get('source')
-
-        print("✅ Posted:", res)
-
-        # Cross-post to Instagram using the Facebook image URL if available
-        if image_url:
-            try:
-                insta.post_to_instagram(image_url, message)
-            except Exception:
-                pass
-
-        return {"photo_id": photo_id, "image_url": image_url, "response": res}
-    except Exception as e:
-        print(f"❌ Error: {str(e)}")
-        return False
+    return posting_utils.post_on_facebook(message, image_filename, PAGE_ID, ACCESS_TOKEN)
 
 def run_nexora_by_phoenix():
     """Run Nexora by Phoenix International posting"""
-    posts = load_posts()
-    random.shuffle(posts)
-    post_count = 0
-    while not stop_event.is_set():
-        for post in posts:
-            if stop_event.is_set():
-                break
-            post_count += 1
-            current_post_summary = f"{post['message'][:50]}..." if len(post.get('message', '')) > 50 else post.get('message', 'No message')
-            if status_callback:
-                status_callback('nexora_by_phoenix', True, f"Posting... (Post #{post_count})", current_post_summary)
-            success = post_on_facebook(post["message"], post["image_filename"])
-            if status_callback:
-                status = "Posted" if success else "Failed"
-                status_callback('nexora_by_phoenix', True, status, None)
-            time.sleep(current_interval)
+    posting_utils.run_posting_loop(
+        stop_event=stop_event,
+        status_callback=status_callback,
+        get_interval_func=lambda: current_interval,
+        callback_key='nexora_by_phoenix',
+        posts_file=POSTS_FILE,
+        page_id=PAGE_ID,
+        access_token=ACCESS_TOKEN
+    )
 
 def stop_nexora_by_phoenix():
     """Stop Nexora by Phoenix International posting"""

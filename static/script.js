@@ -1,6 +1,7 @@
 let currentTab = 'dashboard';
 let statusInterval = null;
 let currentModulePosts = [];
+let grahakRefreshTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     setupNavigation();
@@ -315,6 +316,13 @@ async function renderGrahak(container) {
                     <p id="grahak-news-status">Disabled</p>
                 </div>
             </div>
+            <div class="stat-card">
+                <div class="stat-icon bg-purple-soft"><i class="fa-solid fa-clock"></i></div>
+                <div class="stat-info">
+                    <h4>Scheduled Tasks</h4>
+                    <p id="grahak-scheduled-count">0</p>
+                </div>
+            </div>
         </div>
 
         <div class="card">
@@ -342,6 +350,10 @@ async function renderGrahak(container) {
                     <textarea id="grahak-caption" class="form-control" rows="2"></textarea>
                 </div>
                 <div class="form-group">
+                    <label>Schedule Post (Optional)</label>
+                    <input type="datetime-local" id="g-scheduled-at" class="form-control">
+                </div>
+                <div class="form-group">
                     <label style="display:block; margin-bottom:0.5rem;">Targets</label>
                     <div style="display:flex; gap:1rem; flex-wrap:wrap;">
                         <label><input type="checkbox" id="g-fb-feed" checked> FB Feed</label>
@@ -353,17 +365,168 @@ async function renderGrahak(container) {
                 <button type="button" class="btn btn-primary" onclick="grahakUpload()">Upload & Post</button>
             </form>
         </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Task Management</div>
+            </div>
+            <div class="table-responsive">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>File / Task</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="grahak-tasks-table">
+                        <tr><td colspan="4" style="text-align:center;">No active tasks.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     `;
     updateGrahakStatus();
 }
 
 async function updateGrahakStatus() {
+    // Stop polling if we navigated away from the Grahak tab
+    if (currentTab !== 'grahak') {
+        if (grahakRefreshTimer) clearTimeout(grahakRefreshTimer);
+        grahakRefreshTimer = null;
+        return;
+    }
+
     try {
         const res = await fetch('/api/grahak/status');
         const data = await res.json();
         const el = document.getElementById('grahak-news-status');
         if(el) el.textContent = data.news_enabled ? 'Active' : 'Disabled';
+        const schedEl = document.getElementById('grahak-scheduled-count');
+        if(schedEl) schedEl.textContent = data.scheduled_count || 0;
+
+        // Update Task Table
+        const tasksRes = await fetch('/api/grahak/tasks');
+        const tasks = await tasksRes.json();
+        renderGrahakTasks(tasks);
+
+        // Automatically refresh only if there are active tasks
+        const hasActive = Object.values(tasks).some(t => t.status === 'processing' || t.status === 'scheduled');
+        if (hasActive) {
+            if (grahakRefreshTimer) clearTimeout(grahakRefreshTimer);
+            grahakRefreshTimer = setTimeout(updateGrahakStatus, 3000);
+        } else {
+            grahakRefreshTimer = null;
+        }
     } catch(e) {}
+}
+
+function renderGrahakTasks(tasks) {
+    const tbody = document.getElementById('grahak-tasks-table');
+    if (!tbody) return;
+
+    const taskIds = Object.keys(tasks).sort((a, b) => tasks[b].created_at - tasks[a].created_at);
+    if (taskIds.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">No active tasks.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = taskIds.map(tid => {
+        const t = tasks[tid];
+        const statusClass = t.status === 'completed' ? 'text-success' : (t.status === 'failed' ? 'text-danger' : 'text-primary');
+        const isCancellable = t.status === 'scheduled' || t.status === 'processing';
+        
+        return `
+            <tr>
+                <td>
+                    <div style="font-weight:500;">${t.filename || tid}</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">${tid}</div>
+                </td>
+                <td><span class="${statusClass}">${t.status.toUpperCase()}</span></td>
+                <td>
+                    <div class="progress-bar-container" style="height:10px; margin-top:0;">
+                        <div class="progress-bar" style="width:${t.progress || 0}%; height:10px;"></div>
+                    </div>
+                </td>
+                <td>
+                    <div style="display:flex; gap:0.25rem;">
+                        <button class="btn btn-sm btn-secondary" title="View Details" onclick="viewTaskDetails('${tid}')">
+                            <i class="fa-solid fa-circle-info"></i>
+                        </button>
+                        ${t.status === 'failed' ? `
+                            <button class="btn btn-sm btn-primary" title="Retry" onclick="retryGrahakTask('${tid}')">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+                        ` : ''}
+                    <button class="btn btn-sm btn-outline-danger" onclick="cancelGrahakTask('${tid}')">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+async function cancelGrahakTask(taskId) {
+    if(!confirm('Remove this task?')) return;
+    await fetch(`/api/grahak/task/${taskId}`, { method: 'DELETE' });
+    updateGrahakStatus();
+}
+
+async function viewTaskDetails(taskId) {
+    try {
+        const res = await fetch(`/api/grahak/task/${taskId}`);
+        const data = await res.json();
+        
+        const modalHtml = `
+            <div id="details-modal" class="modal show" style="display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); z-index: 9999; position: fixed; top: 0; left: 0; width: 100%; height: 100%;">
+                <div class="card" style="width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                    <div class="card-header" style="position: sticky; top: 0; background: white; z-index: 10;">
+                        <div class="card-title">Task Details</div>
+                        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('details-modal').remove()">Close</button>
+                    </div>
+                    <div style="padding: 1.5rem;">
+                        <div style="margin-bottom: 1rem;"><strong>Status:</strong> <span class="status-badge ${data.status === 'completed' ? 'status-running' : 'status-stopped'}">${data.status.toUpperCase()}</span></div>
+                        <div style="margin-bottom: 1rem;"><strong>Task ID:</strong> <code style="font-size: 0.8rem;">${taskId}</code></div>
+                        <div style="margin-bottom: 1rem;"><strong>Created:</strong> ${new Date(data.created_at * 1000).toLocaleString()}</div>
+                        
+                        ${data.error ? `
+                            <div style="margin-bottom: 1rem;">
+                                <strong style="color: var(--danger);">Error Message:</strong>
+                                <pre style="background: #fff5f5; padding: 12px; border-radius: 6px; border: 1px solid #feb2b2; white-space: pre-wrap; margin-top: 5px; font-size: 0.85rem; color: #c53030;">${data.error}</pre>
+                            </div>
+                        ` : ''}
+                        
+                        ${data.results ? `
+                            <div style="margin-bottom: 1rem;">
+                                <strong>API Response Data:</strong>
+                                <pre style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid var(--border); overflow-x: auto; margin-top: 5px; font-size: 0.8rem;">${JSON.stringify(data.results, null, 2)}</pre>
+                            </div>
+                        ` : ''}
+                        
+                        <div style="margin-bottom: 0.5rem;"><strong>Post Content:</strong></div>
+                        <p style="font-style: italic; color: var(--text-muted); background: #f9f9f9; padding: 10px; border-radius: 4px; border-left: 4px solid var(--primary);">${data.caption || 'No caption provided'}</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    } catch (e) {
+        alert("Could not load task details. The task may have been cleaned up.");
+    }
+}
+
+async function retryGrahakTask(taskId) {
+    if (!confirm('This will re-submit the post with the same caption and targets. Proceed?')) return;
+    const res = await fetch(`/api/grahak/task/${taskId}/retry`, { method: 'POST' });
+    const data = await res.json();
+    if (data.task_id) {
+        updateGrahakStatus();
+    } else {
+        alert('Retry failed: ' + (data.error || 'Unknown error'));
+    }
 }
 
 async function grahakAction(action) {
@@ -378,6 +541,7 @@ async function grahakUpload() {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('caption', document.getElementById('grahak-caption').value);
+    formData.append('scheduled_at', document.getElementById('g-scheduled-at').value);
     formData.append('fb_feed', document.getElementById('g-fb-feed').checked);
     formData.append('fb_story', document.getElementById('g-fb-story').checked);
     formData.append('ig_feed', document.getElementById('g-ig-feed').checked);

@@ -61,6 +61,37 @@ posting_state = {
 # Track outcomes of background tasks
 task_results = {}
 task_results_lock = threading.Lock() # Lock for thread-safe access to task_results
+posting_state_lock = threading.Lock() # Lock for thread-safe access to posting_state
+
+def _execute_grahak_task(task_id, filepath, caption, targets, delay=0, scheduled_at=None):
+    """Shared background logic for executing Grahak Chetna upload tasks."""
+    try:
+        if delay > 0:
+            with task_results_lock:
+                if task_id in task_results:
+                    task_results[task_id]['status'] = 'scheduled'
+            
+            logger.info(f"⏰ Task {task_id} scheduled for {scheduled_at}. Waiting {int(delay)} seconds...")
+            time.sleep(delay)
+
+        logger.info(f"🚀 Starting background upload for task ID: {task_id}")
+        
+        def on_update(update_info):
+            with task_results_lock:
+                current_task_info = task_results.get(task_id, {})
+                current_task_info.update(update_info)
+                if update_info.get('status') == 'Upload process completed':
+                    current_task_info['status'] = 'completed'
+                    current_task_info['completed_at'] = datetime.utcnow().isoformat()
+                task_results[task_id] = current_task_info
+
+        grahak_uploader.process_upload(filepath, caption, targets, callback=on_update)
+        logger.info(f"✅ Background upload finished for {task_id}")
+    except Exception as e:
+        logger.error(f"❌ Unhandled exception in grahak task {task_id}: {e}", exc_info=True)
+        with task_results_lock:
+            if task_id in task_results:
+                task_results[task_id].update({'status': 'failed', 'error': str(e), 'progress': 100})
 
 def _cleanup_tasks_worker():
     """Background worker to remove task results older than 24 hours"""
@@ -100,22 +131,23 @@ def save_posts(filepath, posts):
 
 def update_posting_status(post_type, is_running, message='', current_post=None):
     """Update posting status for a specific post type"""
-    if post_type == 'tour':
-        posting_state['tour_running'] = is_running
-        posting_state['tour_status'] = message
-        posting_state['tour_current_post'] = current_post
-    elif post_type == 'nz':
-        posting_state['nz_running'] = is_running
-        posting_state['nz_status'] = message
-        posting_state['nz_current_post'] = current_post
-    elif post_type == 'insta':
-        posting_state['insta_running'] = is_running
-        posting_state['insta_status'] = message
-        posting_state['insta_current_post'] = current_post
-    elif post_type == 'gaatha':
-        posting_state['gaatha_running'] = is_running
-        posting_state['gaatha_status'] = message
-        posting_state['gaatha_current_post'] = current_post
+    with posting_state_lock:
+        if post_type == 'tour':
+            posting_state['tour_running'] = is_running
+            posting_state['tour_status'] = message
+            posting_state['tour_current_post'] = current_post
+        elif post_type == 'nz':
+            posting_state['nz_running'] = is_running
+            posting_state['nz_status'] = message
+            posting_state['nz_current_post'] = current_post
+        elif post_type == 'insta':
+            posting_state['insta_running'] = is_running
+            posting_state['insta_status'] = message
+            posting_state['insta_current_post'] = current_post
+        elif post_type == 'gaatha':
+            posting_state['gaatha_running'] = is_running
+            posting_state['gaatha_status'] = message
+            posting_state['gaatha_current_post'] = current_post
 
 @app.route('/')
 def index():
@@ -412,6 +444,8 @@ def grahak_status():
         "last_news_post": "",
         "default_hashtags": "#GrahakChetna #News"
     })
+    with task_results_lock:
+        status['scheduled_count'] = sum(1 for t in task_results.values() if t.get('status') == 'scheduled')
     return jsonify(status)
 
 @app.route('/api/grahak/start_news', methods=['POST'])
@@ -489,40 +523,20 @@ def grahak_upload_post():
             task_results[task_id] = {
                 'status': 'processing', 
                 'filename': filename,
+                'filepath': filepath,
+                'caption': caption,
+                'targets': targets,
                 'scheduled_at': scheduled_at if delay > 0 else None,
                 'created_at': time.time(),
                 'progress': 0 # Initialize progress
             }
 
-        def background_upload():
-            try:
-                if delay > 0:
-                    with task_results_lock:
-                        task_results[task_id]['status'] = 'scheduled'
-                    
-                    logger.info(f"⏰ Task {task_id} scheduled for {scheduled_at}. Waiting {int(delay)} seconds...")
-                    time.sleep(delay)
-
-                logger.info(f"🚀 Starting background upload for {filename} (ID: {task_id})")
-                
-                def on_update(update_info): # Callback now receives a dict with status, progress, and results
-                    with task_results_lock: # Protect updates from the background thread
-                        current_task_info = task_results.get(task_id, {})
-                        current_task_info.update(update_info)
-                        if update_info.get('status') == 'Upload process completed':
-                            current_task_info['status'] = 'completed' # Final status
-                            current_task_info['completed_at'] = datetime.utcnow().isoformat()
-                        task_results[task_id] = current_task_info
-
-                grahak_uploader.process_upload(filepath, caption, targets, callback=on_update)
-                logger.info(f"✅ Background upload finished for {task_id}")
-            except Exception as e:
-                logger.error(f"❌ Unhandled exception in grahak_uploader thread: {e}", exc_info=True)
-                with task_results_lock: # Protect write on failure
-                    task_results[task_id] = {'status': 'failed', 'error': str(e), 'progress': 100}
-
-        # Run in a background thread to prevent UI timeout
-        thread = threading.Thread(target=background_upload, daemon=True)
+        # Run helper in background thread
+        thread = threading.Thread(
+            target=_execute_grahak_task, 
+            args=(task_id, filepath, caption, targets, delay, scheduled_at),
+            daemon=True
+        )
         thread.start()
         
         return jsonify({
@@ -541,6 +555,57 @@ def get_grahak_task_status(task_id):
     if not result:
         return jsonify({'error': 'Task not found'}), 404
     return jsonify(result)
+
+@app.route('/api/grahak/tasks', methods=['GET'])
+def list_grahak_tasks():
+    """List all background tasks for management"""
+    with task_results_lock:
+        return jsonify(task_results)
+
+@app.route('/api/grahak/task/<task_id>', methods=['DELETE'])
+def delete_grahak_task(task_id):
+    """Cancel/Delete a background task"""
+    with task_results_lock:
+        if task_id in task_results:
+            task_results.pop(task_id)
+            return jsonify({'status': 'deleted'})
+    return jsonify({'error': 'Task not found'}), 404
+
+@app.route('/api/grahak/task/<task_id>/retry', methods=['POST'])
+def retry_grahak_task(task_id):
+    """Re-attempt a failed background upload task"""
+    with task_results_lock:
+        old_task = task_results.get(task_id)
+    
+    if not old_task:
+        return jsonify({'error': 'Task not found'}), 404
+    
+    filepath = old_task.get('filepath')
+    caption = old_task.get('caption')
+    targets = old_task.get('targets')
+    filename = old_task.get('filename')
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({'error': 'Original file no longer exists on server'}), 400
+
+    new_task_id = f"task_{int(time.time())}_{os.urandom(4).hex()}"
+    with task_results_lock:
+        task_results[new_task_id] = {
+            'status': 'processing',
+            'filename': filename,
+            'filepath': filepath,
+            'caption': caption,
+            'targets': targets,
+            'created_at': time.time(),
+            'progress': 0
+        }
+
+    threading.Thread(
+        target=_execute_grahak_task, 
+        args=(new_task_id, filepath, caption, targets),
+        daemon=True
+    ).start()
+    return jsonify({'status': 'queued', 'task_id': new_task_id})
 
 @app.route('/api/grahak/feeds', methods=['GET'])
 def grahak_feeds():

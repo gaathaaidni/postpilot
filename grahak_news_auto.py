@@ -4,30 +4,14 @@ Generates structured news posts with viral hashtags and formatting.
 """
 import os
 import json
-import requests
 import random
+import requests
+import xml.etree.ElementTree as ET
 from datetime import datetime
+import facebook_api
 
 # Configuration
 PAGE_ID = '374211199112915'
-
-def get_token():
-    if os.path.exists('token.txt'):
-        with open('token.txt','r') as f: return f.read().strip()
-    return os.getenv('FB_TOKEN')
-
-def get_page_token(user_token):
-    """Exchange User Token for Page Token to ensure we post AS THE PAGE"""
-    try:
-        url = f"https://graph.facebook.com/v19.0/me/accounts"
-        params = {"access_token": user_token}
-        resp = requests.get(url, params=params).json()
-        for page in resp.get("data", []):
-            if page.get("id") == PAGE_ID:
-                return page.get("access_token")
-    except Exception:
-        pass
-    return user_token  # Fallback to original if exchange fails
 
 VIRAL_HASHTAGS = """
 .
@@ -47,12 +31,16 @@ def format_news_post(title, body, source="Grahak Chetna"):
     return post_text
 
 def post_text_to_fb(message):
-    token = get_token()
-    page_token = get_page_token(token)
+    token = facebook_api.get_access_token()
+    page_token = facebook_api.get_page_token(token, PAGE_ID)
+    if not page_token:
+        print("❌ Could not retrieve Page Access Token")
+        return False
+        
     url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
     payload = {'message': message, 'access_token': page_token}
     try:
-        r = requests.post(url, data=payload).json()
+        r = facebook_api._request_with_retry("POST", url, data=payload)
         if 'id' in r:
             print(f"✅ News Posted: {r['id']}")
             return True
@@ -64,18 +52,44 @@ def post_text_to_fb(message):
         return False
 
 def run_automation():
-    # Logic to fetch from RSS or config would go here. 
-    # For now, we simulate a professional update based on status.json or generic template
+    # Fetch feeds from the config managed by app.py
+    config_path = os.path.join('config', 'rss_feeds.json')
+    news_items = []
+
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                feeds = config.get('feeds', [])
+                
+            for feed in feeds:
+                print(f"📡 Fetching: {feed['name']}...")
+                resp = requests.get(feed['url'], timeout=10)
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.content)
+                    # Support standard RSS 2.0
+                    for item in root.findall('.//item'):
+                        title = item.find('title').text if item.find('title') is not None else ""
+                        desc = item.find('description').text if item.find('description') is not None else ""
+                        if title:
+                            news_items.append((title, desc, feed['name']))
+        except Exception as e:
+            print(f"❌ RSS Fetch Error: {e}")
+
+    if not news_items:
+        print("⚠️ No news found in RSS feeds. Using fallback placeholders.")
+        news_items = [
+            ("Consumer Awareness Drive", "Stay informed about your rights as a consumer in the digital age.", "System"),
+            ("Safety First", "Always check for ISI marks and quality certifications before purchasing appliances.", "System")
+        ]
     
-    # Example placeholder news (in production this comes from the RSS parser)
-    news_items = [
-        ("New Consumer Protection Rules", "The government has issued new guidelines for e-commerce platforms to prevent dark patterns."),
-        ("Electric Vehicle Safety Standards", "Ministry imposes stricter battery testing norms for all new EV scooters launched in India."),
-        ("Digital Payment Fraud Alert", "RBI warns users against screen-sharing apps during UPI transactions. Stay alert!")
-    ]
+    # Select a random news item from collected feeds
+    title, body, source = random.choice(news_items)
+    # Clean HTML tags if present in description
+    import re
+    clean_body = re.sub('<[^<]+?>', '', body)[:300] + "..." if body else ""
     
-    title, body = random.choice(news_items)
-    message = format_news_post(title, body)
+    message = format_news_post(title, clean_body, source)
     post_text_to_fb(message)
 
 if __name__ == "__main__":
