@@ -458,6 +458,18 @@ def grahak_upload_post():
         
     file = request.files['file']
     caption = request.form.get('caption', '')
+    scheduled_at = request.form.get('scheduled_at') # Expected format: YYYY-MM-DDTHH:MM
+    
+    delay = 0
+    if scheduled_at:
+        try:
+            # Parse the datetime-local string
+            target_time = datetime.strptime(scheduled_at, '%Y-%m-%dT%H:%M')
+            delay = (target_time - datetime.now()).total_seconds()
+            if delay < 0:
+                delay = 0
+        except ValueError:
+            logger.warning(f"Invalid schedule format received: {scheduled_at}")
     
     # Parse checkbox flags
     targets = {
@@ -477,12 +489,20 @@ def grahak_upload_post():
             task_results[task_id] = {
                 'status': 'processing', 
                 'filename': filename,
+                'scheduled_at': scheduled_at if delay > 0 else None,
                 'created_at': time.time(),
                 'progress': 0 # Initialize progress
             }
 
         def background_upload():
             try:
+                if delay > 0:
+                    with task_results_lock:
+                        task_results[task_id]['status'] = 'scheduled'
+                    
+                    logger.info(f"⏰ Task {task_id} scheduled for {scheduled_at}. Waiting {int(delay)} seconds...")
+                    time.sleep(delay)
+
                 logger.info(f"🚀 Starting background upload for {filename} (ID: {task_id})")
                 
                 def on_update(update_info): # Callback now receives a dict with status, progress, and results

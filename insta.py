@@ -1,19 +1,9 @@
 # insta_thread.py
-import requests, time, json, os
+import time, json, os
 import threading
+from utils import facebook_api
 
 status_callback = None
-
-def get_access_token():
-    """Read user access token from env, then token.txt fallback."""
-    return os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN') or _read_token_file()
-
-def _read_token_file():
-    try:
-        with open('token.txt', 'r') as f:
-            return f.read().strip()
-    except:
-        return None
 
 POSTED_FILE = 'posted.txt'
 
@@ -29,7 +19,7 @@ class InstaSync:
         self.name = name
         self.stop_event = threading.Event()
         self.interval = 3 * 60
-        self.access_token = get_access_token()
+        self.access_token = facebook_api.get_access_token()
 
     def set_interval(self, seconds):
         self.interval = seconds
@@ -38,8 +28,13 @@ class InstaSync:
         self.stop_event.set()
 
     def get_recent_facebook_posts(self):
-        url = f"https://graph.facebook.com/v18.0/{self.page_id}/posts?fields=id,message,attachments{{media,type}}&access_token={self.access_token}"
-        return requests.get(url).json().get('data', [])
+        url = f"https://graph.facebook.com/v19.0/{self.page_id}/posts"
+        params = {
+            'fields': 'id,message,attachments{media,type}',
+            'access_token': self.access_token
+        }
+        res = facebook_api._request_with_retry("GET", url, params=params)
+        return res.get('data', [])
 
 def get_posted_ids():
     try:
@@ -52,18 +47,27 @@ def save_posted_id(post_id):
     with open(POSTED_FILE, 'a') as f:
         f.write(post_id + '\n')
 
-    def post_to_instagram(self, image_url, caption):
-        if not self.ig_user_id: return False
-        create_url = f"https://graph.facebook.com/v18.0/{self.ig_user_id}/media"
-        publish_url = f"https://graph.facebook.com/v18.0/{self.ig_user_id}/media_publish"
+def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
+    """Top-level function for Instagram posting, used by other modules."""
+    if not ig_user_id:
+        ig_user_id = os.getenv('INSTA_ID_GRAHAK_CHETNA')
+    if not access_token:
+        access_token = facebook_api.get_access_token()
+        
+    if not ig_user_id or not access_token:
+        return False
 
-        payload = {'image_url': image_url, 'caption': caption, 'access_token': self.access_token}
-        res = requests.post(create_url, data=payload).json()
-        if 'id' not in res:
-            return False
+    create_url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media"
+    publish_url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish"
 
-        time.sleep(5)
-        return 'id' in requests.post(publish_url, data={'creation_id': res['id'], 'access_token': self.access_token}).json()
+    payload = {'image_url': image_url, 'caption': caption, 'access_token': access_token}
+    res = facebook_api._request_with_retry("POST", create_url, data=payload)
+    if 'id' not in res:
+        return False
+
+    time.sleep(5) # Brief wait for container processing
+    pub_res = facebook_api._request_with_retry("POST", publish_url, data={'creation_id': res['id'], 'access_token': access_token})
+    return 'id' in pub_res
 
     def run(self):
         post_count = 0
