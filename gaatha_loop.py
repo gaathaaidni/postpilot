@@ -1,8 +1,8 @@
 import time, json, os
 import threading
 import random
-from . import facebook_api
-from . import posting_utils
+import facebook_api
+import posting_utils
 
 # Gaatha AI Settings (now relative to src/)
 PAGE_ID = os.getenv('FB_PAGE_ID_GAATHA_AI') or os.getenv('FB_PAGE_ID_GAATHA') or '1028368893692590'
@@ -22,6 +22,8 @@ def set_interval(interval):
     current_interval = interval
 
 def load_posts():
+    return posting_utils.load_posts(POST_TYPE)
+
 def post_to_facebook(message, image_filename):
     url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
     

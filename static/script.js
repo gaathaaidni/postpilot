@@ -115,6 +115,7 @@ function renderDashboard(container) {
                 <div class="stat-info">
                     <h4>Nexora Suite</h4>
                     <p id="dash-status-tour">Checking...</p>
+                    <small id="dash-tour-interval" class="text-muted">Interval: --</small>
                 </div>
             </div>
             <div class="stat-card">
@@ -122,6 +123,7 @@ function renderDashboard(container) {
                 <div class="stat-info">
                     <h4>Phoenix Intl</h4>
                     <p id="dash-status-nz">Checking...</p>
+                    <small id="dash-nz-interval" class="text-muted">Interval: --</small>
                 </div>
             </div>
             <div class="stat-card">
@@ -129,6 +131,7 @@ function renderDashboard(container) {
                 <div class="stat-info">
                     <h4>Gaatha AI</h4>
                     <p id="dash-status-gaatha">Checking...</p>
+                    <small id="dash-gaatha-interval" class="text-muted">Interval: --</small>
                 </div>
             </div>
             <div class="stat-card">
@@ -136,10 +139,54 @@ function renderDashboard(container) {
                 <div class="stat-info">
                     <h4>Instagram</h4>
                     <p id="dash-status-insta">Checking...</p>
+                    <small id="dash-insta-interval" class="text-muted">Interval: --</small>
                 </div>
             </div>
         </div>
-        
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title"><i class="fa-solid fa-sliders"></i> Feature Control Panel</div>
+            </div>
+            <div style="display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); padding:1rem 0;">
+                ${['tour','nz','gaatha','insta'].map(type => {
+                    const labels = {
+                        tour: 'Nexora Suite',
+                        nz: 'Phoenix Intl',
+                        gaatha: 'Gaatha AI',
+                        insta: 'Instagram Sync'
+                    };
+                    const icons = {
+                        tour: 'fa-earth-americas',
+                        nz: 'fa-passport',
+                        gaatha: 'fa-scroll',
+                        insta: 'fa-instagram'
+                    };
+                    return `
+                        <div class="control-tile" style="border:1px solid var(--border); border-radius: 12px; padding:1rem; background: var(--surface);">
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem;">
+                                <div>
+                                    <div style="font-weight:600; display:flex; align-items:center; gap:0.5rem;"><i class="fa-solid ${icons[type]}"></i> ${labels[type]}</div>
+                                    <div style="font-size:0.9rem; color: var(--text-muted);" id="dash-${type}-summary">Status unknown</div>
+                                </div>
+                                <div style="text-align:right; font-size:0.85rem; color: var(--text-muted);" id="dash-${type}-interval-short">Interval: --</div>
+                            </div>
+                            <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:1rem;">
+                                <button class="btn btn-sm btn-primary" onclick="controlModule('${type}', 'start')"><i class="fa-solid fa-play"></i> Start</button>
+                                <button class="btn btn-sm btn-danger" onclick="controlModule('${type}', 'stop')"><i class="fa-solid fa-stop"></i> Stop</button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteAllPosts('${type}')"><i class="fa-solid fa-trash-can"></i> Clear Posts</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap; justify-content:flex-end; padding-top:0.5rem;">
+                <button class="btn btn-danger" onclick="controlAll('stop')"><i class="fa-solid fa-stop"></i> Stop All</button>
+                <button class="btn btn-primary" onclick="controlAll('start')"><i class="fa-solid fa-play"></i> Run All</button>
+                <button class="btn btn-secondary" onclick="refreshDashboard()"><i class="fa-solid fa-sync-alt"></i> Refresh Status</button>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-header">
                 <div class="card-title"><i class="fa-solid fa-filter"></i> Post Quick Browser</div>
@@ -234,6 +281,22 @@ function updateDashboardStatus(data) {
     set('dash-status-nz', mapStatus(data.nz_running));
     set('dash-status-gaatha', mapStatus(data.gaatha_running));
     set('dash-status-insta', mapStatus(data.insta_running));
+
+    set('dash-tour-interval', `Interval: ${data.tour_interval || 0} sec`);
+    set('dash-nz-interval', `Interval: ${data.nz_interval || 0} sec`);
+    set('dash-gaatha-interval', `Interval: ${data.gaatha_interval || 0} sec`);
+    set('dash-insta-interval', `Interval: ${data.insta_interval || 0} sec`);
+
+    set('dash-tour-summary', `${data.tour_running ? 'Running' : 'Stopped'} · ${data.tour_status || 'No activity yet'}`);
+    set('dash-nz-summary', `${data.nz_running ? 'Running' : 'Stopped'} · ${data.nz_status || 'No activity yet'}`);
+    set('dash-gaatha-summary', `${data.gaatha_running ? 'Running' : 'Stopped'} · ${data.gaatha_status || 'No activity yet'}`);
+    set('dash-insta-summary', `${data.insta_running ? 'Running' : 'Stopped'} · ${data.insta_status || 'No activity yet'}`);
+}
+
+function refreshDashboard() {
+    updateStatus();
+    const filter = document.getElementById('dashboard-filter');
+    if (filter && filter.value) filterDashboardPosts(filter.value);
 }
 
 async function deleteAllPosts(type) {

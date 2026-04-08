@@ -2,8 +2,8 @@ import os
 import random
 import sqlite3
 import time
-from . import facebook_api
-from . import insta
+import facebook_api
+import insta
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "posts.db")
 

@@ -8,7 +8,7 @@ import random
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime # This path needs to be updated to APP_ROOT / 'config'
-from . import facebook_api
+import facebook_api
 
 # Configuration
 PAGE_ID = '374211199112915'

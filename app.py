@@ -11,13 +11,13 @@ from PIL import Image
 from dotenv import load_dotenv
 
 load_dotenv()
-# modules for posting logic (now relative imports within src/)
-from . import nexora_suite as tour
-from . import nexora_by_phoenix_international as visa
-from . import gaatha_loop as gaatha
-from . import insta
-from . import grahak_news_auto
-from . import grahak_uploader
+# modules for posting logic
+import nexora_suite as tour
+import nexora_by_phoenix_international as visa
+import gaatha_loop as gaatha
+import insta
+import grahak_news_auto
+import grahak_uploader
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -549,7 +549,8 @@ def get_status():
         'insta_current_post': posting_state['insta_current_post'],
         'tour_interval': posting_state['tour_interval'],
         'nz_interval': posting_state['nz_interval'],
-        'gaatha_interval': posting_state['gaatha_interval']
+        'gaatha_interval': posting_state['gaatha_interval'],
+        'insta_interval': posting_state['insta_interval']
     })
 
 

@@ -1,8 +1,8 @@
 # nz_thread.py
 import os
 from threading import Event
-from . import posting_utils
-from . import facebook_api
+import posting_utils
+import facebook_api
 
 stop_event = Event()
 status_callback = None

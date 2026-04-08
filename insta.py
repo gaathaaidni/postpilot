@@ -1,7 +1,7 @@
 # insta_thread.py
 import time, json, os
 import threading
-from utils import facebook_api
+import facebook_api
 
 status_callback = None
 
