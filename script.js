@@ -164,6 +164,13 @@ function renderDashboard(container) {
     updateStatus(); // Immediate refresh
 }
 
+function formatDateTime(isoString) {
+    if (!isoString) return 'Never';
+    // Append 'Z' to treat as UTC if not present, then convert to local time
+    const date = new Date(isoString.endsWith('Z') ? isoString : isoString + 'Z');
+    return date.toLocaleString();
+}
+
 async function filterDashboardPosts(type) {
     const list = document.getElementById('dashboard-posts-list');
     if (!type) {
@@ -195,7 +202,8 @@ async function filterDashboardPosts(type) {
                         <tr>
                             <th style="width: 100px">Image</th>
                             <th>Message</th>
-                            <th style="width: 150px">Created</th>
+                            <th style="width: 150px">Added</th>
+                            <th style="width: 150px">Last Posted</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -208,7 +216,8 @@ async function filterDashboardPosts(type) {
                                     }
                                 </td>
                                 <td><div style="max-height: 60px; overflow-y: auto; font-size: 0.9rem;">${post.message || '<em class="text-muted">No message</em>'}</div></td>
-                                <td><small class="text-muted">${post.created_at ? new Date(post.created_at + 'Z').toLocaleString() : 'N/A'}</small></td>
+                                <td><small class="text-muted">${formatDateTime(post.created_at)}</small></td>
+                                <td><small class="text-muted">${formatDateTime(post.last_posted_at)}</small></td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -237,43 +246,23 @@ function updateDashboardStatus(data) {
 }
 
 async function deleteAllPosts(type) {
-    const msg = `Are you sure you want to delete ALL posts for <strong>${type.toUpperCase()}</strong>? This action cannot be undone.`;
-    
-    showConfirm(msg, async () => {
-        try {
-            const res = await fetch(`/api/posts/${type}/all`, { method: 'DELETE' });
-            const data = await res.json();
-            if (data.success) {
-                filterDashboardPosts(type); // Refresh the list
-            } else {
-                alert('Error deleting posts: ' + (data.error || 'Unknown error'));
-            }
-        } catch (e) {
-            console.error('Error during delete all:', e);
+    if (!confirm(`Are you sure you want to delete ALL posts for ${type}? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        const res = await fetch(`/api/posts/${type}/all`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            alert(data.message);
+            filterDashboardPosts(type); // Refresh the list
+        } else {
+            alert('Error deleting posts: ' + (data.error || 'Unknown error'));
         }
-    });
-}
-
-function showConfirm(htmlMessage, onConfirm) {
-    const modal = document.getElementById('confirm-modal');
-    const msgEl = document.getElementById('confirm-msg');
-    const yesBtn = document.getElementById('confirm-yes-btn');
-
-    msgEl.innerHTML = htmlMessage;
-    modal.classList.add('show');
-
-    // Replace button to clear old event listeners
-    const newBtn = yesBtn.cloneNode(true);
-    yesBtn.parentNode.replaceChild(newBtn, yesBtn);
-
-    newBtn.onclick = () => {
-        onConfirm();
-        closeConfirmModal();
-    };
-}
-
-function closeConfirmModal() {
-    document.getElementById('confirm-modal').classList.remove('show');
+    } catch (e) {
+        console.error('Error during delete all:', e);
+        alert('Failed to delete posts. Please check console for details.');
+    }
 }
 
 async function renderModule(container, type) {
@@ -308,6 +297,7 @@ async function renderModule(container, type) {
                         <tr>
                             <th style="width: 80px">Image</th>
                             <th>Message</th>
+                            <th style="width: 120px">Last Posted</th>
                             <th style="width: 120px">Actions</th>
                         </tr>
                     </thead>
@@ -351,6 +341,9 @@ async function loadPosts(type) {
                     <div class="text-truncate">${post.message || 'No caption'}</div>
                 </td>
                 <td>
+                    <small class="text-muted">${formatDateTime(post.last_posted_at)}</small>
+                </td>
+                <td>
                     <button class="btn btn-sm btn-secondary" onclick='openModal("edit", ${index}, "${type}")'><i class="fa-solid fa-pen"></i></button>
                     <button class="btn btn-sm btn-outline-danger" onclick="deletePost('${type}', ${index})"><i class="fa-solid fa-trash"></i></button>
                 </td>
@@ -377,7 +370,7 @@ async function saveInterval(type) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({interval: parseInt(val)})
     });
-    showToast('Interval updated successfully!', 'success');
+    alert('Interval updated');
 }
 
 async function controlModule(type, action) {
@@ -579,9 +572,7 @@ function renderGrahakTasks(tasks) {
 
 async function cancelGrahakTask(taskId) {
     if(!confirm('Remove this task?')) return;
-    const res = await fetch(`/api/grahak/task/${taskId}`, { method: 'DELETE' });
-    if (res.ok) showToast('Task removed successfully.', 'success');
-    else showToast('Failed to remove task.', 'error');
+    await fetch(`/api/grahak/task/${taskId}`, { method: 'DELETE' });
     updateGrahakStatus();
 }
 
@@ -589,9 +580,11 @@ async function viewTaskDetails(taskId) {
     try {
         const res = await fetch(`/api/grahak/task/${taskId}`);
         const data = await res.json();
-        if (!data) throw new Error("No task data received.");
         
-        const modalHtml = `<div id="details-modal" class="modal show" style="display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); z-index: 9999; position: fixed; top: 0; left: 0; width: 100%; height: 100%;"><div class="card" style="width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.2);"><div class="card-header" style="position: sticky; top: 0; background: white; z-index: 10;">
+        const modalHtml = `
+            <div id="details-modal" class="modal show" style="display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); z-index: 9999; position: fixed; top: 0; left: 0; width: 100%; height: 100%;">
+                <div class="card" style="width: 90%; max-width: 600px; max-height: 85vh; overflow-y: auto; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                    <div class="card-header" style="position: sticky; top: 0; background: white; z-index: 10;">
                         <div class="card-title">Task Details</div>
                         <button class="btn btn-sm btn-secondary" onclick="document.getElementById('details-modal').remove()">Close</button>
                     </div>
@@ -622,14 +615,14 @@ async function viewTaskDetails(taskId) {
         `;
         document.body.insertAdjacentHTML('beforeend', modalHtml);
     } catch (e) {
-        showToast("Could not load task details. The task may have been cleaned up.", 'warning');
+        alert("Could not load task details. The task may have been cleaned up.");
     }
 }
 
 async function retryGrahakTask(taskId) {
     if (!confirm('This will re-submit the post with the same caption and targets. Proceed?')) return;
     const res = await fetch(`/api/grahak/task/${taskId}/retry`, { method: 'POST' });
-    const data = await res.json(); // Assuming data contains success/error message
+    const data = await res.json();
     if (data.task_id) {
         updateGrahakStatus();
     } else {
@@ -644,7 +637,7 @@ async function grahakAction(action) {
 
 async function grahakUpload() {
     const file = document.getElementById('grahak-file').files[0];
-    if(!file) return showToast("Please select a file to upload.", 'warning');
+    if(!file) return alert("Select file");
     
     const formData = new FormData();
     formData.append('file', file);
@@ -662,10 +655,10 @@ async function grahakUpload() {
     
     try {
         const res = await fetch('/api/grahak/upload_post', {method: 'POST', body: formData});
-        const d = await res.json(); // Assuming d contains status and message
-        showToast('Upload processed: ' + (d.message || 'Success!'), 'success');
+        const d = await res.json();
+        alert('Upload processed: ' + JSON.stringify(d.results));
     } catch(e) {
-        showToast('Error uploading file. Please try again.', 'error');
+        alert('Error uploading');
     }
     
     btn.textContent = oldText;

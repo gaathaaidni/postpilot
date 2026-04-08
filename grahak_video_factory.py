@@ -5,7 +5,7 @@ Integrates video generation code with Facebook & Instagram Reels publishing.
 import os
 import time
 import json
-import facebook_api
+from . import facebook_api
 try:
     from gtts import gTTS
 except ImportError:
@@ -32,10 +32,10 @@ def _resolve_asset_path(*relative_parts):
     filename = os.path.join(*relative_parts)
     candidates = [
         filename,
-        os.path.join(os.path.dirname(__file__), filename),
-        os.path.join("/workspace/postpilot", filename),
-        os.path.join("/workspaces/postpilot", filename),
+        os.path.join(os.path.dirname(__file__), filename), # Current directory (src/)
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), filename), # Project root
     ]
+    # Also check within src/static if it's a static asset
     for path in candidates:
         if os.path.exists(path):
             return path

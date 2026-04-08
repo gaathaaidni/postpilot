@@ -1,14 +1,14 @@
 import time, json, os
 import threading
 import random
-import facebook_api
+from . import facebook_api
+from . import posting_utils
 
-# Gaatha AI Settings
+# Gaatha AI Settings (now relative to src/)
 PAGE_ID = os.getenv('FB_PAGE_ID_GAATHA_AI') or os.getenv('FB_PAGE_ID_GAATHA') or '1028368893692590'
-POSTS_FILE = os.path.join(os.path.dirname(__file__), "posts", "gaatha_posts.json")
+POST_TYPE = "gaatha"
 
 ACCESS_TOKEN = facebook_api.get_access_token()
-
 stop_event = threading.Event()
 status_callback = None
 current_interval = 30 * 60
@@ -22,12 +22,6 @@ def set_interval(interval):
     current_interval = interval
 
 def load_posts():
-    try:
-        with open(POSTS_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return []
-
 def post_to_facebook(message, image_filename):
     url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
     
@@ -65,9 +59,9 @@ def post_to_facebook(message, image_filename):
 
 def run_gaatha_loop():
     while not stop_event.is_set():
-        posts = load_posts()
+        posts = posting_utils.load_posts(POST_TYPE)
         if posts:
-            post = random.choice(posts)
+            post = posts[0] # Priority post
             msg = post.get('message', 'Gaatha AI Update')
             img = post.get('image_filename', '')
             
@@ -75,6 +69,7 @@ def run_gaatha_loop():
                 status_callback('gaatha', True, 'Posting...', msg)
             
             if post_to_facebook(msg, img):
+                posting_utils.update_last_posted_timestamp(post.get('id'))
                 if status_callback:
                     status_callback('gaatha', True, 'Posted Successfully', msg)
             else:

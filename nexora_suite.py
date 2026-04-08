@@ -1,7 +1,7 @@
 import os
 from threading import Event
-import posting_utils
-import facebook_api
+from . import posting_utils
+from . import facebook_api
 
 stop_event = Event()
 status_callback = None
@@ -9,10 +9,10 @@ current_interval = 30 * 60  # Default to 30 minutes
 
 ACCESS_TOKEN = facebook_api.get_access_token()
 PAGE_ID = os.getenv('FB_PAGE_ID_NEXORA_SUITE', '967550829768297')  # Nexora Suite page
-POSTS_FILE = "posts/tour_posts.json"
+POST_TYPE = "tour"
 
 def load_posts():
-    return posting_utils.load_posts(POSTS_FILE)
+    return posting_utils.load_posts(POST_TYPE)
 
 def set_status_callback(callback):
     """Set callback for status updates"""
@@ -34,7 +34,7 @@ def run_nexora_suite():
         status_callback=status_callback,
         get_interval_func=lambda: current_interval,
         callback_key='nexora_suite',
-        posts_file=POSTS_FILE,
+        posts_file=POST_TYPE,
         page_id=PAGE_ID,
         access_token=ACCESS_TOKEN
     )

@@ -102,6 +102,28 @@
         </div>
     </div>
 
+    <!-- Toast Notification Container -->
+    <div id="toast-container"></div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>Confirm Action</h3>
+                <button class="close-btn" onclick="closeConfirmModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-msg" style="margin-bottom: 0; line-height: 1.5;"></p>
+            </div>
+            <div class="modal-footer" style="padding-top: 1rem;">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+                <button id="confirm-yes-btn" class="btn btn-danger">
+                    <i class="fa-solid fa-trash-can"></i> Confirm Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/script.js"></script>
 </body>
 </html>

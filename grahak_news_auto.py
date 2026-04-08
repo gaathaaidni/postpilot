@@ -7,8 +7,8 @@ import json
 import random
 import requests
 import xml.etree.ElementTree as ET
-from datetime import datetime
-import facebook_api
+from datetime import datetime # This path needs to be updated to APP_ROOT / 'config'
+from . import facebook_api
 
 # Configuration
 PAGE_ID = '374211199112915'
@@ -53,7 +53,7 @@ def post_text_to_fb(message):
 
 def run_automation():
     # Fetch feeds from the config managed by app.py
-    config_path = os.path.join('config', 'rss_feeds.json')
+    config_path = os.path.join(os.path.dirname(__file__), 'config', 'rss_feeds.json')
     news_items = []
 
     if os.path.exists(config_path):

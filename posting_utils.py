@@ -2,8 +2,8 @@ import os
 import random
 import sqlite3
 import time
-import facebook_api
-import insta
+from . import facebook_api
+from . import insta
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "posts.db")
 
@@ -13,13 +13,26 @@ def load_posts(post_type):
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
         posts = conn.execute(
-            "SELECT message, image_filename FROM posts WHERE post_type = ? ORDER BY id ASC",
+            "SELECT id, message, image_filename, last_posted_at FROM posts WHERE post_type = ? ORDER BY last_posted_at ASC, id ASC",
             (post_type,)).fetchall()
         conn.close()
         return [dict(p) for p in posts]
     except Exception as e:
         print(f"❌ Error loading posts for {post_type}: {e}")
         return []
+
+def update_last_posted_timestamp(post_id):
+    """Updates the last_posted_at timestamp for a specific post in the SQLite database."""
+    try:
+        # Use a context manager for the connection to ensure it closes properly
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "UPDATE posts SET last_posted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (post_id,)
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"❌ Error updating last_posted_at for post {post_id}: {e}")
 
 def post_on_facebook(message, image_filename, page_id, access_token, image_folder="images"):
     """Shared logic for posting an image to a Facebook page and cross-posting to Instagram."""
@@ -68,15 +81,15 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
 
 def run_posting_loop(stop_event, status_callback, get_interval_func, callback_key, posts_file, page_id, access_token):
     """Standardized background loop for Nexora modules."""
-    posts = load_posts(posts_file)
-    if not posts:
-        if status_callback:
-            status_callback(callback_key, False, "Idle (No posts found)", None)
-        return
-
-    random.shuffle(posts)
     post_count = 0
     while not stop_event.is_set():
+        posts = load_posts(posts_file)
+        if not posts:
+            if status_callback:
+                status_callback(callback_key, False, "Idle (No posts found)", None)
+            time.sleep(60)
+            continue
+
         for post in posts:
             if stop_event.is_set(): break
             post_count += 1
@@ -88,6 +101,10 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
             
             success = post_on_facebook(msg, post.get("image_filename", ""), page_id, access_token)
             
+            if success:
+                # Record the successful post timestamp
+                update_last_posted_timestamp(post.get('id'))
+
             if status_callback:
                 status = "Posted" if success else "Failed"
                 status_callback(callback_key, True, status, None)

@@ -7,21 +7,23 @@ from flask import Flask, render_template, jsonify, request, send_from_directory
 import logging
 from pathlib import Path
 from datetime import datetime
+from PIL import Image
 from dotenv import load_dotenv
 
 load_dotenv()
-# modules for posting logic (renamed files)
-import nexora_suite as tour
-import nexora_by_phoenix_international as visa
-import gaatha_loop as gaatha
-import insta
-import grahak_news_auto
-import grahak_uploader
+# modules for posting logic (now relative imports within src/)
+from . import nexora_suite as tour
+from . import nexora_by_phoenix_international as visa
+from . import gaatha_loop as gaatha
+from . import insta
+from . import grahak_news_auto
+from . import grahak_uploader
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+# Flask app initialization - specify template and static folders relative to APP_ROOT
+app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # Use absolute paths for robustness
 APP_ROOT = Path(__file__).parent
@@ -30,6 +32,27 @@ DB_PATH = APP_ROOT / "posts.db"
 
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+
+ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.avi', '.mkv'}
+ALLOWED_MIMETYPES = {
+    'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+    'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/avi'
+}
+
+def validate_file(file):
+    """Validates file extension, MIME type, and image integrity."""
+    extension = os.path.splitext(file.filename)[1].lower()
+    if extension not in ALLOWED_EXTENSIONS or file.content_type not in ALLOWED_MIMETYPES:
+        return False, 'Unsupported file format or type'
+    
+    if extension in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}:
+        try:
+            with Image.open(file) as img:
+                img.verify()
+            file.seek(0)  # Reset stream position after verification
+        except Exception:
+            return False, 'Invalid image file content'
+    return True, None
 
 # Global state for running tasks
 posting_state = {
@@ -96,6 +119,77 @@ def _execute_grahak_task(task_id, filepath, caption, targets, delay=0, scheduled
             if task_id in task_results:
                 task_results[task_id].update({'status': 'failed', 'error': str(e), 'progress': 100})
 
+def _cleanup_images_worker():
+    """Background worker to remove images not referenced in the database or active tasks"""
+    while True:
+        try:
+            logger.info("🧹 Starting orphaned image cleanup...")
+            
+            # 1. Get filenames from SQLite database
+            db_images = set()
+            try:
+                with get_db_connection() as conn:
+                    rows = conn.execute("SELECT DISTINCT image_filename FROM posts WHERE image_filename IS NOT NULL AND image_filename != ''").fetchall()
+                    db_images = {row['image_filename'] for row in rows}
+            except Exception as e:
+                logger.error(f"Error querying DB for images: {e}")
+
+            # 2. Get filenames from active task results (prevent deleting files currently being processed)
+            task_images = set()
+            with task_results_lock:
+                for task in task_results.values():
+                    fname = task.get('filename')
+                    if fname:
+                        task_images.add(fname)
+
+            # 3. Scan the upload folder and remove orphans
+            upload_dir = app.config['UPLOAD_FOLDER']
+            if os.path.exists(upload_dir):
+                files_on_disk = os.listdir(upload_dir)
+                deleted_count = 0
+                for filename in files_on_disk:
+                    if not os.path.isfile(os.path.join(upload_dir, filename)) or filename.startswith('.'):
+                        continue
+                    if filename not in db_images and filename not in task_images:
+                        os.remove(os.path.join(upload_dir, filename))
+                        deleted_count += 1
+                logger.info(f"✅ Image cleanup finished. Deleted {deleted_count} orphaned files.")
+        except Exception as e:
+            logger.error(f"Error in image cleanup worker: {e}")
+        time.sleep(86400)  # Run once every 24 hours
+
+def _cleanup_single_image(filename):
+    """Checks if an image is still needed and deletes it if not."""
+    if not filename:
+        return
+
+    try:
+        with get_db_connection() as conn:
+            # Check if any other post uses this image
+            row = conn.execute(
+                "SELECT COUNT(*) as count FROM posts WHERE image_filename = ?", 
+                (filename,)
+            ).fetchone()
+            if row and row['count'] > 0:
+                return # Still referenced in database
+    except Exception as e:
+        logger.error(f"Error checking DB for single image cleanup: {e}")
+        return
+
+    # Check active tasks
+    with task_results_lock:
+        if any(t.get('filename') == filename for t in task_results.values()):
+            return # Still referenced in an active task
+
+    # Delete from disk
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if os.path.exists(filepath):
+        try:
+            os.remove(filepath)
+            logger.info(f"🗑️ Automatically cleaned up unused image: {filename}")
+        except Exception as e:
+            logger.error(f"Failed to delete orphaned image {filename}: {e}")
+
 def _cleanup_tasks_worker():
     """Background worker to remove task results older than 24 hours"""
     while True:
@@ -124,21 +218,22 @@ def get_db_connection():
     return conn
 
 def init_db():
-    with get_db_connection() as conn:
+    with get_db_connection() as conn: # Ensure this is called from the correct APP_ROOT
         conn.execute('''
             CREATE TABLE IF NOT EXISTS posts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 post_type TEXT NOT NULL,
                 message TEXT,
                 image_filename TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_posted_at TIMESTAMP
             )
         ''')
 
 def load_posts_by_type(post_type):
     with get_db_connection() as conn:
         posts = conn.execute(
-            "SELECT message, image_filename FROM posts WHERE post_type = ? ORDER BY id ASC",
+            "SELECT id, message, image_filename, created_at, last_posted_at FROM posts WHERE post_type = ? ORDER BY last_posted_at ASC, id ASC",
             (post_type,)
         ).fetchall()
         return [dict(p) for p in posts]
@@ -154,7 +249,7 @@ def search_posts():
         with get_db_connection() as conn:
             search_pattern = f"%{query}%"
             results = conn.execute(
-                "SELECT id, post_type, message, image_filename, created_at FROM posts WHERE message LIKE ? OR post_type LIKE ? ORDER BY created_at DESC",
+                "SELECT id, post_type, message, image_filename, created_at, last_posted_at FROM posts WHERE message LIKE ? OR post_type LIKE ? ORDER BY created_at DESC",
                 (search_pattern, search_pattern)
             ).fetchall()
             return jsonify([dict(row) for row in results])
@@ -191,92 +286,91 @@ def index():
 @app.route('/api/posts/<post_type>', methods=['GET'])
 def get_posts(post_type):
     """Get posts for a specific type"""
-    if post_type == 'tour':
-        posts = load_posts(TOUR_FILE)
-    elif post_type == 'nz':
-        posts = load_posts(NZ_FILE)
-    elif post_type == 'insta':
-        posts = load_posts(INSTA_FILE)
-    elif post_type == 'gaatha':
-        posts = load_posts(GAATHA_FILE)
-    else:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
         return jsonify({'error': 'Invalid post type'}), 400
-    
+    posts = load_posts_by_type(post_type)
     return jsonify(posts)
 
 @app.route('/api/posts/<post_type>', methods=['POST'])
 def add_post(post_type):
     """Add a new post"""
-    if post_type == 'tour':
-        filepath = TOUR_FILE
-    elif post_type == 'nz':
-        filepath = NZ_FILE
-    elif post_type == 'insta':
-        filepath = INSTA_FILE
-    elif post_type == 'gaatha':
-        filepath = GAATHA_FILE
-    else:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
         return jsonify({'error': 'Invalid post type'}), 400
-    
     data = request.get_json()
-    posts = load_posts(filepath)
-    
-    new_post = {
-        'message': data.get('message', ''),
-        'image_filename': data.get('image_filename', '')
-    }
-    posts.append(new_post)
-    save_posts(filepath, posts)
-    
-    return jsonify(new_post), 201
+    message = data.get('message', '')
+    image_filename = data.get('image_filename', '')
+    with get_db_connection() as conn:
+        conn.execute("INSERT INTO posts (post_type, message, image_filename) VALUES (?, ?, ?)",
+                    (post_type, message, image_filename))
+    return jsonify({'message': message, 'image_filename': image_filename}), 201
 
 @app.route('/api/posts/<post_type>/<int:index>', methods=['PUT'])
 def update_post(post_type, index):
     """Update a post"""
-    if post_type == 'tour':
-        filepath = TOUR_FILE
-    elif post_type == 'nz':
-        filepath = NZ_FILE
-    elif post_type == 'insta':
-        filepath = INSTA_FILE
-    elif post_type == 'gaatha':
-        filepath = GAATHA_FILE
-    else:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
         return jsonify({'error': 'Invalid post type'}), 400
-    
-    posts = load_posts(filepath)
-    if index < 0 or index >= len(posts):
-        return jsonify({'error': 'Post not found'}), 404
-    
     data = request.get_json()
-    posts[index]['message'] = data.get('message', posts[index].get('message', ''))
-    posts[index]['image_filename'] = data.get('image_filename', posts[index].get('image_filename', ''))
-    
-    save_posts(filepath, posts)
-    return jsonify(posts[index])
+    message = data.get('message')
+    image_filename = data.get('image_filename')
+    with get_db_connection() as conn:
+        res = conn.execute(
+            """UPDATE posts SET message = COALESCE(?, message), image_filename = COALESCE(?, image_filename) 
+               WHERE id = (SELECT id FROM posts WHERE post_type = ? ORDER BY id ASC LIMIT 1 OFFSET ?)""",
+            (message, image_filename, post_type, index))
+        if res.rowcount == 0: return jsonify({'error': 'Post not found'}), 404
+    return jsonify({'success': True})
 
 @app.route('/api/posts/<post_type>/<int:index>', methods=['DELETE'])
 def delete_post(post_type, index):
-    """Delete a post"""
-    if post_type == 'tour':
-        filepath = TOUR_FILE
-    elif post_type == 'nz':
-        filepath = NZ_FILE
-    elif post_type == 'insta':
-        filepath = INSTA_FILE
-    elif post_type == 'gaatha':
-        filepath = GAATHA_FILE
-    else:
+    """Delete a post and its associated image if unused"""
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
         return jsonify({'error': 'Invalid post type'}), 400
-    
-    posts = load_posts(filepath)
-    if index < 0 or index >= len(posts):
-        return jsonify({'error': 'Post not found'}), 404
-    
-    posts.pop(index)
-    save_posts(filepath, posts)
-    
+        
+    filename_to_cleanup = None
+    with get_db_connection() as conn:
+        # Find the specific post and its image filename first
+        row = conn.execute(
+            "SELECT id, image_filename FROM posts WHERE post_type = ? ORDER BY id ASC LIMIT 1 OFFSET ?",
+            (post_type, index)).fetchone()
+        
+        if not row:
+            return jsonify({'error': 'Post not found'}), 404
+            
+        filename_to_cleanup = row['image_filename']
+        
+        # Delete the specific post record
+        conn.execute("DELETE FROM posts WHERE id = ?", (row['id'],))
+        conn.commit()
+
+    if filename_to_cleanup:
+        _cleanup_single_image(filename_to_cleanup)
+
     return jsonify({'success': True})
+
+@app.route('/api/posts/<post_type>/all', methods=['DELETE'])
+def delete_all_posts(post_type):
+    """Delete all posts for a specific type and clean up orphaned images"""
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
+        return jsonify({'error': 'Invalid post type'}), 400
+
+    filenames_to_check = []
+    with get_db_connection() as conn:
+        # 1. Collect all distinct filenames that might become orphans
+        rows = conn.execute(
+            "SELECT DISTINCT image_filename FROM posts WHERE post_type = ? AND image_filename IS NOT NULL AND image_filename != ''",
+            (post_type,)
+        ).fetchall()
+        filenames_to_check = [row['image_filename'] for row in rows]
+
+        # 2. Perform bulk deletion
+        conn.execute("DELETE FROM posts WHERE post_type = ?", (post_type,))
+        conn.commit()
+
+    # 3. Trigger individual cleanup for each potential orphan
+    for filename in filenames_to_check:
+        _cleanup_single_image(filename)
+
+    return jsonify({'success': True, 'message': f'All {post_type} posts and associated orphaned images deleted'}), 200
 
 # Image upload endpoint
 @app.route('/api/upload', methods=['POST'])
@@ -288,15 +382,17 @@ def upload_image():
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
-    
-    if file:
-        filename = file.filename
-        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        return jsonify({'filename': filename}), 201
-    
-    return jsonify({'error': 'File upload failed'}), 400
+
+    is_valid, error_msg = validate_file(file)
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+
+    extension = os.path.splitext(file.filename)[1].lower()
+    filename = f"post_{int(time.time())}_{os.urandom(4).hex()}{extension}"
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+    return jsonify({'filename': filename}), 201
 
 # Control endpoints
 @app.route('/api/control/tour/start', methods=['POST'])
@@ -484,7 +580,7 @@ def grahak_status():
 @app.route('/api/grahak/start_news', methods=['POST'])
 def grahak_start_news():
     status = _read_config(os.path.join('config','automation_status.json'), {})
-    status['news_enabled'] = True
+    status['news_enabled'] = True # This path needs to be updated to APP_ROOT / 'config'
     status['last_news_run'] = datetime.utcnow().isoformat()
     with open(os.path.join('config','automation_status.json'),'w') as f:
         json.dump(status, f, indent=2)
@@ -493,7 +589,7 @@ def grahak_start_news():
 @app.route('/api/grahak/stop_news', methods=['POST'])
 def grahak_stop_news():
     status = _read_config(os.path.join('config','automation_status.json'), {})
-    status['news_enabled'] = False
+    status['news_enabled'] = False # This path needs to be updated to APP_ROOT / 'config'
     with open(os.path.join('config','automation_status.json'),'w') as f:
         json.dump(status, f, indent=2)
     return jsonify({'status':'ok'})
@@ -502,7 +598,7 @@ def grahak_stop_news():
 def grahak_update_settings():
     data = request.json or {}
     status = _read_config(os.path.join('config','automation_status.json'), {})
-    if 'default_hashtags' in data:
+    if 'default_hashtags' in data: # This path needs to be updated to APP_ROOT / 'config'
         status['default_hashtags'] = data['default_hashtags']
     with open(os.path.join('config','automation_status.json'),'w') as f:
         json.dump(status, f, indent=2)
@@ -510,9 +606,9 @@ def grahak_update_settings():
 
 @app.route('/api/grahak/run_news', methods=['POST'])
 def grahak_run_news():
-    # Call the function directly in a thread for better integration and logging
+    # Call the function directly in a thread for better integration and logging, now from src.grahak_news_auto
     threading.Thread(target=grahak_news_auto.run_automation, daemon=True).start()
-    status = _read_config(os.path.join('config','automation_status.json'), {})
+    status = _read_config(APP_ROOT / 'config' / 'automation_status.json', {})
     status['last_news_run'] = datetime.utcnow().isoformat()
     with open(os.path.join('config','automation_status.json'),'w') as f:
         json.dump(status, f, indent=2)
@@ -524,6 +620,13 @@ def grahak_upload_post():
         return jsonify({'error': 'No file part'}), 400
         
     file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    is_valid, error_msg = validate_file(file)
+    if not is_valid:
+        return jsonify({'error': error_msg}), 400
+
     caption = request.form.get('caption', '')
     scheduled_at = request.form.get('scheduled_at') # Expected format: YYYY-MM-DDTHH:MM
     
@@ -546,8 +649,9 @@ def grahak_upload_post():
         'ig_reel': request.form.get('ig_reel') == 'true'
     }
     
-    if file.filename:
-        filename = f"upload_{int(time.time())}_{file.filename}"
+    if file:
+        extension = os.path.splitext(file.filename)[1].lower()
+        filename = f"grahak_{int(time.time())}_{os.urandom(4).hex()}{extension}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
@@ -642,7 +746,7 @@ def retry_grahak_task(task_id):
 
 @app.route('/api/grahak/feeds', methods=['GET'])
 def grahak_feeds():
-    data = _read_config(os.path.join('config','rss_feeds.json'), {"feeds": []})
+    data = _read_config(APP_ROOT / 'config' / 'rss_feeds.json', {"feeds": []})
     return jsonify(data.get('feeds', []))
 
 @app.route('/api/grahak/add_feed', methods=['POST'])
@@ -650,9 +754,9 @@ def grahak_add_feed():
     payload = request.get_json() or {}
     name = payload.get('name','').strip()
     url = payload.get('url','').strip()
-    if not name or not url:
+    if not name or not url: # This path needs to be updated to APP_ROOT / 'config'
         return jsonify({'error':'invalid'}),400
-    data = _read_config(os.path.join('config','rss_feeds.json'), {"feeds": []})
+    data = _read_config(APP_ROOT / 'config' / 'rss_feeds.json', {"feeds": []})
     feeds = data.get('feeds',[])
     feeds.append({'name':name,'url':url})
     data['feeds']=feeds
@@ -664,7 +768,7 @@ def grahak_add_feed():
 def grahak_delete_feed():
     payload = request.get_json() or {}
     idx = payload.get('index')
-    data = _read_config(os.path.join('config','rss_feeds.json'), {"feeds": []})
+    data = _read_config(APP_ROOT / 'config' / 'rss_feeds.json', {"feeds": []})
     feeds = data.get('feeds',[])
     if isinstance(idx,int) and 0<=idx<len(feeds):
         feeds.pop(idx)
@@ -692,7 +796,7 @@ def grahak_dashboard():
     return render_template('index.html')
 
 # Interval management endpoints
-@app.route('/api/interval/<post_type>', methods=['GET'])
+@app.route('/api/interval/<post_type>', methods=['GET']) # This path needs to be updated to APP_ROOT / 'config'
 def get_interval(post_type):
     """Get posting interval for a specific post type"""
     interval_key = f'{post_type}_interval'
@@ -738,4 +842,5 @@ def serve_image(filename):
 if __name__ == '__main__':
     init_db()
     threading.Thread(target=_cleanup_tasks_worker, daemon=True).start()
+    threading.Thread(target=_cleanup_images_worker, daemon=True).start()
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -6,10 +6,14 @@ from pathlib import Path
 ROOT = Path("/workspaces/postpilot")
 DB_PATH = ROOT / "posts.db"
 POSTS_DIR = ROOT / "posts"
+DB_PATH = ROOT / "src" / "posts.db" # Database is now in src/
+POSTS_DIR = ROOT / "posts" # JSON files for migration are assumed to be in root/posts/
 
 FILES = {
     'tour': POSTS_DIR / "tour_posts.json",
     'nz': POSTS_DIR / "visa_posts.json",
+    'tour': POSTS_DIR / "tour_posts.json", # Assuming these JSON files are still in root/posts/ for migration
+    'nz': POSTS_DIR / "visa_posts.json",   # If they are moved, update this path accordingly
     'insta': POSTS_DIR / "insta_posts.json",
     'gaatha': POSTS_DIR / "gaatha_posts.json"
 }
@@ -24,7 +28,8 @@ def migrate():
             post_type TEXT NOT NULL,
             message TEXT,
             image_filename TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_posted_at TIMESTAMP
         )
     ''')
     

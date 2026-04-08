@@ -28,3 +28,5 @@ gunicorn \
     --access-logfile - \
     --error-logfile - \
     app:app
+export FLASK_APP=src.app
+gunicorn -w $WORKERS -b 0.0.0.0:$PORT src.app:app
