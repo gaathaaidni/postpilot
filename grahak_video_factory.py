@@ -23,6 +23,9 @@ except ImportError:
 PAGE_ID = os.getenv('FB_PAGE_ID_GRAHAK_CHETNA') or '374211199112915'
 IG_USER_ID = os.getenv('INSTA_ID_GRAHAK_CHETNA')
 
+# Global Font Cache to reduce disk I/O
+_FONT_CACHE = {}
+
 # --- Language Helpers ---
 def _resolve_asset_path(*relative_parts):
     """Resolve static asset path across local/codespace environments."""
@@ -40,6 +43,10 @@ def _resolve_asset_path(*relative_parts):
 
 def _load_font(size, bold=False):
     """Load a scalable TrueType font."""
+    cache_key = (size, bold)
+    if cache_key in _FONT_CACHE:
+        return _FONT_CACHE[cache_key]
+
     # Common font paths
     candidates = [
         os.getenv("GRAHAK_FONT_PATH"),
@@ -49,12 +56,13 @@ def _load_font(size, bold=False):
     ]
     for path in candidates:
         if path and os.path.exists(path):
-            try: return ImageFont.truetype(path, size)
-            except: continue
-        # Try loading by name if path fails
-        try: return ImageFont.truetype(path, size)
-        except: continue
-            
+            try:
+                font = ImageFont.truetype(path, size)
+                _FONT_CACHE[cache_key] = font
+                return font
+            except:
+                continue
+
     return ImageFont.load_default()
 
 def _text_size(draw, text, font):
@@ -98,7 +106,7 @@ def generate_audio(text, lang='en', filename='temp_audio.mp3'):
         return None
 
 # --- 1. Video Generation (Your Code Integration) ---
-def generate_video_from_text(title, script, lang='en', background_image=None):
+def generate_video_from_text(title, script, lang='en', background_image=None, fps=5):
     """
     Generates a reel-style video from title and description.
     Returns the local file path of the generated video.
@@ -168,12 +176,15 @@ def generate_video_from_text(title, script, lang='en', background_image=None):
     _draw_logo_corner(img, draw, width)
 
     # Title (Wrapped in Rounded Rects)
-    lines = textwrap.wrap(title.strip(), width=15)[:5]
+    lines = textwrap.wrap(title.strip(), width=18)[:5]
     
     # Dynamic font sizing
-    font = _load_font(60, bold=True)
+    font_size = 60 if len(lines) < 3 else 48
+    font = _load_font(font_size, bold=True)
+    
     center_y = int(height * 0.60)
-    total_h = sum([_text_size(draw, line, font)[1] + 20 for line in lines])
+    line_heights = [_text_size(draw, line, font)[1] for line in lines]
+    total_h = sum(line_heights) + (len(lines) - 1) * 24
     y = center_y - total_h // 2
 
     for line in lines:
@@ -201,7 +212,7 @@ def generate_video_from_text(title, script, lang='en', background_image=None):
             image_clip = ImageClip(image_filename).set_duration(audio_clip.duration + 0.5)
             
             video = image_clip.set_audio(audio_clip)
-            video.write_videofile(output_filename, fps=1, codec="libx264", audio_codec="aac")
+            video.write_videofile(output_filename, fps=fps, codec="libx264", audio_codec="aac", logger=None)
             
             # Cleanup
             os.remove(image_filename)
@@ -209,6 +220,11 @@ def generate_video_from_text(title, script, lang='en', background_image=None):
             
         except Exception as e:
             print(f"❌ Video encoding failed: {e}")
+            # Ensure cleanup on failure
+            for f in [image_filename, audio_file]:
+                if f and os.path.exists(f):
+                    try: os.remove(f)
+                    except: pass
             return None
     else:
         print("⚠️ MoviePy missing, returning image only.")

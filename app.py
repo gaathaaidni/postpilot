@@ -2,6 +2,7 @@ import json
 import threading
 import os
 import time
+import sqlite3
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import logging
 from pathlib import Path
@@ -14,6 +15,7 @@ import nexora_suite as tour
 import nexora_by_phoenix_international as visa
 import gaatha_loop as gaatha
 import insta
+import grahak_news_auto
 import grahak_uploader
 
 logging.basicConfig(level=logging.INFO)
@@ -24,15 +26,10 @@ app = Flask(__name__)
 # Use absolute paths for robustness
 APP_ROOT = Path(__file__).parent
 UPLOAD_FOLDER = APP_ROOT / 'images'
-POSTS_DIR = APP_ROOT / "posts"
+DB_PATH = APP_ROOT / "posts.db"
 
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-
-NZ_FILE = POSTS_DIR / "visa_posts.json"
-TOUR_FILE = POSTS_DIR / "tour_posts.json"
-INSTA_FILE = POSTS_DIR / "insta_posts.json"
-GAATHA_FILE = POSTS_DIR / "gaatha_posts.json"
 
 # Global state for running tasks
 posting_state = {
@@ -66,6 +63,12 @@ posting_state_lock = threading.Lock() # Lock for thread-safe access to posting_s
 def _execute_grahak_task(task_id, filepath, caption, targets, delay=0, scheduled_at=None):
     """Shared background logic for executing Grahak Chetna upload tasks."""
     try:
+        if not os.path.exists(filepath):
+            logger.error(f"❌ File not found for task {task_id}: {filepath}")
+            with task_results_lock:
+                task_results[task_id].update({'status': 'failed', 'error': 'Source file missing'})
+            return
+
         if delay > 0:
             with task_results_lock:
                 if task_id in task_results:
@@ -115,19 +118,49 @@ PHOENIX_PAGE_ID = os.getenv('FB_PAGE_ID_PHOENIX', '954901604381882')
 PHOENIX_IG_ID = os.getenv('INSTA_ID_PHOENIX', '17841472248438802')
 insta_phoenix = insta.InstaSync(PHOENIX_PAGE_ID, PHOENIX_IG_ID, 'insta_phoenix')
 
-def load_posts(filepath):
-    """Load posts from JSON file"""
-    try:
-        with open(filepath, 'r') as f:
-            return json.load(f)
-    except:
-        return []
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-def save_posts(filepath, posts):
-    """Save posts to JSON file"""
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, 'w') as f:
-        json.dump(posts, f, indent=2)
+def init_db():
+    with get_db_connection() as conn:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                post_type TEXT NOT NULL,
+                message TEXT,
+                image_filename TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+def load_posts_by_type(post_type):
+    with get_db_connection() as conn:
+        posts = conn.execute(
+            "SELECT message, image_filename FROM posts WHERE post_type = ? ORDER BY id ASC",
+            (post_type,)
+        ).fetchall()
+        return [dict(p) for p in posts]
+
+@app.route('/api/search', methods=['GET'])
+def search_posts():
+    """Search posts by keyword in message or post_type."""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify([])
+
+    try:
+        with get_db_connection() as conn:
+            search_pattern = f"%{query}%"
+            results = conn.execute(
+                "SELECT id, post_type, message, image_filename, created_at FROM posts WHERE message LIKE ? OR post_type LIKE ? ORDER BY created_at DESC",
+                (search_pattern, search_pattern)
+            ).fetchall()
+            return jsonify([dict(row) for row in results])
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        return jsonify({'error': 'Search failed'}), 500
 
 def update_posting_status(post_type, is_running, message='', current_post=None):
     """Update posting status for a specific post type"""
@@ -477,8 +510,8 @@ def grahak_update_settings():
 
 @app.route('/api/grahak/run_news', methods=['POST'])
 def grahak_run_news():
-    # run script directly
-    threading.Thread(target=lambda: os.system('python3 grahak_news_auto.py'), daemon=True).start()
+    # Call the function directly in a thread for better integration and logging
+    threading.Thread(target=grahak_news_auto.run_automation, daemon=True).start()
     status = _read_config(os.path.join('config','automation_status.json'), {})
     status['last_news_run'] = datetime.utcnow().isoformat()
     with open(os.path.join('config','automation_status.json'),'w') as f:
@@ -703,5 +736,6 @@ def serve_image(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
+    init_db()
     threading.Thread(target=_cleanup_tasks_worker, daemon=True).start()
     app.run(debug=True, host='0.0.0.0', port=5000)

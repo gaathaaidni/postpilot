@@ -1,20 +1,24 @@
 import os
-import json
 import random
+import sqlite3
 import time
 import facebook_api
 import insta
 
-def load_posts(filepath):
-    """Safely load posts from a JSON file."""
-    if not os.path.exists(filepath):
-        print(f"⚠️ Posts file not found: {filepath}")
-        return []
+DB_PATH = os.path.join(os.path.dirname(__file__), "posts.db")
+
+def load_posts(post_type):
+    """Safely load posts from SQLite database."""
     try:
-        with open(filepath, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError) as e:
-        print(f"❌ Error loading posts from {filepath}: {e}")
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        posts = conn.execute(
+            "SELECT message, image_filename FROM posts WHERE post_type = ? ORDER BY id ASC",
+            (post_type,)).fetchall()
+        conn.close()
+        return [dict(p) for p in posts]
+    except Exception as e:
+        print(f"❌ Error loading posts for {post_type}: {e}")
         return []
 
 def post_on_facebook(message, image_filename, page_id, access_token, image_folder="images"):

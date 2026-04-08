@@ -9,6 +9,12 @@ logger = logging.getLogger(__name__)
 # Configuration for API requests
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 2  # seconds
+FB_API_VERSION = "v19.0"
+BASE_URL = f"https://graph.facebook.com/{FB_API_VERSION}"
+
+class FacebookAPIError(Exception):
+    """Custom exception for Facebook Graph API errors."""
+    pass
 
 def get_access_token():
     """
@@ -52,7 +58,7 @@ def get_page_token(user_token, page_id):
         logger.error("No user token provided to get_page_token.")
         return None
     try:
-        url = f"https://graph.facebook.com/v19.0/me/accounts"
+        url = f"{BASE_URL}/me/accounts"
         params = {"access_token": user_token}
         resp = requests.get(url, params=params).json()
         if 'data' in resp:
@@ -64,6 +70,30 @@ def get_page_token(user_token, page_id):
         return None
     except Exception as e:
         logger.error(f"Exception in get_page_token for page {page_id}: {e}")
+        return None
+
+def get_token_info(token):
+    """
+    Debug helper to check token validity, scopes, and expiration.
+    Essential for determining if a token needs manual re-authentication.
+    """
+    url = f"{BASE_URL}/debug_token"
+    params = {
+        "input_token": token,
+        "access_token": token
+    }
+    try:
+        resp = requests.get(url, params=params)
+        res_json = resp.json()
+        if 'data' in res_json:
+            data = res_json['data']
+            status = "VALID" if data.get('is_valid') else "INVALID"
+            expires = data.get('data_access_expires_at', 'Never')
+            logger.info(f"Token Check [{status}]: Expires: {expires}, Scopes: {data.get('scopes')}")
+            return data
+        return None
+    except Exception as e:
+        logger.error(f"Failed to debug token: {e}")
         return None
 
 def _is_rate_limited(response_json, status_code):
