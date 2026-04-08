@@ -5,6 +5,7 @@ Run: python verify_token.py
 import os
 import requests
 import datetime
+import json
 
 def load_token():
     # Priority: Env Var > .env > token.txt
@@ -33,6 +34,18 @@ def load_token():
         except Exception:
             pass
     return None
+
+def print_rate_limits(headers):
+    """Parses and prints FB Rate Limit headers."""
+    # App-level usage
+    app_usage = headers.get('x-app-usage')
+    if app_usage:
+        try:
+            usage = json.loads(app_usage)
+            print(f"\n📈 App Rate Limit Usage:")
+            print(f"   Call Count: {usage.get('call_count')}% | CPU: {usage.get('total_cputime')}% | Time: {usage.get('total_time')}%")
+        except Exception:
+            print(f"\n📈 App Rate Limit Usage: {app_usage}")
 
 def main():
     token = load_token()
@@ -94,6 +107,11 @@ def main():
             print(f"\n❌ Token is INVALID")
             if 'error' in data:
                 print(f"   Reason: {data['error'].get('message')}")
+
+        # Secondary check for Rate Limits by hitting a data endpoint
+        me_url = "https://graph.facebook.com/v19.0/me"
+        me_res = requests.get(me_url, params={'access_token': token})
+        print_rate_limits(me_res.headers)
 
     except Exception as e:
         print(f"❌ Network Error: {e}")

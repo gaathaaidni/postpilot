@@ -3,6 +3,7 @@ import threading
 import os
 import time
 from flask import Flask, render_template, jsonify, request, send_from_directory
+import logging
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -15,6 +16,8 @@ import gaatha_loop as gaatha
 import insta
 import grahak_uploader
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -54,6 +57,23 @@ posting_state = {
     'gaatha_interval': 30 * 60,
     'insta_interval': 3 * 60
 }
+
+# Track outcomes of background tasks
+task_results = {}
+task_results_lock = threading.Lock() # Lock for thread-safe access to task_results
+
+def _cleanup_tasks_worker():
+    """Background worker to remove task results older than 24 hours"""
+    while True:
+        now = time.time()
+        # 86400 seconds = 24 hours
+        cutoff = now - 86400
+        
+        with task_results_lock: # Protect access to task_results
+            expired_tasks = [tid for tid, info in task_results.items() if info.get('created_at', 0) < cutoff]
+            for tid in expired_tasks:
+                task_results.pop(tid, None)
+        time.sleep(3600)  # Run cleanup every hour
 
 # Initialize Insta Sync Objects
 SUITE_PAGE_ID = os.getenv('FB_PAGE_ID_SUITE', '967550829768297')
@@ -452,11 +472,55 @@ def grahak_upload_post():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        # Process in background? For now, run sync to return results
-        results = grahak_uploader.process_upload(filepath, caption, targets)
-        return jsonify({'status': 'completed', 'results': results})
+        task_id = f"task_{int(time.time())}_{os.urandom(4).hex()}"
+        with task_results_lock: # Protect initial write
+            task_results[task_id] = {
+                'status': 'processing', 
+                'filename': filename,
+                'created_at': time.time(),
+                'progress': 0 # Initialize progress
+            }
+
+        def background_upload():
+            try:
+                logger.info(f"🚀 Starting background upload for {filename} (ID: {task_id})")
+                
+                def on_update(update_info): # Callback now receives a dict with status, progress, and results
+                    with task_results_lock: # Protect updates from the background thread
+                        current_task_info = task_results.get(task_id, {})
+                        current_task_info.update(update_info)
+                        if update_info.get('status') == 'Upload process completed':
+                            current_task_info['status'] = 'completed' # Final status
+                            current_task_info['completed_at'] = datetime.utcnow().isoformat()
+                        task_results[task_id] = current_task_info
+
+                grahak_uploader.process_upload(filepath, caption, targets, callback=on_update)
+                logger.info(f"✅ Background upload finished for {task_id}")
+            except Exception as e:
+                logger.error(f"❌ Unhandled exception in grahak_uploader thread: {e}", exc_info=True)
+                with task_results_lock: # Protect write on failure
+                    task_results[task_id] = {'status': 'failed', 'error': str(e), 'progress': 100}
+
+        # Run in a background thread to prevent UI timeout
+        thread = threading.Thread(target=background_upload, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'status': 'queued',
+            'task_id': task_id,
+            'message': 'Upload started in background.'
+        }), 202
     
     return jsonify({'error': 'No filename'}), 400
+
+@app.route('/api/grahak/task/<task_id>', methods=['GET'])
+def get_grahak_task_status(task_id):
+    """Get the result of a specific background upload task"""
+    with task_results_lock: # Protect read
+        result = task_results.get(task_id)
+    if not result:
+        return jsonify({'error': 'Task not found'}), 404
+    return jsonify(result)
 
 @app.route('/api/grahak/feeds', methods=['GET'])
 def grahak_feeds():
@@ -554,4 +618,5 @@ def serve_image(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 if __name__ == '__main__':
+    threading.Thread(target=_cleanup_tasks_worker, daemon=True).start()
     app.run(debug=True, host='0.0.0.0', port=5000)

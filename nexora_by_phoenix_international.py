@@ -1,42 +1,17 @@
 # nz_thread.py
-import requests, time, random, os, json
+import time, random, os, json
 from threading import Event
-import insta
+import facebook_api
+import insta # Still used for cross-posting
 
 stop_event = Event()
 status_callback = None
 current_interval = 30 * 60  # Default to 30 minutes
 
-def get_access_token():
-    """Read user access token from env, then token.txt fallback."""
-    return os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN') or _read_token_file()
-
-
-def _read_token_file():
-    try:
-        with open('token.txt', 'r') as f:
-            return f.read().strip()
-    except:
-        return None
-
-ACCESS_TOKEN = get_access_token()
+ACCESS_TOKEN = facebook_api.get_access_token()
 PAGE_ID = os.getenv('FB_PAGE_ID_NEXORA_BY_PHOENIX_INTERNATIONAL') or os.getenv('FB_PAGE_ID_NEXORA_BY_PHOENIX') or '954901604381882'  # Nexora by Phoenix International page
 IMAGE_FOLDER = "images"
-FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos"
 POSTS_FILE = "posts/visa_posts.json"
-
-def get_page_token():
-    """Fetch page token from user token"""
-    try:
-        url = f"https://graph.facebook.com/v19.0/me/accounts?access_token={ACCESS_TOKEN}"
-        res = requests.get(url).json()
-        if 'data' in res:
-            for page in res['data']:
-                if page.get('id') == PAGE_ID:
-                    return page.get('access_token')
-        return None
-    except:
-        return None
 
 def load_posts():
     with open(POSTS_FILE, 'r') as f:
@@ -68,16 +43,17 @@ def post_on_facebook(message, image_filename):
         return False
 
     try:
-        # Upload the image file directly to Facebook (multipart upload)
-        page_token = get_page_token()
+        page_token = facebook_api.get_page_token(ACCESS_TOKEN, PAGE_ID)
         if not page_token:
             print("❌ Failed: Could not get page token")
             return False
 
+        FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/photos" # Define here as it uses PAGE_ID
+        # Upload the image file directly to Facebook (multipart upload)
         with open(path, 'rb') as img:
             files = {'source': (image_filename, img, 'image/jpeg')}
             data = {"caption": message, "access_token": page_token}
-            res = requests.post(FB_API_URL, files=files, data=data).json()
+            res = facebook_api._request_with_retry("POST", FB_API_URL, files=files, data=data)
 
         if 'error' in res:
             error_msg = res['error'].get('message', 'Unknown error')
@@ -87,7 +63,7 @@ def post_on_facebook(message, image_filename):
         photo_id = res.get('id')
         image_url = None
         if photo_id:
-            info = requests.get(f"https://graph.facebook.com/v19.0/{photo_id}?fields=images&access_token={page_token}").json()
+            info = facebook_api._request_with_retry("GET", f"https://graph.facebook.com/v19.0/{photo_id}?fields=images&access_token={page_token}")
             images = info.get('images') or []
             if images:
                 image_url = images[0].get('source')
