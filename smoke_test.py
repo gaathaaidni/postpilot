@@ -98,18 +98,6 @@ def test_grahak_uploader():
         print(f"   - CRITICAL ERROR: {e}")
         print_result("Grahak Uploader", False)
 
-def test_grahak_news_auto():
-    print_header("Grahak News Auto (Text Post)")
-    try:
-        import grahak_news_auto
-        print("   - Running news automation...")
-        print("   - ⚠️ WARNING: This will attempt a REAL post.")
-        grahak_news_auto.run_automation()
-        print_result("Grahak News Auto", True) # Assumes success if no exception
-    except Exception as e:
-        print(f"   - CRITICAL ERROR: {e}")
-        print_result("Grahak News Auto", False)
-
 def main():
     print("🔥 PostPilot Application Smoke Test 🔥")
     
@@ -121,7 +109,6 @@ def main():
     test_module("Nexora Phoenix (Visa)", "post_on_facebook", "nexora_by_phoenix_international.py")
     test_module("Gaatha AI", "post_to_facebook", "gaatha_loop.py")
     test_grahak_uploader()
-    test_grahak_news_auto()
     
     print("\nSmoke test complete. Review the output for any 'FAILED' or 'CRITICAL ERROR' messages.")
 

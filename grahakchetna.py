@@ -80,7 +80,7 @@ def run_grahakchetna():
     posts = load_posts()
     if not posts:
         if status_callback:
-            status_callback('grahakchetna', False, "Idle (No posts found)", None)
+            status_callback('grahak', False, "Idle (No posts found)", None)
         return
 
     random.shuffle(posts)
@@ -92,11 +92,11 @@ def run_grahakchetna():
             post_count += 1
             current_post_summary = f"{post['message'][:50]}..." if len(post.get('message', '')) > 50 else post.get('message', 'No message')
             if status_callback:
-                status_callback('grahakchetna', True, f"Posting... (Post #{post_count})", current_post_summary)
+                status_callback('grahak', True, f"Posting... (Post #{post_count})", current_post_summary)
             success = post_on_facebook(post["message"], post["image_filename"])
             if status_callback:
                 status = "Posted" if success else "Failed"
-                status_callback('grahakchetna', True, status, None)
+                status_callback('grahak', True, status, None)
             time.sleep(current_interval)
 
 def stop_grahakchetna():

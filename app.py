@@ -16,8 +16,7 @@ import nexora_suite as tour
 import nexora_by_phoenix_international as visa
 import gaatha_loop as gaatha
 import insta
-import grahak_news_auto
-import grahak_uploader
+import grahakchetna as grahak
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -61,63 +60,28 @@ posting_state = {
     'gaatha_running': False,
     'insta_suite_running': False,
     'insta_phoenix_running': False,
+    'grahak_running': False,
     # Threads store
     'threads': {},
     'tour_status': '',
     'nz_status': '',
     'insta_status': '',
+    'grahak_status': '',
     'tour_current_post': None,
     'nz_current_post': None,
     'insta_current_post': None,
+    'grahak_current_post': None,
     'gaatha_status': '',
     'gaatha_current_post': None,
     # Intervals
     'tour_interval': 30 * 60,  # 30 minutes in seconds
     'nz_interval': 30 * 60,
     'gaatha_interval': 30 * 60,
+    'grahak_interval': 30 * 60,
     'insta_interval': 3 * 60
 }
 
-# Track outcomes of background tasks
-task_results = {}
-task_results_lock = threading.Lock() # Lock for thread-safe access to task_results
 posting_state_lock = threading.Lock() # Lock for thread-safe access to posting_state
-
-def _execute_grahak_task(task_id, filepath, caption, targets, delay=0, scheduled_at=None):
-    """Shared background logic for executing Grahak Chetna upload tasks."""
-    try:
-        if not os.path.exists(filepath):
-            logger.error(f"❌ File not found for task {task_id}: {filepath}")
-            with task_results_lock:
-                task_results[task_id].update({'status': 'failed', 'error': 'Source file missing'})
-            return
-
-        if delay > 0:
-            with task_results_lock:
-                if task_id in task_results:
-                    task_results[task_id]['status'] = 'scheduled'
-            
-            logger.info(f"⏰ Task {task_id} scheduled for {scheduled_at}. Waiting {int(delay)} seconds...")
-            time.sleep(delay)
-
-        logger.info(f"🚀 Starting background upload for task ID: {task_id}")
-        
-        def on_update(update_info):
-            with task_results_lock:
-                current_task_info = task_results.get(task_id, {})
-                current_task_info.update(update_info)
-                if update_info.get('status') == 'Upload process completed':
-                    current_task_info['status'] = 'completed'
-                    current_task_info['completed_at'] = datetime.utcnow().isoformat()
-                task_results[task_id] = current_task_info
-
-        grahak_uploader.process_upload(filepath, caption, targets, callback=on_update)
-        logger.info(f"✅ Background upload finished for {task_id}")
-    except Exception as e:
-        logger.error(f"❌ Unhandled exception in grahak task {task_id}: {e}", exc_info=True)
-        with task_results_lock:
-            if task_id in task_results:
-                task_results[task_id].update({'status': 'failed', 'error': str(e), 'progress': 100})
 
 def _cleanup_images_worker():
     """Background worker to remove images not referenced in the database or active tasks"""
@@ -134,15 +98,7 @@ def _cleanup_images_worker():
             except Exception as e:
                 logger.error(f"Error querying DB for images: {e}")
 
-            # 2. Get filenames from active task results (prevent deleting files currently being processed)
-            task_images = set()
-            with task_results_lock:
-                for task in task_results.values():
-                    fname = task.get('filename')
-                    if fname:
-                        task_images.add(fname)
-
-            # 3. Scan the upload folder and remove orphans
+            # 2. Scan the upload folder and remove orphans
             upload_dir = app.config['UPLOAD_FOLDER']
             if os.path.exists(upload_dir):
                 files_on_disk = os.listdir(upload_dir)
@@ -150,7 +106,7 @@ def _cleanup_images_worker():
                 for filename in files_on_disk:
                     if not os.path.isfile(os.path.join(upload_dir, filename)) or filename.startswith('.'):
                         continue
-                    if filename not in db_images and filename not in task_images:
+                    if filename not in db_images:
                         os.remove(os.path.join(upload_dir, filename))
                         deleted_count += 1
                 logger.info(f"✅ Image cleanup finished. Deleted {deleted_count} orphaned files.")
@@ -176,11 +132,6 @@ def _cleanup_single_image(filename):
         logger.error(f"Error checking DB for single image cleanup: {e}")
         return
 
-    # Check active tasks
-    with task_results_lock:
-        if any(t.get('filename') == filename for t in task_results.values()):
-            return # Still referenced in an active task
-
     # Delete from disk
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if os.path.exists(filepath):
@@ -189,19 +140,6 @@ def _cleanup_single_image(filename):
             logger.info(f"🗑️ Automatically cleaned up unused image: {filename}")
         except Exception as e:
             logger.error(f"Failed to delete orphaned image {filename}: {e}")
-
-def _cleanup_tasks_worker():
-    """Background worker to remove task results older than 24 hours"""
-    while True:
-        now = time.time()
-        # 86400 seconds = 24 hours
-        cutoff = now - 86400
-        
-        with task_results_lock: # Protect access to task_results
-            expired_tasks = [tid for tid, info in task_results.items() if info.get('created_at', 0) < cutoff]
-            for tid in expired_tasks:
-                task_results.pop(tid, None)
-        time.sleep(3600)  # Run cleanup every hour
 
 # Initialize Insta Sync Objects
 SUITE_PAGE_ID = os.getenv('FB_PAGE_ID_SUITE', '967550829768297')
@@ -286,7 +224,7 @@ def index():
 @app.route('/api/posts/<post_type>', methods=['GET'])
 def get_posts(post_type):
     """Get posts for a specific type"""
-    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha', 'grahak']:
         return jsonify({'error': 'Invalid post type'}), 400
     posts = load_posts_by_type(post_type)
     return jsonify(posts)
@@ -294,7 +232,7 @@ def get_posts(post_type):
 @app.route('/api/posts/<post_type>', methods=['POST'])
 def add_post(post_type):
     """Add a new post"""
-    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha', 'grahak']:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json()
     message = data.get('message', '')
@@ -307,7 +245,7 @@ def add_post(post_type):
 @app.route('/api/posts/<post_type>/<int:index>', methods=['PUT'])
 def update_post(post_type, index):
     """Update a post"""
-    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha', 'grahak']:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json()
     message = data.get('message')
@@ -323,7 +261,7 @@ def update_post(post_type, index):
 @app.route('/api/posts/<post_type>/<int:index>', methods=['DELETE'])
 def delete_post(post_type, index):
     """Delete a post and its associated image if unused"""
-    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha', 'grahak']:
         return jsonify({'error': 'Invalid post type'}), 400
         
     filename_to_cleanup = None
@@ -350,7 +288,7 @@ def delete_post(post_type, index):
 @app.route('/api/posts/<post_type>/all', methods=['DELETE'])
 def delete_all_posts(post_type):
     """Delete all posts for a specific type and clean up orphaned images"""
-    if post_type not in ['tour', 'nz', 'insta', 'gaatha']:
+    if post_type not in ['tour', 'nz', 'insta', 'gaatha', 'grahak']:
         return jsonify({'error': 'Invalid post type'}), 400
 
     filenames_to_check = []
@@ -473,6 +411,32 @@ def stop_gaatha():
         return jsonify({'status': 'Gaatha posting stopped'}), 200
     return jsonify({'status': 'Gaatha not running'}), 200
 
+# --- GRAHAK ENDPOINTS ---
+@app.route('/api/control/grahak/start', methods=['POST'])
+def start_grahak():
+    """Start Grahak Chetna posting"""
+    if not posting_state['grahak_running']:
+        grahak.set_status_callback(update_posting_status)
+        grahak.set_interval(posting_state['grahak_interval'])
+        grahak.stop_event.clear()
+        thread = threading.Thread(target=grahak.run_grahakchetna, daemon=True)
+        thread.start()
+        posting_state['threads']['grahak'] = thread
+        posting_state['grahak_running'] = True
+        update_posting_status('grahak', True, 'Starting...', None)
+        return jsonify({'status': 'Grahak posting started'}), 200
+    return jsonify({'status': 'Grahak already running'}), 200
+
+@app.route('/api/control/grahak/stop', methods=['POST'])
+def stop_grahak():
+    """Stop Grahak Chetna posting"""
+    if posting_state['grahak_running']:
+        grahak.stop_grahakchetna()
+        posting_state['grahak_running'] = False
+        update_posting_status('grahak', False, '', None)
+        return jsonify({'status': 'Grahak posting stopped'}), 200
+    return jsonify({'status': 'Grahak not running'}), 200
+
 
 # --- INSTA SYNC ENDPOINTS (Split) ---
 
@@ -519,6 +483,7 @@ def start_all():
     start_tour()
     start_nz()
     start_gaatha()
+    start_grahak()
     start_insta()
     return jsonify({'status': 'All tasks started'}), 200
 
@@ -528,6 +493,7 @@ def stop_all():
     stop_tour()
     stop_nz()
     stop_gaatha()
+    stop_grahak()
     stop_insta()
     return jsonify({'status': 'All tasks stopped'}), 200
 
@@ -538,264 +504,24 @@ def get_status():
         'tour_running': posting_state['tour_running'],
         'nz_running': posting_state['nz_running'],
         'gaatha_running': posting_state['gaatha_running'],
+        'grahak_running': posting_state['grahak_running'],
         'insta_running': posting_state['insta_suite_running'] or posting_state['insta_phoenix_running'],
         'tour_status': posting_state['tour_status'],
         'nz_status': posting_state['nz_status'],
         'gaatha_status': posting_state['gaatha_status'],
+        'grahak_status': posting_state['grahak_status'],
         'insta_status': posting_state['insta_status'],
         'tour_current_post': posting_state['tour_current_post'],
         'nz_current_post': posting_state['nz_current_post'],
         'gaatha_current_post': posting_state['gaatha_current_post'],
+        'grahak_current_post': posting_state['grahak_current_post'],
         'insta_current_post': posting_state['insta_current_post'],
         'tour_interval': posting_state['tour_interval'],
         'nz_interval': posting_state['nz_interval'],
         'gaatha_interval': posting_state['gaatha_interval'],
+        'grahak_interval': posting_state['grahak_interval'],
         'insta_interval': posting_state['insta_interval']
     })
-
-
-# --- GrahakChetna endpoints ---
-
-def _read_config(path, default):
-    try:
-        with open(path, 'r') as f:
-            return json.load(f)
-    except:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w') as f:
-            json.dump(default, f, indent=2)
-        return default
-
-@app.route('/api/grahak/status', methods=['GET'])
-def grahak_status():
-    status = _read_config(os.path.join('config','automation_status.json'), {
-        "news_enabled": True,
-        "last_news_run": "",
-        "last_news_post": "",
-        "default_hashtags": "#GrahakChetna #News"
-    })
-    with task_results_lock:
-        status['scheduled_count'] = sum(1 for t in task_results.values() if t.get('status') == 'scheduled')
-    return jsonify(status)
-
-@app.route('/api/grahak/start_news', methods=['POST'])
-def grahak_start_news():
-    status = _read_config(os.path.join('config','automation_status.json'), {})
-    status['news_enabled'] = True # This path needs to be updated to APP_ROOT / 'config'
-    status['last_news_run'] = datetime.utcnow().isoformat()
-    with open(os.path.join('config','automation_status.json'),'w') as f:
-        json.dump(status, f, indent=2)
-    return jsonify({'status':'ok'})
-
-@app.route('/api/grahak/stop_news', methods=['POST'])
-def grahak_stop_news():
-    status = _read_config(os.path.join('config','automation_status.json'), {})
-    status['news_enabled'] = False # This path needs to be updated to APP_ROOT / 'config'
-    with open(os.path.join('config','automation_status.json'),'w') as f:
-        json.dump(status, f, indent=2)
-    return jsonify({'status':'ok'})
-
-@app.route('/api/grahak/update_settings', methods=['POST'])
-def grahak_update_settings():
-    data = request.json or {}
-    status = _read_config(os.path.join('config','automation_status.json'), {})
-    if 'default_hashtags' in data: # This path needs to be updated to APP_ROOT / 'config'
-        status['default_hashtags'] = data['default_hashtags']
-    with open(os.path.join('config','automation_status.json'),'w') as f:
-        json.dump(status, f, indent=2)
-    return jsonify({'status':'updated'})
-
-@app.route('/api/grahak/run_news', methods=['POST'])
-def grahak_run_news():
-    # Call the function directly in a thread for better integration and logging, now from src.grahak_news_auto
-    threading.Thread(target=grahak_news_auto.run_automation, daemon=True).start()
-    status = _read_config(APP_ROOT / 'config' / 'automation_status.json', {})
-    status['last_news_run'] = datetime.utcnow().isoformat()
-    with open(os.path.join('config','automation_status.json'),'w') as f:
-        json.dump(status, f, indent=2)
-    return jsonify({'status':'started'})
-
-@app.route('/api/grahak/upload_post', methods=['POST'])
-def grahak_upload_post():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'No file selected'}), 400
-
-    is_valid, error_msg = validate_file(file)
-    if not is_valid:
-        return jsonify({'error': error_msg}), 400
-
-    caption = request.form.get('caption', '')
-    scheduled_at = request.form.get('scheduled_at') # Expected format: YYYY-MM-DDTHH:MM
-    
-    delay = 0
-    if scheduled_at:
-        try:
-            # Parse the datetime-local string
-            target_time = datetime.strptime(scheduled_at, '%Y-%m-%dT%H:%M')
-            delay = (target_time - datetime.now()).total_seconds()
-            if delay < 0:
-                delay = 0
-        except ValueError:
-            logger.warning(f"Invalid schedule format received: {scheduled_at}")
-    
-    # Parse checkbox flags
-    targets = {
-        'fb_feed': request.form.get('fb_feed') == 'true',
-        'fb_story': request.form.get('fb_story') == 'true',
-        'ig_feed': request.form.get('ig_feed') == 'true',
-        'ig_reel': request.form.get('ig_reel') == 'true'
-    }
-    
-    if file:
-        extension = os.path.splitext(file.filename)[1].lower()
-        filename = f"grahak_{int(time.time())}_{os.urandom(4).hex()}{extension}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        task_id = f"task_{int(time.time())}_{os.urandom(4).hex()}"
-        with task_results_lock: # Protect initial write
-            task_results[task_id] = {
-                'status': 'processing', 
-                'filename': filename,
-                'filepath': filepath,
-                'caption': caption,
-                'targets': targets,
-                'scheduled_at': scheduled_at if delay > 0 else None,
-                'created_at': time.time(),
-                'progress': 0 # Initialize progress
-            }
-
-        # Run helper in background thread
-        thread = threading.Thread(
-            target=_execute_grahak_task, 
-            args=(task_id, filepath, caption, targets, delay, scheduled_at),
-            daemon=True
-        )
-        thread.start()
-        
-        return jsonify({
-            'status': 'queued',
-            'task_id': task_id,
-            'message': 'Upload started in background.'
-        }), 202
-    
-    return jsonify({'error': 'No filename'}), 400
-
-@app.route('/api/grahak/task/<task_id>', methods=['GET'])
-def get_grahak_task_status(task_id):
-    """Get the result of a specific background upload task"""
-    with task_results_lock: # Protect read
-        result = task_results.get(task_id)
-    if not result:
-        return jsonify({'error': 'Task not found'}), 404
-    return jsonify(result)
-
-@app.route('/api/grahak/tasks', methods=['GET'])
-def list_grahak_tasks():
-    """List all background tasks for management"""
-    with task_results_lock:
-        return jsonify(task_results)
-
-@app.route('/api/grahak/task/<task_id>', methods=['DELETE'])
-def delete_grahak_task(task_id):
-    """Cancel/Delete a background task"""
-    with task_results_lock:
-        if task_id in task_results:
-            task_results.pop(task_id)
-            return jsonify({'status': 'deleted'})
-    return jsonify({'error': 'Task not found'}), 404
-
-@app.route('/api/grahak/task/<task_id>/retry', methods=['POST'])
-def retry_grahak_task(task_id):
-    """Re-attempt a failed background upload task"""
-    with task_results_lock:
-        old_task = task_results.get(task_id)
-    
-    if not old_task:
-        return jsonify({'error': 'Task not found'}), 404
-    
-    filepath = old_task.get('filepath')
-    caption = old_task.get('caption')
-    targets = old_task.get('targets')
-    filename = old_task.get('filename')
-
-    if not filepath or not os.path.exists(filepath):
-        return jsonify({'error': 'Original file no longer exists on server'}), 400
-
-    new_task_id = f"task_{int(time.time())}_{os.urandom(4).hex()}"
-    with task_results_lock:
-        task_results[new_task_id] = {
-            'status': 'processing',
-            'filename': filename,
-            'filepath': filepath,
-            'caption': caption,
-            'targets': targets,
-            'created_at': time.time(),
-            'progress': 0
-        }
-
-    threading.Thread(
-        target=_execute_grahak_task, 
-        args=(new_task_id, filepath, caption, targets),
-        daemon=True
-    ).start()
-    return jsonify({'status': 'queued', 'task_id': new_task_id})
-
-@app.route('/api/grahak/feeds', methods=['GET'])
-def grahak_feeds():
-    data = _read_config(APP_ROOT / 'config' / 'rss_feeds.json', {"feeds": []})
-    return jsonify(data.get('feeds', []))
-
-@app.route('/api/grahak/add_feed', methods=['POST'])
-def grahak_add_feed():
-    payload = request.get_json() or {}
-    name = payload.get('name','').strip()
-    url = payload.get('url','').strip()
-    if not name or not url: # This path needs to be updated to APP_ROOT / 'config'
-        return jsonify({'error':'invalid'}),400
-    data = _read_config(APP_ROOT / 'config' / 'rss_feeds.json', {"feeds": []})
-    feeds = data.get('feeds',[])
-    feeds.append({'name':name,'url':url})
-    data['feeds']=feeds
-    with open(os.path.join('config','rss_feeds.json'),'w') as f:
-        json.dump(data, f, indent=2)
-    return jsonify({'status':'ok'})
-
-@app.route('/api/grahak/delete_feed', methods=['POST'])
-def grahak_delete_feed():
-    payload = request.get_json() or {}
-    idx = payload.get('index')
-    data = _read_config(APP_ROOT / 'config' / 'rss_feeds.json', {"feeds": []})
-    feeds = data.get('feeds',[])
-    if isinstance(idx,int) and 0<=idx<len(feeds):
-        feeds.pop(idx)
-        data['feeds']=feeds
-        with open(os.path.join('config','rss_feeds.json'),'w') as f:
-            json.dump(data,f,indent=2)
-        return jsonify({'status':'ok'})
-    return jsonify({'error':'invalid'}),400
-
-@app.route('/api/grahak/logs', methods=['GET'])
-def grahak_logs():
-    def tail(path, n=50):
-        try:
-            with open(path,'r') as f:
-                lines=f.readlines()
-            return lines[-n:]
-        except:
-            return []
-    return jsonify({
-        'news': [l.rstrip() for l in tail('news.log')]
-    })
-
-@app.route('/grahak-dashboard')
-def grahak_dashboard():
-    return render_template('index.html')
-
 # Interval management endpoints
 @app.route('/api/interval/<post_type>', methods=['GET']) # This path needs to be updated to APP_ROOT / 'config'
 def get_interval(post_type):
@@ -827,6 +553,8 @@ def set_interval(post_type):
         visa.set_interval(interval)
     elif post_type == 'gaatha':
         gaatha.set_interval(interval)
+    elif post_type == 'grahak':
+        grahak.set_interval(interval)
     elif post_type == 'insta':
         # Update both
         insta_suite.set_interval(interval)
@@ -842,6 +570,5 @@ def serve_image(filename):
 
 if __name__ == '__main__':
     init_db()
-    threading.Thread(target=_cleanup_tasks_worker, daemon=True).start()
     threading.Thread(target=_cleanup_images_worker, daemon=True).start()
     app.run(debug=True, host='0.0.0.0', port=5000)
