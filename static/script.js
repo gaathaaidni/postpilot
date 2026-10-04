@@ -1,7 +1,23 @@
 let currentTab = 'dashboard';
 let statusInterval = null;
 let currentModulePosts = [];
-let grahakRefreshTimer = null;
+
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+async function authFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    const method = (options.method || 'GET').toUpperCase();
+    if (['POST', 'PUT', 'DELETE'].includes(method)) {
+        if (!options.headers['X-CSRFToken'] && CSRF_TOKEN) {
+            options.headers['X-CSRFToken'] = CSRF_TOKEN;
+        }
+    }
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        window.location.href = '/login';
+    }
+    return res;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     setupNavigation();
@@ -17,7 +33,6 @@ function setupNavigation() {
             btn.classList.add('active');
             loadTab(btn.dataset.tab);
             
-            // Sync mobile dropdown
             const sel = document.querySelector('.mobile-nav-select');
             if(sel) sel.value = btn.dataset.tab;
         });
@@ -63,14 +78,12 @@ function loadTab(tab) {
     const content = document.getElementById('content-area');
     const title = document.getElementById('page-title');
     
-    // Update Title
     const titles = {
         'dashboard': 'System Overview',
         'tour': 'Nexora Suite Management',
         'nz': 'Phoenix International Management',
         'gaatha': 'Gaatha AI Automation',
-        'insta': 'Instagram Synchronization',
-        'grahak': 'Grahak Chetna Automation'
+        'insta': 'Instagram Synchronization'
     };
     title.textContent = titles[tab] || 'Dashboard';
 
@@ -83,21 +96,21 @@ function loadTab(tab) {
 
 async function startStatusPolling() {
     updateStatus();
+    if (statusInterval) clearInterval(statusInterval);
     statusInterval = setInterval(updateStatus, 3000);
 }
 
 async function updateStatus() {
     try {
-        const res = await fetch('/api/status');
+        const res = await authFetch('/api/status');
+        if (!res.ok) return;
         const data = await res.json();
         
-        // Update Dashboard indicators if on dashboard
         if (currentTab === 'dashboard') {
             updateDashboardStatus(data);
         }
         
-        // Update Module specific indicators
-        if (['tour', 'nz', 'gaatha', 'grahak', 'insta'].includes(currentTab)) {
+        if (['tour', 'nz', 'gaatha', 'insta'].includes(currentTab)) {
             updateModuleStatus(currentTab, data);
         }
     } catch (e) {
@@ -133,17 +146,9 @@ function renderDashboard(container) {
                 </div>
             </div>
             <div class="stat-card">
-                <div class="stat-icon bg-red-soft"><i class="fa-solid fa-bullhorn"></i></div>
-                <div class="stat-info">
-                    <h4>Grahak Chetna</h4>
-                    <p id="dash-status-grahak">Checking...</p>
-                    <small id="dash-grahak-interval" class="text-muted">Interval: --</small>
-                </div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-icon bg-orange-soft"><i class="fa-brands fa-instagram"></i></div>
                 <div class="stat-info">
-                    <h4>Instagram</h4>
+                    <h4>Instagram Sync</h4>
                     <p id="dash-status-insta">Checking...</p>
                     <small id="dash-insta-interval" class="text-muted">Interval: --</small>
                 </div>
@@ -152,22 +157,20 @@ function renderDashboard(container) {
 
         <div class="card">
             <div class="card-header">
-                <div class="card-title"><i class="fa-solid fa-sliders"></i> Feature Control Panel</div>
+                <div class="card-title"><i class="fa-solid fa-sliders"></i> Active Module Controls</div>
             </div>
             <div style="display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); padding:1rem 0;">
-                ${['tour','nz','gaatha','grahak','insta'].map(type => {
+                ${['tour','nz','gaatha','insta'].map(type => {
                     const labels = {
                         tour: 'Nexora Suite',
                         nz: 'Phoenix Intl',
                         gaatha: 'Gaatha AI',
-                        grahak: 'Grahak Chetna',
                         insta: 'Instagram Sync'
                     };
                     const icons = {
                         tour: 'fa-earth-americas',
                         nz: 'fa-passport',
                         gaatha: 'fa-scroll',
-                        grahak: 'fa-bullhorn',
                         insta: 'fa-instagram'
                     };
                     return `
@@ -201,11 +204,10 @@ function renderDashboard(container) {
                 <div style="display: flex; gap: 0.5rem; align-items: center;">
                     <span style="font-size: 0.85rem; color: var(--text-muted);">Filter:</span>
                     <select id="dashboard-filter" class="form-control" style="width: auto; padding: 0.3rem;" onchange="filterDashboardPosts(this.value)">
-                        <option value="">All Types (Select...)</option>
+                        <option value="">Select Category...</option>
                         <option value="tour">Nexora Suite (Tour)</option>
                         <option value="nz">Phoenix Intl (Visa)</option>
                         <option value="gaatha">Gaatha AI</option>
-                        <option value="grahak">Grahak Chetna</option>
                         <option value="insta">Instagram Sync</option>
                     </select>
                 </div>
@@ -217,7 +219,7 @@ function renderDashboard(container) {
             </div>
         </div>
     `;
-    updateStatus(); // Immediate refresh
+    updateStatus();
 }
 
 async function filterDashboardPosts(type) {
@@ -230,7 +232,7 @@ async function filterDashboardPosts(type) {
     list.innerHTML = `<div style="text-align:center; padding: 3rem;"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading ${type} posts...</div>`;
     
     try {
-        const res = await fetch(`/api/posts/${type}`);
+        const res = await authFetch(`/api/posts/${type}`);
         const posts = await res.json();
         
         if (posts.length === 0) {
@@ -240,23 +242,25 @@ async function filterDashboardPosts(type) {
 
         list.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center; padding: 0.5rem 1rem; border-bottom: 1px solid var(--border);">
-                <h5 style="margin:0;">${type.charAt(0).toUpperCase() + type.slice(1)} Posts</h5>
+                <h5 style="margin:0;">${type.toUpperCase()} Posts (${posts.length})</h5>
                 <button class="btn btn-sm btn-danger" onclick="deleteAllPosts('${type}')">
-                    <i class="fa-solid fa-trash-can"></i> Delete All ${type.charAt(0).toUpperCase() + type.slice(1)} Posts
+                    <i class="fa-solid fa-trash-can"></i> Delete All ${type.toUpperCase()} Posts
                 </button>
             </div>
             <div class="table-responsive">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th style="width: 100px">Image</th>
+                            <th style="width: 60px">ID</th>
+                            <th style="width: 100px">Media</th>
                             <th>Message</th>
-                            <th style="width: 150px">Created</th>
+                            <th style="width: 150px">Last Posted</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${posts.map(post => `
                             <tr>
+                                <td><span style="font-weight: 600; color: var(--text-muted); font-size: 0.85rem;">#${post.id}</span></td>
                                 <td>
                                     ${post.image_filename ? 
                                         `<img src="/images/${post.image_filename}" class="post-img-preview" alt="Post">` : 
@@ -264,7 +268,7 @@ async function filterDashboardPosts(type) {
                                     }
                                 </td>
                                 <td><div style="max-height: 60px; overflow-y: auto; font-size: 0.9rem;">${post.message || '<em class="text-muted">No message</em>'}</div></td>
-                                <td><small class="text-muted">${post.created_at ? new Date(post.created_at + 'Z').toLocaleString() : 'N/A'}</small></td>
+                                <td><small class="text-muted">${post.last_posted_at ? new Date(post.last_posted_at + 'Z').toLocaleString() : 'Never'}</small></td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -278,7 +282,7 @@ async function filterDashboardPosts(type) {
 
 function updateDashboardStatus(data) {
     const mapStatus = (running) => running ? 
-        `<span style="color:var(--success)">Active</span>` : 
+        `<span style="color:var(--success); font-weight:600;">Active</span>` : 
         `<span style="color:var(--text-muted)">Stopped</span>`;
     
     const set = (id, val) => {
@@ -289,20 +293,17 @@ function updateDashboardStatus(data) {
     set('dash-status-tour', mapStatus(data.tour_running));
     set('dash-status-nz', mapStatus(data.nz_running));
     set('dash-status-gaatha', mapStatus(data.gaatha_running));
-    set('dash-status-grahak', mapStatus(data.grahak_running));
     set('dash-status-insta', mapStatus(data.insta_running));
 
     set('dash-tour-interval', `Interval: ${data.tour_interval || 0} sec`);
     set('dash-nz-interval', `Interval: ${data.nz_interval || 0} sec`);
     set('dash-gaatha-interval', `Interval: ${data.gaatha_interval || 0} sec`);
-    set('dash-grahak-interval', `Interval: ${data.grahak_interval || 0} sec`);
     set('dash-insta-interval', `Interval: ${data.insta_interval || 0} sec`);
 
-    set('dash-tour-summary', `${data.tour_running ? 'Running' : 'Stopped'} · ${data.tour_status || 'No activity yet'}`);
-    set('dash-nz-summary', `${data.nz_running ? 'Running' : 'Stopped'} · ${data.nz_status || 'No activity yet'}`);
-    set('dash-gaatha-summary', `${data.gaatha_running ? 'Running' : 'Stopped'} · ${data.gaatha_status || 'No activity yet'}`);
-    set('dash-grahak-summary', `${data.grahak_running ? 'Running' : 'Stopped'} · ${data.grahak_status || 'No activity yet'}`);
-    set('dash-insta-summary', `${data.insta_running ? 'Running' : 'Stopped'} · ${data.insta_status || 'No activity yet'}`);
+    set('dash-tour-summary', `${data.tour_running ? 'Running' : 'Stopped'} · ${data.tour_status || 'Idle'}`);
+    set('dash-nz-summary', `${data.nz_running ? 'Running' : 'Stopped'} · ${data.nz_status || 'Idle'}`);
+    set('dash-gaatha-summary', `${data.gaatha_running ? 'Running' : 'Stopped'} · ${data.gaatha_status || 'Idle'}`);
+    set('dash-insta-summary', `${data.insta_running ? 'Running' : 'Stopped'} · ${data.insta_status || 'Idle'}`);
 }
 
 function refreshDashboard() {
@@ -316,15 +317,17 @@ async function deleteAllPosts(type) {
     
     showConfirm(msg, async () => {
         try {
-            const res = await fetch(`/api/posts/${type}/all`, { method: 'DELETE' });
+            const res = await authFetch(`/api/posts/${type}/all`, { method: 'DELETE' });
             const data = await res.json();
             if (data.success) {
-                filterDashboardPosts(type); // Refresh the list
+                showToast(`All ${type.toUpperCase()} posts deleted`, 'success');
+                filterDashboardPosts(type);
+                if (currentTab === type) loadPosts(type);
             } else {
-                alert('Error deleting posts: ' + (data.error || 'Unknown error'));
+                showToast(data.error || 'Failed to delete posts', 'error');
             }
         } catch (e) {
-            console.error('Error during delete all:', e);
+            showToast('Error during bulk delete', 'error');
         }
     });
 }
@@ -337,7 +340,6 @@ function showConfirm(htmlMessage, onConfirm) {
     msgEl.innerHTML = htmlMessage;
     modal.classList.add('show');
 
-    // Replace button to clear old event listeners
     const newBtn = yesBtn.cloneNode(true);
     yesBtn.parentNode.replaceChild(newBtn, yesBtn);
 
@@ -352,7 +354,6 @@ function closeConfirmModal() {
 }
 
 async function renderModule(container, type) {
-    // Basic Layout
     container.innerHTML = `
         <div class="card">
             <div class="card-header">
@@ -381,19 +382,20 @@ async function renderModule(container, type) {
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th style="width: 80px">Image</th>
+                            <th style="width: 60px">ID</th>
+                            <th style="width: 80px">Media</th>
                             <th>Message</th>
                             <th style="width: 120px">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="posts-table-body">
-                        <tr><td colspan="3" style="text-align:center;">Loading...</td></tr>
-                    </tbo                </table>
+                        <tr><td colspan="4" style="text-align:center;">Loading...</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     `;
 
-    // Load Data
     loadPosts(type);
     loadInterval(type);
     updateStatus();
@@ -401,7 +403,7 @@ async function renderModule(container, type) {
 
 async function loadPosts(type) {
     try {
-        const res = await fetch(`/api/posts/${type}`);
+        const res = await authFetch(`/api/posts/${type}`);
         const posts = await res.json();
         currentModulePosts = posts;
         const tbody = document.getElementById('posts-table-body');
@@ -409,12 +411,13 @@ async function loadPosts(type) {
         if (!tbody) return;
 
         if (posts.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding: 2rem; color: var(--text-muted);">No posts configured.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding: 2rem; color: var(--text-muted);">No posts configured for ${type.toUpperCase()}.</td></tr>`;
             return;
         }
 
-        tbody.innerHTML = posts.map((post, index) => `
+        tbody.innerHTML = posts.map(post => `
             <tr>
+                <td><span style="font-weight: 600; color: var(--text-muted); font-size: 0.85rem;">#${post.id}</span></td>
                 <td>
                     ${post.image_filename ? 
                         `<img src="/images/${post.image_filename}" class="post-img-preview" alt="Post">` : 
@@ -425,8 +428,8 @@ async function loadPosts(type) {
                     <div class="text-truncate">${post.message || 'No caption'}</div>
                 </td>
                 <td>
-                    <button class="btn btn-sm btn-secondary" onclick='openModal("edit", ${index}, "${type}")'><i class="fa-solid fa-pen"></i></button>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deletePost('${type}', ${index})"><i class="fa-solid fa-trash"></i></button>
+                    <button class="btn btn-sm btn-secondary" onclick='openModal("edit", ${post.id}, "${type}")' title="Edit"><i class="fa-solid fa-pen"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deletePost('${type}', ${post.id})" title="Delete"><i class="fa-solid fa-trash"></i></button>
                 </td>
             </tr>
         `).join('');
@@ -437,7 +440,7 @@ async function loadPosts(type) {
 
 async function loadInterval(type) {
     try {
-        const res = await fetch(`/api/interval/${type}`);
+        const res = await authFetch(`/api/interval/${type}`);
         const data = await res.json();
         const input = document.getElementById('interval-input');
         if(input && data.interval) input.value = data.interval;
@@ -446,21 +449,25 @@ async function loadInterval(type) {
 
 async function saveInterval(type) {
     const val = document.getElementById('interval-input').value;
-    await fetch(`/api/interval/${type}`, {
+    const res = await authFetch(`/api/interval/${type}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({interval: parseInt(val)})
     });
-    showToast('Interval updated successfully!', 'success');
+    if (res.ok) {
+        showToast('Interval updated successfully!', 'success');
+    } else {
+        showToast('Failed to update interval', 'error');
+    }
 }
 
 async function controlModule(type, action) {
-    await fetch(`/api/control/${type}/${action}`, { method: 'POST' });
+    await authFetch(`/api/control/${type}/${action}`, { method: 'POST' });
     updateStatus();
 }
 
 async function controlAll(action) {
-    await fetch(`/api/control/all/${action}`, { method: 'POST' });
+    await authFetch(`/api/control/all/${action}`, { method: 'POST' });
     updateStatus();
 }
 
@@ -473,9 +480,6 @@ function updateModuleStatus(type, data) {
     let isRunning = data[`${type}_running`];
     let statusMsg = data[`${type}_status`] || '';
 
-    // Adjust key for insta
-    if (type === 'insta') isRunning = data.insta_running;
-
     if (isRunning) {
         badge.className = 'status-badge status-running';
         badge.textContent = 'Running';
@@ -487,22 +491,22 @@ function updateModuleStatus(type, data) {
     text.textContent = statusMsg;
 }
 
-// Post Modal Logic
-function openModal(mode, data, type) {
+// Post Modal Logic (Using Stable Primary Key IDs)
+function openModal(mode, postId, type) {
     document.getElementById('post-modal').classList.add('show');
     document.getElementById('modal-title').textContent = mode === 'edit' ? 'Edit Post' : 'New Post';
-    
-    // Set hidden fields
     document.getElementById('post-type').value = type || '';
     
-    if (mode === 'edit') {
-        const post = currentModulePosts[data];
-        document.getElementById('post-index').value = data;
-        document.getElementById('post-message').value = post.message || '';
-        document.getElementById('current-image-filename').value = post.image_filename || '';
-        document.getElementById('file-name').textContent = post.image_filename || 'Change file...';
+    if (mode === 'edit' && postId) {
+        const post = currentModulePosts.find(p => p.id === postId);
+        if (post) {
+            document.getElementById('post-id').value = post.id;
+            document.getElementById('post-message').value = post.message || '';
+            document.getElementById('current-image-filename').value = post.image_filename || '';
+            document.getElementById('file-name').textContent = post.image_filename || 'Choose file...';
+        }
     } else {
-        document.getElementById('post-index').value = '-1';
+        document.getElementById('post-id').value = '';
         document.getElementById('post-message').value = '';
         document.getElementById('current-image-filename').value = '';
         document.getElementById('file-name').textContent = 'Choose file or drag here';
@@ -522,53 +526,71 @@ function handleFileSelect(input) {
 
 async function savePost() {
     const type = document.getElementById('post-type').value;
-    const index = parseInt(document.getElementById('post-index').value);
-    const message = document.getElementById('post-message').value;
+    const postId = document.getElementById('post-id').value;
+    const message = document.getElementById('post-message').value.trim();
     const fileInput = document.getElementById('post-file');
     let filename = document.getElementById('current-image-filename').value;
 
     if (fileInput.files.length > 0) {
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
-        const uploadRes = await fetch('/api/upload', {method: 'POST', body: formData});
+        const uploadRes = await authFetch('/api/upload', {method: 'POST', body: formData});
         const uploadData = await uploadRes.json();
         if (uploadData.filename) {
             filename = uploadData.filename;
+        } else {
+            showToast(uploadData.error || 'Upload failed', 'error');
+            return;
         }
     }
 
     const payload = { message, image_filename: filename };
     
-    if (index >= 0) {
-        await fetch(`/api/posts/${type}/${index}`, {
+    if (postId) {
+        const res = await authFetch(`/api/posts/${type}/${postId}`, {
             method: 'PUT',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
         });
+        if (res.ok) {
+            showToast('Post updated successfully', 'success');
+        } else {
+            showToast('Failed to update post', 'error');
+        }
     } else {
-        await fetch(`/api/posts/${type}`, {
+        const res = await authFetch(`/api/posts/${type}`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(payload)
         });
+        if (res.ok) {
+            showToast('Post created successfully', 'success');
+        } else {
+            showToast('Failed to create post', 'error');
+        }
     }
 
     closeModal();
     loadPosts(type);
 }
 
-async function deletePost(type, index) {
-    if(confirm('Are you sure you want to delete this post?')) {
-        await fetch(`/api/posts/${type}/${index}`, { method: 'DELETE' });
-        loadPosts(type);
-    }
+async function deletePost(type, postId) {
+    showConfirm(`Are you sure you want to delete post #${postId}?`, async () => {
+        const res = await authFetch(`/api/posts/${type}/${postId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast('Post deleted', 'success');
+            loadPosts(type);
+        } else {
+            showToast('Failed to delete post', 'error');
+        }
+    });
 }
 
-/**
- * Elegant Toast Notification
- * @param {string} message 
- * @param {string} type - 'success', 'error', 'warning'
- */
+async function handleLogout() {
+    await authFetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/login';
+}
+
 function showToast(message, type = 'success') {
     let container = document.getElementById('toast-container');
     if (!container) {

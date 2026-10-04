@@ -1,32 +1,21 @@
 #!/bin/bash
-
-# PostPilot Flask App - Production Run Script
-# This script runs the app using Gunicorn (production WSGI server)
-# Usage: ./run-production.sh [workers] [port]
+# PostPilot Web Server Production Startup Script
+# Usage: ./run-production.sh [workers] [port] [host]
+# Default host is 127.0.0.1 for security behind reverse proxy (Nginx)
 
 WORKERS=${1:-4}
 PORT=${2:-5000}
+HOST=${3:-127.0.0.1}
 
-echo "🚀 PostPilot Flask (Production Mode)"
-echo "===================================="
-echo ""
-echo "Configuration:"
-echo "  Workers: $WORKERS"
-echo "  Port: $PORT"
-echo ""
+echo "Starting PostPilot (Production Mode)"
+echo "Host: $HOST | Port: $PORT | Workers: $WORKERS"
 
-# Install production requirements
-pip install -r requirements.txt -q
-
-# Run with Gunicorn
-echo "Starting server with $WORKERS workers..."
-gunicorn \
+export APP_ENV=production
+exec gunicorn \
     --workers $WORKERS \
     --worker-class sync \
-    --bind 0.0.0.0:$PORT \
+    --bind $HOST:$PORT \
     --timeout 120 \
     --access-logfile - \
     --error-logfile - \
     app:app
-export FLASK_APP=src.app
-gunicorn -w $WORKERS -b 0.0.0.0:$PORT src.app:app

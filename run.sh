@@ -1,4 +1,5 @@
 #!/bin/bash
-export FLASK_APP=src.app
-export FLASK_DEBUG=1
-flask run --host=0.0.0.0 --port=5000
+# PostPilot Development & Termux Runtime Script
+export APP_ENV=development
+export FLASK_APP=app:app
+python app.py

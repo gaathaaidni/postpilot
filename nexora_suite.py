@@ -1,44 +1,35 @@
-import os
-from threading import Event
-import posting_utils
-import facebook_api
+"""
+nexora_suite.py - Compatibility Wrapper
+Delegates to the unified channel_runner module for 'tour' channel orchestration.
+Maintains 100% backward compatibility for existing imports and tests.
+"""
+import channel_runner
 
-stop_event = Event()
-status_callback = None
-current_interval = 30 * 60  # Default to 30 minutes
+_channel = channel_runner.get_channel('tour')
 
-ACCESS_TOKEN = facebook_api.get_access_token()
-PAGE_ID = os.getenv('FB_PAGE_ID_NEXORA_SUITE', '967550829768297')  # Nexora Suite page
-POST_TYPE = "tour"
+# Expose backward-compatible module attributes
+stop_event = _channel.stop_event
+PAGE_ID = _channel.get_page_id()
+POST_TYPE = _channel.post_type
+
+@property
+def current_interval():
+    return _channel.current_interval
 
 def load_posts():
-    return posting_utils.load_posts(POST_TYPE)
+    return _channel.load_posts()
 
 def set_status_callback(callback):
-    """Set callback for status updates"""
-    global status_callback
-    status_callback = callback
+    _channel.set_status_callback(callback)
 
 def set_interval(interval):
-    """Set posting interval in seconds"""
-    global current_interval
-    current_interval = interval
+    _channel.set_interval(interval)
 
 def post_on_facebook(message, image_filename):
-    return posting_utils.post_on_facebook(message, image_filename, PAGE_ID, ACCESS_TOKEN)
+    return _channel.post_on_facebook(message, image_filename)
 
 def run_nexora_suite():
-    """Run Nexora Suite posting"""
-    posting_utils.run_posting_loop(
-        stop_event=stop_event,
-        status_callback=status_callback,
-        get_interval_func=lambda: current_interval,
-        callback_key='nexora_suite',
-        posts_file=POST_TYPE,
-        page_id=PAGE_ID,
-        access_token=ACCESS_TOKEN
-    )
+    _channel.run()
 
 def stop_nexora_suite():
-    """Stop Nexora Suite posting"""
-    stop_event.set()
+    _channel.stop()

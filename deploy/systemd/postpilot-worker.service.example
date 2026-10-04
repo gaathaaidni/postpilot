@@ -1,0 +1,46 @@
+# ==============================================================================
+# PostPilot Background Task Worker Systemd Service Unit Template
+# ==============================================================================
+# TEMPLATE ONLY — DO NOT INSTALL ON GAATHA PRODUCTION VPS
+#
+# Installation Guide (on an isolated Linux host):
+# 1. Copy to /etc/systemd/system/postpilot-worker.service
+# 2. Adjust User, WorkingDirectory, and ExecStart paths if needed
+# 3. Reload daemon: sudo systemctl daemon-reload
+# 4. Enable service: sudo systemctl enable postpilot-worker
+# 5. Start service: sudo systemctl start postpilot-worker
+# ==============================================================================
+
+[Unit]
+Description=PostPilot Background Task Worker Daemon
+After=network.target postgresql.service postpilot-web.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=postpilot
+Group=postpilot
+WorkingDirectory=/opt/postpilot
+
+# Load environment configuration from untracked .env file
+EnvironmentFile=/opt/postpilot/.env
+
+# Worker daemon execution: manages worker lease and channel runners
+ExecStart=/opt/postpilot/venv/bin/python worker.py
+
+# Clean graceful shutdown via SIGTERM
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Automatic recovery upon abnormal exit
+Restart=always
+RestartSec=5s
+
+# Security sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

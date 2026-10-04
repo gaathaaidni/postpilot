@@ -1,41 +1,30 @@
 import os
-import random
-import sqlite3
 import time
 import facebook_api
 import insta
-
-DB_PATH = os.path.join(os.path.dirname(__file__), "posts.db")
+import database
+import config
 
 def load_posts(post_type):
-    """Safely load posts from SQLite database."""
+    """Safely load posts from database layer."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        posts = conn.execute(
-            "SELECT id, message, image_filename, last_posted_at FROM posts WHERE post_type = ? ORDER BY last_posted_at ASC, id ASC",
-            (post_type,)).fetchall()
-        conn.close()
-        return [dict(p) for p in posts]
+        return database.load_posts_by_type(post_type)
     except Exception as e:
         print(f"❌ Error loading posts for {post_type}: {e}")
         return []
 
 def update_last_posted_timestamp(post_id):
-    """Updates the last_posted_at timestamp for a specific post in the SQLite database."""
+    """Updates the last_posted_at timestamp in the database."""
     try:
-        # Use a context manager for the connection to ensure it closes properly
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "UPDATE posts SET last_posted_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (post_id,)
-            )
-            conn.commit()
+        database.update_last_posted_timestamp(post_id)
     except Exception as e:
         print(f"❌ Error updating last_posted_at for post {post_id}: {e}")
 
-def post_on_facebook(message, image_filename, page_id, access_token, image_folder="images"):
+def post_on_facebook(message, image_filename, page_id, access_token, image_folder=None):
     """Shared logic for posting an image to a Facebook page and cross-posting to Instagram."""
+    if not image_folder:
+        image_folder = str(config.UPLOAD_FOLDER)
+        
     path = os.path.join(image_folder, image_filename)
     if not os.path.exists(path):
         print(f"Image not found: {path}")
@@ -79,37 +68,52 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
         print(f"❌ Exception in post_on_facebook: {str(e)}")
         return False
 
-def run_posting_loop(stop_event, status_callback, get_interval_func, callback_key, posts_file, page_id, access_token):
-    """Standardized background loop for Nexora modules."""
+def run_posting_loop(stop_event, status_callback, get_interval_func, callback_key, post_type, page_id, access_token):
+    """Standardized background loop for posting modules."""
     post_count = 0
     while not stop_event.is_set():
-        posts = load_posts(posts_file)
+        posts = load_posts(post_type)
         if not posts:
+            if stop_event.is_set():
+                break
             if status_callback:
-                status_callback(callback_key, False, "Idle (No posts found)", None)
-            time.sleep(60)
+                status_callback(callback_key, True, "Idle (No posts found)", None)
+            else:
+                database.set_task_state(callback_key, is_running=True, status="Idle (No posts found)")
+            if stop_event.wait(timeout=1.0):
+                break
             continue
 
         for post in posts:
-            if stop_event.is_set(): break
+            if stop_event.is_set():
+                break
             post_count += 1
             msg = post.get('message', '')
             summary = f"{msg[:50]}..." if len(msg) > 50 else (msg or 'No message')
             
             if status_callback:
                 status_callback(callback_key, True, f"Posting... (Post #{post_count})", summary)
-            
+            else:
+                database.set_task_state(callback_key, is_running=True, status=f"Posting... (Post #{post_count})", current_post_summary=summary)
+
             success = post_on_facebook(msg, post.get("image_filename", ""), page_id, access_token)
             
             if success:
-                # Record the successful post timestamp
                 update_last_posted_timestamp(post.get('id'))
 
+            status = "Posted" if success else "Failed"
+            if stop_event.is_set():
+                break
             if status_callback:
-                status = "Posted" if success else "Failed"
                 status_callback(callback_key, True, status, None)
-            
-            # Responsive sleep logic
-            wait_until = time.time() + get_interval_func()
-            while time.time() < wait_until and not stop_event.is_set():
-                time.sleep(1)
+            else:
+                database.set_task_state(callback_key, is_running=True, status=status)
+
+            # Responsive wait using stop_event
+            if stop_event.wait(timeout=get_interval_func()):
+                break
+
+    if status_callback:
+        status_callback(callback_key, False, "Stopped", None)
+    else:
+        database.set_task_state(callback_key, is_running=False, status="Stopped")

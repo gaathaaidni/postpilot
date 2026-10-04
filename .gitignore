@@ -1,0 +1,49 @@
+# Environment & Secret files
+.env
+.env.*
+!.env.example
+token.txt
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+data/
+!data/.gitkeep
+
+# User upload & media
+images/*
+!images/.gitkeep
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Logs
+*.log
+logs/
+
+# Temporary files & Diagnostic dumps
+Connected pages
+temp_*
+*.tmp
+
+# Backups & Archives
+backups/
+*.zip
+*.tar.gz
+
+# Operating system artifacts
+.DS_Store
+Thumbs.db

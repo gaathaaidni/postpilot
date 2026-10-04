@@ -19,7 +19,7 @@ class FacebookAPIError(Exception):
 def get_access_token():
     """
     Retrieves the Facebook user access token.
-    Priority: Environment Variable (FB_ACCESS_TOKEN or FB_TOKEN) > .env file > token.txt file.
+    Priority: Environment Variable (FB_ACCESS_TOKEN or FB_TOKEN) > .env file.
     """
     token = os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN')
     if token:
@@ -40,13 +40,6 @@ def get_access_token():
         except Exception as e:
             logger.warning(f"Failed to read token from .env: {e}")
 
-    # Fallback to token.txt
-    if os.path.exists('token.txt'):
-        try:
-            with open('token.txt', 'r') as f:
-                return f.read().strip()
-        except Exception as e:
-            logger.warning(f"Failed to read token from token.txt: {e}")
     return None
 
 def get_page_token(user_token, page_id):

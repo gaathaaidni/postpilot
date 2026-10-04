@@ -328,24 +328,87 @@ body {
 
 .close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-muted); }
 
+.table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 1rem;
+}
+
 @media (max-width: 768px) {
-    body { overflow-y: auto; }
+    body {
+        overflow-y: auto;
+        height: auto;
+        min-height: 100vh;
+    }
     .app-container {
         flex-direction: column;
         height: auto;
+        min-height: 100vh;
     }
     .sidebar {
         width: 100%;
         height: auto;
         border-right: none;
-        border-bottom: var(--border);
+        border-bottom: 1px solid var(--border);
         padding: 1rem;
     }
     .nav-menu { display: none !important; }
-    .mobile-nav-container { display: block; } /* Show mobile dropdown container */
+    .mobile-nav-container {
+        display: block;
+        margin-top: 0.5rem;
+    }
+    .mobile-nav-select {
+        width: 100%;
+        padding: 0.65rem 0.75rem;
+        font-size: 1rem;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background-color: var(--bg-card);
+        color: var(--text-main);
+    }
     .brand { margin-bottom: 0.5rem; }
-    .main-content { padding: 0; }
-    .top-bar { padding: 0 1rem; height: 60px; }
-    #content-area { padding: 1rem; }
-    .modal-content { width: 95%; }
+    .main-content {
+        padding: 0;
+        height: auto;
+        overflow: visible;
+    }
+    .top-bar {
+        padding: 0.75rem 1rem;
+        height: auto;
+        min-height: 60px;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+    }
+    .global-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    #content-area {
+        padding: 1rem;
+        overflow: visible;
+        height: auto;
+    }
+    .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    .stat-card {
+        padding: 1rem;
+    }
+    .text-truncate {
+        max-width: 160px;
+    }
+    .modal-content {
+        width: 95%;
+        max-width: 500px;
+        margin: 1rem auto;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    .btn {
+        min-height: 38px;
+    }
 }

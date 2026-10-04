@@ -1,0 +1,81 @@
+# ==============================================================================
+# PostPilot Production Nginx Reverse Proxy Configuration Template
+# ==============================================================================
+# IMPORTANT:
+# - TEMPLATE ONLY: Do NOT install on the Gaatha production VPS.
+# - Replace 'postpilot.example.com' with your actual domain or IP address.
+# - Ensure Gunicorn is listening locally on 127.0.0.1:5000 (never public 0.0.0.0).
+# ==============================================================================
+
+# HTTP: Redirect all plain HTTP traffic to secure HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name postpilot.example.com;
+
+    # ACME Challenge for Let's Encrypt certificates
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS: Secure Reverse Proxy to PostPilot Application Server
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name postpilot.example.com;
+
+    # SSL Certificate Paths (Managed by Certbot / ACME)
+    ssl_certificate /etc/letsencrypt/live/postpilot.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/postpilot.example.com/privkey.pem;
+
+    # Recommended Modern SSL Parameters
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_tickets off;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Max Upload Size (matching MAX_CONTENT_LENGTH=16777216 / 16MB)
+    client_max_body_size 16M;
+
+    # Access and Error Logs
+    access_log /var/log/nginx/postpilot_access.log;
+    error_log /var/log/nginx/postpilot_error.log warn;
+
+    # Serve static assets directly for optimal performance
+    location /static/ {
+        alias /opt/postpilot/static/;
+        expires 30d;
+        add_header Cache-Control "public, no-transform";
+    }
+
+    # Proxy all application requests to local Gunicorn WSGI server
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+
+        # Forward Standard Proxy Headers to preserve client context
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts suitable for media uploads
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

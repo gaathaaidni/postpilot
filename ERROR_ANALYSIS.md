@@ -24,8 +24,8 @@ Your access token in [visa.py](visa.py#L5) needs to be refreshed with the correc
    - `pages_read_engagement`
    - `pages_manage_metadata`
    - `pages_manage_posts`
-3. Replace the `ACCESS_TOKEN` in [visa.py](visa.py#L5)
-4. Also update [tour.py](tour.py#L5) with the same token
+3. Set the new token in your `.env` file:
+   `FB_ACCESS_TOKEN=your_new_token_here`
 
 ### Option 2: Use the Instagram API Instead
 If you want to post photos with captions, use Instagram Graph API:
@@ -49,9 +49,7 @@ FB_API_URL = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed"
 
 - [ ] Generate a new access token from Facebook Graph Explorer
 - [ ] Ensure it has: `pages_manage_posts` permission
-- [ ] Update `ACCESS_TOKEN` in [visa.py](visa.py#L5)
-- [ ] Update `ACCESS_TOKEN` in [tour.py](tour.py#L5)
-- [ ] Test posting with: `python3 -c "import visa; visa.post_on_facebook('Test', '1000004944.png')"`
+- [ ] Update `FB_ACCESS_TOKEN` in `.env`
 
 ## 🔧 Changes Made (Auto-Fix)
 

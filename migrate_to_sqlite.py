@@ -1,53 +1,50 @@
-import sqlite3
-import json
-import os
-from pathlib import Path
+"""
+PostPilot Legacy Migration Utility (Archived / Historical Reference)
+-------------------------------------------------------------------
+NOTE: This is a one-time migration script used to transition legacy JSON-based
+posts from pre-v1.0 PostPilot installations into the unified SQLite/PostgreSQL database.
 
-ROOT = Path("/workspaces/postpilot")
-DB_PATH = ROOT / "posts.db"
-POSTS_DIR = ROOT / "posts"
-DB_PATH = ROOT / "src" / "posts.db" # Database is now in src/
-POSTS_DIR = ROOT / "posts" # JSON files for migration are assumed to be in root/posts/
+Active PostPilot runtime does not read from or write to JSON files.
+All active posts, timestamps, and task states are managed authoritatively via database.py.
+This script is preserved for historical recovery of older JSON backups if required.
+"""
+import json
+from pathlib import Path
+import config
+import database
+
+POSTS_DIR = config.BASE_DIR / "posts"
 
 FILES = {
     'tour': POSTS_DIR / "tour_posts.json",
     'nz': POSTS_DIR / "visa_posts.json",
-    'tour': POSTS_DIR / "tour_posts.json", # Assuming these JSON files are still in root/posts/ for migration
-    'nz': POSTS_DIR / "visa_posts.json",   # If they are moved, update this path accordingly
     'insta': POSTS_DIR / "insta_posts.json",
     'gaatha': POSTS_DIR / "gaatha_posts.json"
 }
 
 def migrate():
-    conn = sqlite3.connect(str(DB_PATH))
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS posts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            post_type TEXT NOT NULL,
-            message TEXT,
-            image_filename TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_posted_at TIMESTAMP
-        )
-    ''')
-    
-    for post_type, filepath in FILES.items():
-        if filepath.exists():
-            try:
-                with open(filepath, 'r') as f:
-                    posts = json.load(f)
-                    for post in posts:
-                        cursor.execute(
-                            "INSERT INTO posts (post_type, message, image_filename) VALUES (?, ?, ?)",
-                            (post_type, post.get('message'), post.get('image_filename'))
-                        )
-                print(f"✅ Migrated {len(posts)} posts for {post_type}")
-            except Exception as e: print(f"❌ Error migrating {post_type}: {e}")
-    
-    conn.commit()
-    conn.close()
+    database.init_db()
+    with database.get_db_connection() as conn:
+        for post_type, filepath in FILES.items():
+            if filepath.exists():
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        posts = json.load(f)
+                        count = 0
+                        for post in posts:
+                            msg = post.get('message', '').strip()
+                            img = post.get('image_filename', '').strip()
+                            if msg or img:
+                                conn.execute(
+                                    "INSERT INTO posts (post_type, message, image_filename) VALUES (?, ?, ?)",
+                                    (post_type, msg, img)
+                                )
+                                count += 1
+                        print(f"✅ Migrated {count} posts for {post_type}")
+                except Exception as e:
+                    print(f"❌ Error migrating {post_type}: {e}")
+        conn.commit()
+    print("Migration complete.")
 
 if __name__ == "__main__":
     migrate()

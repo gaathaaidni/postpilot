@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PostPilot Enterprise</title>
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>PostPilot - Universal Automation</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
@@ -33,10 +34,6 @@
                 <button class="nav-item" data-tab="insta">
                     <i class="fa-brands fa-instagram"></i> Instagram Sync
                 </button>
-                <div class="nav-label">Automation</div>
-                <button class="nav-item" data-tab="grahak">
-                    <i class="fa-solid fa-robot"></i> Grahak Chetna
-                </button>
             </nav>
             <div class="sidebar-footer">
                 <div class="status-indicator" id="global-status-indicator">
@@ -48,7 +45,14 @@
         <!-- Main Content -->
         <main class="main-content">
             <header class="top-bar">
-                <h1 id="page-title">Dashboard</h1>
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <h1 id="page-title">Dashboard</h1>
+                    {% if local_mode %}
+                    <span style="background: #e0f2fe; color: #0369a1; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.5rem; border-radius: 9999px;">
+                        <i class="fa-solid fa-house-laptop"></i> Localhost Mode
+                    </span>
+                    {% endif %}
+                </div>
                 <div class="global-actions">
                     <button class="btn btn-outline-danger" onclick="controlAll('stop')">
                         <i class="fa-solid fa-stop"></i> Stop All
@@ -56,6 +60,14 @@
                     <button class="btn btn-primary" onclick="controlAll('start')">
                         <i class="fa-solid fa-play"></i> Run All
                     </button>
+                    <div class="user-menu" style="display: flex; align-items: center; gap: 0.5rem; margin-left: 0.5rem; border-left: 1px solid var(--border); padding-left: 0.75rem;">
+                        <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 500;">
+                            <i class="fa-solid fa-circle-user"></i> {{ username }}
+                        </span>
+                        <button class="btn btn-sm btn-secondary" onclick="handleLogout()" title="Sign Out">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                        </button>
+                    </div>
                 </div>
             </header>
 
@@ -73,17 +85,17 @@
                 <button class="close-btn" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <form id="post-form">
-                    <input type="hidden" id="post-index">
+                <form id="post-form" onsubmit="event.preventDefault(); savePost();">
+                    <input type="hidden" id="post-id">
                     <input type="hidden" id="post-type">
                     
                     <div class="form-group">
-                        <label>Caption / Message</label>
+                        <label for="post-message">Caption / Message</label>
                         <textarea id="post-message" rows="4" class="form-control" placeholder="Enter post content..."></textarea>
                     </div>
 
                     <div class="form-group">
-                        <label>Image</label>
+                        <label>Media (Image / Video)</label>
                         <div class="file-upload-wrapper">
                             <input type="file" id="post-file" accept="image/*,video/*" onchange="handleFileSelect(this)">
                             <div class="file-upload-label">

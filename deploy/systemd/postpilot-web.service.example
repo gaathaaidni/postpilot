@@ -1,0 +1,48 @@
+# ==============================================================================
+# PostPilot Web Application Systemd Service Unit Template
+# ==============================================================================
+# TEMPLATE ONLY — DO NOT INSTALL ON GAATHA PRODUCTION VPS
+#
+# Installation Guide (on an isolated Linux host):
+# 1. Copy to /etc/systemd/system/postpilot-web.service
+# 2. Adjust User, WorkingDirectory, and ExecStart paths if needed
+# 3. Reload daemon: sudo systemctl daemon-reload
+# 4. Enable service: sudo systemctl enable postpilot-web
+# 5. Start service: sudo systemctl start postpilot-web
+# ==============================================================================
+
+[Unit]
+Description=PostPilot Web Application Server (Gunicorn WSGI)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=notify
+User=postpilot
+Group=postpilot
+WorkingDirectory=/opt/postpilot
+
+# Load environment configuration from untracked .env file
+EnvironmentFile=/opt/postpilot/.env
+
+# Gunicorn WSGI Execution: bound strictly to localhost (127.0.0.1:5000)
+ExecStart=/opt/postpilot/venv/bin/gunicorn \
+    --workers 3 \
+    --bind 127.0.0.1:5000 \
+    --timeout 60 \
+    --access-logfile /var/log/postpilot/web_access.log \
+    --error-logfile /var/log/postpilot/web_error.log \
+    app:app
+
+# Restart policy for high availability
+Restart=always
+RestartSec=5s
+
+# Security sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

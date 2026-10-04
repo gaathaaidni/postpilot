@@ -71,16 +71,20 @@ pip install -r requirements.txt
 
 ### 2️⃣ Configuration (1 minute)
 
-Update your Facebook/Instagram credentials in these files:
-- `tour.py` - Lines 5-10 (Tour posting)
-- `visa.py` - Lines 5-10 (Visa posting)
-- `insta.py` - Lines 6-10 (Instagram sync)
-
-```python
-# Example in tour.py
-ACCESS_TOKEN = "your_facebook_token_here"
-PAGE_ID = "your_page_id_here"
+Copy the environment template and set your credentials:
+```bash
+cp .env.example .env
 ```
+
+Edit `.env` with your settings:
+```ini
+FB_ACCESS_TOKEN=your_facebook_token_here
+FB_PAGE_ID_SUITE=967550829768297
+FB_PAGE_ID_PHOENIX=954901604381882
+FB_PAGE_ID_GAATHA_AI=1028368893692590
+```
+
+> **Security Note**: Never commit your `.env` file or hardcode tokens in Python files!
 
 ### 3️⃣ Run the Application
 
