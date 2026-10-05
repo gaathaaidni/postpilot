@@ -2,140 +2,381 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <title>PostPilot - Universal Automation</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>PostPilot - Universal Social Media Automation</title>
+    
+    <!-- Preconnect & Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Main Design System -->
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <!-- Mobile App Bar (Fixed on phones & tablets) -->
+    <header class="mobile-header" role="banner">
+        <button id="mobile-menu-btn" class="mobile-btn" aria-label="Open Navigation Menu" title="Menu">
+            <i class="fa-solid fa-bars"></i>
+        </button>
+        <div class="mobile-brand">
+            <i class="fa-solid fa-paper-plane"></i>
+            <span>PostPilot</span>
+        </div>
+        <div class="mobile-actions">
+            <button class="mobile-btn" onclick="openModal('add')" title="Compose New Post" aria-label="Compose New Post">
+                <i class="fa-solid fa-plus-circle" style="color: var(--primary);"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Mobile Drawer Backdrop Overlay -->
+    <div id="mobile-backdrop" class="mobile-backdrop" aria-hidden="true"></div>
+
     <div class="app-container">
-        <!-- Sidebar -->
-        <aside class="sidebar">
-            <div class="brand">
-                <i class="fa-solid fa-paper-plane"></i>
-                <span>PostPilot</span>
-            </div>
-            <nav class="nav-menu">
-                <button class="nav-item active" data-tab="dashboard">
-                    <i class="fa-solid fa-chart-line"></i> Dashboard
+        <!-- Sidebar Navigation Drawer -->
+        <aside id="sidebar" class="sidebar" role="navigation" aria-label="Main Navigation">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <div class="brand-icon">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </div>
+                    <div>
+                        <div style="line-height: 1.1;">PostPilot</div>
+                        <span class="brand-tag">Universal v2.5</span>
+                    </div>
+                </div>
+                <button id="sidebar-close-btn" class="sidebar-close-btn" aria-label="Close Navigation">
+                    <i class="fa-solid fa-xmark"></i>
                 </button>
-                <div class="nav-label">Modules</div>
+            </div>
+
+            <nav class="nav-menu">
+                <div class="nav-section-title">Overview</div>
+                <button class="nav-item active" data-tab="dashboard">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Dashboard</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="accounts">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-share-nodes"></i>
+                        <span>Social Accounts</span>
+                    </div>
+                    <span class="nav-badge" id="nav-accounts-count">4 Assets</span>
+                </button>
+                <button class="nav-item" data-tab="composer">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                        <span>Create Post</span>
+                    </div>
+                    <span class="nav-badge" style="background: var(--primary-glow); color: #a5b4fc;">Live</span>
+                </button>
+
+                <div class="nav-section-title">Automation Channels</div>
                 <button class="nav-item" data-tab="tour">
-                    <i class="fa-solid fa-earth-americas"></i> Nexora Suite
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-earth-americas" style="color: #38bdf8;"></i>
+                        <span>Nexora Suite</span>
+                    </div>
+                    <span id="nav-tour-status" class="nav-badge">Idle</span>
                 </button>
                 <button class="nav-item" data-tab="nz">
-                    <i class="fa-solid fa-passport"></i> Phoenix Intl
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-passport" style="color: #4ade80;"></i>
+                        <span>Phoenix Intl</span>
+                    </div>
+                    <span id="nav-nz-status" class="nav-badge">Idle</span>
                 </button>
                 <button class="nav-item" data-tab="gaatha">
-                    <i class="fa-solid fa-scroll"></i> Gaatha AI
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-wand-magic-sparkles" style="color: #c084fc;"></i>
+                        <span>Gaatha AI</span>
+                    </div>
+                    <span id="nav-gaatha-status" class="nav-badge">Idle</span>
                 </button>
                 <button class="nav-item" data-tab="insta">
-                    <i class="fa-brands fa-instagram"></i> Instagram Sync
+                    <div class="nav-item-content">
+                        <i class="fa-brands fa-instagram" style="color: #f472b6;"></i>
+                        <span>Instagram Sync</span>
+                    </div>
+                    <span id="nav-insta-status" class="nav-badge">Idle</span>
                 </button>
             </nav>
+
             <div class="sidebar-footer">
-                <div class="status-indicator" id="global-status-indicator">
-                    <span class="dot"></span> System Ready
+                <div class="system-status-widget">
+                    <div class="status-indicator-badge">
+                        <span class="pulsing-dot" id="system-pulsing-dot"></span>
+                        <span id="global-status-indicator">Engine Active</span>
+                    </div>
+                    <small id="worker-lease-indicator" style="color: #64748b; font-size: 0.72rem;">Standby</small>
                 </div>
             </div>
         </aside>
 
-        <!-- Main Content -->
-        <main class="main-content">
+        <!-- Main Workspace Area -->
+        <main class="main-content" role="main">
+            <!-- Desktop/Tablet Top Bar -->
             <header class="top-bar">
-                <div style="display: flex; align-items: center; gap: 0.75rem;">
-                    <h1 id="page-title">Dashboard</h1>
+                <div class="page-title-wrap">
+                    <h1 id="page-title" class="page-title">Dashboard</h1>
                     {% if local_mode %}
-                    <span style="background: #e0f2fe; color: #0369a1; font-size: 0.75rem; font-weight: 600; padding: 0.2rem 0.5rem; border-radius: 9999px;">
+                    <span class="mode-badge" title="Authenticated via safe Localhost Mode">
                         <i class="fa-solid fa-house-laptop"></i> Localhost Mode
                     </span>
                     {% endif %}
                 </div>
+
+                <!-- Global Post Search -->
+                <div class="top-bar-search">
+                    <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+                    <input 
+                        type="search" 
+                        id="global-search-input" 
+                        class="search-input" 
+                        placeholder="Search posts across all channels..." 
+                        aria-label="Search posts"
+                        autocomplete="off"
+                    >
+                    <button id="search-clear-btn" class="search-clear-btn" title="Clear search" aria-label="Clear search">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <!-- Actions & Profile -->
                 <div class="global-actions">
-                    <button class="btn btn-outline-danger" onclick="controlAll('stop')">
-                        <i class="fa-solid fa-stop"></i> Stop All
+                    <button class="btn btn-primary" onclick="openModal('add')" title="Compose new post">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>New Post</span>
                     </button>
-                    <button class="btn btn-primary" onclick="controlAll('start')">
-                        <i class="fa-solid fa-play"></i> Run All
+                    <button class="btn btn-outline-danger" onclick="controlAll('stop')" title="Stop all automation channels">
+                        <i class="fa-solid fa-stop"></i>
+                        <span>Stop All</span>
                     </button>
-                    <div class="user-menu" style="display: flex; align-items: center; gap: 0.5rem; margin-left: 0.5rem; border-left: 1px solid var(--border); padding-left: 0.75rem;">
-                        <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 500;">
-                            <i class="fa-solid fa-circle-user"></i> {{ username }}
-                        </span>
-                        <button class="btn btn-sm btn-secondary" onclick="handleLogout()" title="Sign Out">
+                    <button class="btn btn-secondary" onclick="controlAll('start')" title="Start all automation channels">
+                        <i class="fa-solid fa-play" style="color: var(--success);"></i>
+                        <span>Run All</span>
+                    </button>
+
+                    <div class="user-profile-menu">
+                        <div class="user-avatar" title="{{ username }}">
+                            {{ username[0]|upper if username else 'U' }}
+                        </div>
+                        <div class="user-info-text">
+                            <span>{{ username }}</span>
+                            <span class="user-role-label">Administrator</span>
+                        </div>
+                        <button class="btn btn-sm btn-secondary" onclick="handleLogout()" title="Sign Out of PostPilot" aria-label="Sign Out">
                             <i class="fa-solid fa-right-from-bracket"></i>
                         </button>
                     </div>
                 </div>
             </header>
 
-            <div id="content-area">
-                <!-- Content injected via JS -->
+            <!-- Dynamic Tab Content Injection Container -->
+            <div id="content-area" tabindex="-1">
+                <!-- Content dynamically populated via script.js -->
             </div>
         </main>
     </div>
 
-    <!-- Modal for Add/Edit Post -->
-    <div id="post-modal" class="modal">
-        <div class="modal-content">
+    <!-- ==========================================================================
+         Unified Post Composer / Edit Modal
+         ========================================================================== -->
+    <div id="post-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-content" style="max-width: 780px;">
             <div class="modal-header">
-                <h3 id="modal-title">Manage Post</h3>
-                <button class="close-btn" onclick="closeModal()">&times;</button>
+                <div>
+                    <h3 id="modal-title">Create New Post</h3>
+                    <p class="card-subtitle">Compose caption, attach media, and preview across channels</p>
+                </div>
+                <button class="close-btn" onclick="closeModal()" aria-label="Close dialog">&times;</button>
             </div>
             <div class="modal-body">
                 <form id="post-form" onsubmit="event.preventDefault(); savePost();">
                     <input type="hidden" id="post-id">
-                    <input type="hidden" id="post-type">
                     
+                    <!-- Destination Channel Selector -->
                     <div class="form-group">
-                        <label for="post-message">Caption / Message</label>
-                        <textarea id="post-message" rows="4" class="form-control" placeholder="Enter post content..."></textarea>
+                        <label for="post-type" class="form-label">Destination Channel</label>
+                        <select id="post-type" class="form-control" onchange="handleComposerChannelChange(this.value)">
+                            <option value="tour">Nexora Suite (Tour & Travel · Facebook & IG)</option>
+                            <option value="nz">Phoenix Intl (Visa & Migration · Facebook & IG)</option>
+                            <option value="gaatha">Gaatha AI (Cultural & AI Storytelling · Facebook)</option>
+                            <option value="insta">Instagram Sync (Dual-Account Sync Engine)</option>
+                        </select>
                     </div>
 
+                    <!-- Caption Editor -->
                     <div class="form-group">
-                        <label>Media (Image / Video)</label>
-                        <div class="file-upload-wrapper">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                            <label for="post-message" class="form-label" style="margin-bottom: 0;">Caption / Message</label>
+                            <span id="char-counter" style="font-size: 0.78rem; color: var(--text-muted);">0 / 2200 characters</span>
+                        </div>
+                        <textarea 
+                            id="post-message" 
+                            rows="4" 
+                            class="form-control" 
+                            placeholder="Write an engaging caption for Facebook & Instagram..." 
+                            oninput="handleCaptionInput(this.value)"
+                        ></textarea>
+                        
+                        <!-- Quick hashtag chips -->
+                        <div class="hashtag-chips-row">
+                            <span class="hashtag-chip" onclick="insertTag('#PostPilot')">#PostPilot</span>
+                            <span class="hashtag-chip" onclick="insertTag('#Nexora')">#Nexora</span>
+                            <span class="hashtag-chip" onclick="insertTag('#Travel')">#Travel</span>
+                            <span class="hashtag-chip" onclick="insertTag('#PhoenixIntl')">#PhoenixIntl</span>
+                            <span class="hashtag-chip" onclick="insertTag('#Visa')">#Visa</span>
+                            <span class="hashtag-chip" onclick="insertTag('#GaathaAI')">#GaathaAI</span>
+                            <span class="hashtag-chip" onclick="insertTag('#Automation')">#Automation</span>
+                        </div>
+                    </div>
+
+                    <!-- Media Upload Dropzone -->
+                    <div class="form-group">
+                        <label class="form-label">Media Attachment (Image or Video)</label>
+                        <div class="file-upload-wrapper" id="file-drop-zone">
                             <input type="file" id="post-file" accept="image/*,video/*" onchange="handleFileSelect(this)">
-                            <div class="file-upload-label">
+                            <div class="file-upload-icon">
                                 <i class="fa-solid fa-cloud-arrow-up"></i>
-                                <span id="file-name">Choose file or drag here</span>
                             </div>
+                            <div class="file-upload-text" id="file-name">Drag & drop image/video or browse files</div>
+                            <div class="file-upload-hint">Supports PNG, JPG, WEBP, MP4 (Max 16 MB)</div>
+                        </div>
+
+                        <!-- Active File Preview Indicator -->
+                        <div id="file-preview-card" class="file-preview-card">
+                            <img id="preview-thumb-img" class="file-preview-thumb" src="" alt="Selected Media">
+                            <div style="flex: 1; min-width: 0;">
+                                <div id="selected-file-label" style="font-weight: 600; font-size: 0.85rem;" class="text-truncate">filename.png</div>
+                                <div style="font-size: 0.75rem; color: var(--success);"><i class="fa-solid fa-check"></i> Ready to attach</div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="clearSelectedMedia()" title="Remove media">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
                         </div>
                         <input type="hidden" id="current-image-filename">
+                    </div>
+
+                    <!-- Live Social Feed Preview Accordion / Tabs -->
+                    <div style="margin-top: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; background: var(--bg-app);">
+                        <div class="composer-preview-header">
+                            <div style="font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <i class="fa-solid fa-eye" style="color: var(--primary);"></i>
+                                <span>Live Social Media Mockup</span>
+                            </div>
+                            <div class="preview-toggle-group">
+                                <button type="button" id="tab-btn-fb" class="preview-tab-btn active" onclick="switchPreviewPlatform('fb')">
+                                    <i class="fa-brands fa-facebook" style="color: var(--fb-blue);"></i> Facebook
+                                </button>
+                                <button type="button" id="tab-btn-ig" class="preview-tab-btn" onclick="switchPreviewPlatform('ig')">
+                                    <i class="fa-brands fa-instagram" style="color: var(--ig-pink);"></i> Instagram
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Facebook Live Mockup -->
+                        <div id="mockup-container-fb" class="fb-post-mockup">
+                            <div class="fb-mockup-header">
+                                <div class="fb-mockup-avatar" id="fb-preview-avatar">N</div>
+                                <div>
+                                    <div class="fb-mockup-page-name">
+                                        <span id="fb-preview-name">Nexora Suite</span>
+                                        <i class="fa-solid fa-circle-check"></i>
+                                    </div>
+                                    <div class="fb-mockup-time">Just now &middot; <i class="fa-solid fa-earth-americas"></i></div>
+                                </div>
+                            </div>
+                            <div class="fb-mockup-caption" id="fb-preview-caption">Your caption will appear here in real-time...</div>
+                            <div class="fb-mockup-media-container" id="fb-preview-media">
+                                <div class="fb-mockup-media-placeholder">
+                                    <i class="fa-regular fa-image"></i>
+                                    <div>Attach an image or video to preview media layout</div>
+                                </div>
+                            </div>
+                            <div class="fb-mockup-footer">
+                                <div class="fb-footer-action"><i class="fa-regular fa-thumbs-up"></i> Like</div>
+                                <div class="fb-footer-action"><i class="fa-regular fa-comment"></i> Comment</div>
+                                <div class="fb-footer-action"><i class="fa-solid fa-share"></i> Share</div>
+                            </div>
+                        </div>
+
+                        <!-- Instagram Live Mockup (Hidden by default) -->
+                        <div id="mockup-container-ig" class="ig-post-mockup" style="display: none;">
+                            <div class="ig-mockup-header">
+                                <div class="ig-avatar-ring">
+                                    <div class="ig-avatar-inner" id="ig-preview-avatar">N</div>
+                                </div>
+                                <div>
+                                    <div class="ig-mockup-user" id="ig-preview-username">nexora_suite</div>
+                                    <div class="ig-mockup-location">Global &middot; Meta Business</div>
+                                </div>
+                            </div>
+                            <div class="ig-mockup-media-container" id="ig-preview-media">
+                                <div class="fb-mockup-media-placeholder">
+                                    <i class="fa-brands fa-instagram"></i>
+                                    <div>Attach an image to preview 1:1 Instagram frame</div>
+                                </div>
+                            </div>
+                            <div class="ig-mockup-actions">
+                                <div class="ig-action-left">
+                                    <i class="fa-regular fa-heart"></i>
+                                    <i class="fa-regular fa-comment"></i>
+                                    <i class="fa-regular fa-paper-plane"></i>
+                                </div>
+                                <i class="fa-regular fa-bookmark"></i>
+                            </div>
+                            <div class="ig-mockup-caption-wrap">
+                                <span class="ig-mockup-username-prefix" id="ig-preview-prefix">nexora_suite</span>
+                                <span id="ig-preview-caption">Your caption will appear here...</span>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="savePost()">Save Post</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="button" id="save-post-btn" class="btn btn-primary" onclick="savePost()">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Post
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Toast Notification Container -->
-    <div id="toast-container"></div>
-
-    <!-- Confirmation Modal -->
-    <div id="confirm-modal" class="modal">
-        <div class="modal-content" style="max-width: 400px;">
+    <!-- ==========================================================================
+         Confirmation Dialog Modal
+         ========================================================================== -->
+    <div id="confirm-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+        <div class="modal-content" style="max-width: 440px;">
             <div class="modal-header">
-                <h3>Confirm Action</h3>
-                <button class="close-btn" onclick="closeConfirmModal()">&times;</button>
+                <h3 id="confirm-dialog-title" style="display: flex; align-items: center; gap: 0.5rem; color: var(--danger);">
+                    <i class="fa-solid fa-triangle-exclamation"></i> Confirm Action
+                </h3>
+                <button class="close-btn" onclick="closeConfirmModal()" aria-label="Cancel">&times;</button>
             </div>
             <div class="modal-body">
-                <p id="confirm-msg" style="margin-bottom: 0; line-height: 1.5;"></p>
+                <p id="confirm-msg" style="margin-bottom: 0; line-height: 1.5; color: var(--text-secondary);"></p>
             </div>
-            <div class="modal-footer" style="padding-top: 1rem;">
-                <button class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
-                <button id="confirm-yes-btn" class="btn btn-danger">
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+                <button id="confirm-yes-btn" type="button" class="btn btn-danger">
                     <i class="fa-solid fa-trash-can"></i> Confirm Delete
                 </button>
             </div>
         </div>
     </div>
 
+    <!-- Toast Notifications Root -->
+    <div id="toast-container" role="region" aria-live="polite"></div>
+
+    <!-- Application Script -->
     <script src="/static/script.js"></script>
 </body>
 </html>

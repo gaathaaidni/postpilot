@@ -3,98 +3,396 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PostPilot Login</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>PostPilot - Sign In</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
     <style>
-        .login-wrapper {
-            display: flex;
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --primary-glow: rgba(79, 70, 229, 0.25);
+            --bg-dark: #0b0f19;
+            --card-bg: rgba(17, 24, 39, 0.75);
+            --border-glow: rgba(99, 102, 241, 0.2);
+            --text-light: #f9fafb;
+            --text-subtle: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(circle at 20% 20%, #1e1b4b 0%, #0f172a 45%, #050811 100%);
             min-height: 100vh;
+            display: flex;
             align-items: center;
             justify-content: center;
-            background: var(--bg-app);
-            padding: 1rem;
+            color: var(--text-light);
+            padding: 1.25rem;
+            position: relative;
+            overflow-x: hidden;
         }
+
+        /* Ambient glow orbs */
+        .ambient-glow {
+            position: absolute;
+            width: 450px;
+            height: 450px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(79, 70, 229, 0.18) 0%, rgba(79, 70, 229, 0) 70%);
+            top: 10%;
+            left: 15%;
+            filter: blur(40px);
+            pointer-events: none;
+        }
+
+        .ambient-glow-2 {
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(14, 165, 233, 0.15) 0%, rgba(14, 165, 233, 0) 70%);
+            bottom: 10%;
+            right: 15%;
+            filter: blur(40px);
+            pointer-events: none;
+        }
+
         .login-card {
             width: 100%;
-            max-width: 400px;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 2.5rem;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+            max-width: 440px;
+            background: rgba(17, 24, 39, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 2.75rem 2.25rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            position: relative;
+            z-index: 10;
+            animation: fadeInCard 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
-        .login-brand {
+
+        @keyframes fadeInCard {
+            from {
+                opacity: 0;
+                transform: translateY(12px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .brand-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .brand-icon-wrapper {
+            width: 58px;
+            height: 58px;
+            margin: 0 auto 1.25rem;
+            background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+            border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.75rem;
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--primary);
+            color: #ffffff;
+            font-size: 1.6rem;
+            box-shadow: 0 10px 20px -5px var(--primary-glow);
+        }
+
+        .brand-name {
+            font-size: 1.75rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.35rem;
+        }
+
+        .brand-tagline {
+            color: var(--text-subtle);
+            font-size: 0.9rem;
+            font-weight: 400;
+        }
+
+        .channel-pill-row {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 0.85rem;
+        }
+
+        .channel-mini-pill {
+            font-size: 0.72rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            color: #94a3b8;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .alert-box {
+            display: none;
+            padding: 0.85rem 1rem;
+            border-radius: 10px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            font-size: 0.85rem;
+            margin-bottom: 1.5rem;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.35rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #e2e8f0;
             margin-bottom: 0.5rem;
         }
-        .login-subtitle {
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 0.9rem;
-            margin-bottom: 2rem;
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
         }
-        .alert-danger {
-            background-color: #fee2e2;
-            color: #991b1b;
-            padding: 0.75rem;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            margin-bottom: 1rem;
-            display: none;
+
+        .input-icon {
+            position: absolute;
+            left: 1rem;
+            color: #64748b;
+            font-size: 0.95rem;
+            pointer-events: none;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 0.85rem 1rem 0.85rem 2.75rem;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 10px;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        .login-input:focus {
+            outline: none;
+            border-color: #6366f1;
+            background: rgba(15, 23, 42, 0.85);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+        }
+
+        .toggle-password-btn {
+            position: absolute;
+            right: 0.85rem;
+            background: transparent;
+            border: none;
+            color: #64748b;
+            cursor: pointer;
+            padding: 0.25rem 0.5rem;
+            font-size: 0.95rem;
+            transition: color 0.2s;
+        }
+
+        .toggle-password-btn:hover {
+            color: #cbd5e1;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 0.9rem 1.25rem;
+            margin-top: 1.5rem;
+            background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: #ffffff;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6rem;
+            box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.4);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            min-height: 48px;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 14px 24px -5px rgba(79, 70, 229, 0.5);
+            background: linear-gradient(135deg, #5b52f0 0%, #483bd6 100%);
+        }
+
+        .submit-btn:active {
+            transform: translateY(1px);
+        }
+
+        .submit-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .login-footer {
+            margin-top: 2rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: center;
+            font-size: 0.8rem;
+            color: #64748b;
+        }
+
+        @media (max-width: 480px) {
+            .login-card {
+                padding: 2rem 1.5rem;
+                border-radius: 16px;
+            }
+            .brand-name {
+                font-size: 1.5rem;
+            }
+            .channel-pill-row {
+                flex-wrap: wrap;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="login-wrapper">
-        <div class="login-card">
-            <div class="login-brand">
+    <div class="ambient-glow"></div>
+    <div class="ambient-glow-2"></div>
+
+    <main class="login-card" role="main">
+        <header class="brand-header">
+            <div class="brand-icon-wrapper" aria-hidden="true">
                 <i class="fa-solid fa-paper-plane"></i>
-                <span>PostPilot</span>
             </div>
-            <p class="login-subtitle">Sign in to manage social automation</p>
+            <h1 class="brand-name">PostPilot</h1>
+            <p class="brand-tagline">Social media control without complexity</p>
+            <div class="channel-pill-row">
+                <span class="channel-mini-pill"><i class="fa-brands fa-meta"></i> Meta Verified</span>
+                <span class="channel-mini-pill"><i class="fa-brands fa-instagram"></i> Instagram Sync</span>
+                <span class="channel-mini-pill"><i class="fa-solid fa-shield-halved"></i> Universal</span>
+            </div>
+        </header>
 
-            <div id="login-alert" class="alert-danger"></div>
-
-            <form id="login-form" onsubmit="handleLogin(event)">
-                <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
-                
-                <div class="form-group">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" class="form-control" placeholder="Enter username" required autofocus autocomplete="username">
-                </div>
-
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" class="form-control" placeholder="Enter password" required autocomplete="current-password">
-                </div>
-
-                <button type="submit" id="login-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem; padding: 0.75rem;">
-                    <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
-                </button>
-            </form>
+        <div id="login-alert" class="alert-box" role="alert" aria-live="polite">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span id="alert-text">Authentication failed</span>
         </div>
-    </div>
+
+        <form id="login-form" onsubmit="handleLogin(event)" novalidate>
+            <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
+
+            <div class="form-group">
+                <label for="username" class="form-label">Username</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-user input-icon" aria-hidden="true"></i>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        class="login-input" 
+                        placeholder="Enter your username" 
+                        required 
+                        autofocus 
+                        autocomplete="username"
+                        spellcheck="false"
+                    >
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="password" class="form-label">Password</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-lock input-icon" aria-hidden="true"></i>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        class="login-input" 
+                        placeholder="••••••••••••" 
+                        required 
+                        autocomplete="current-password"
+                    >
+                    <button 
+                        type="button" 
+                        class="toggle-password-btn" 
+                        onclick="togglePasswordVisibility()" 
+                        title="Show or hide password"
+                        aria-label="Toggle password visibility"
+                    >
+                        <i id="password-toggle-icon" class="fa-regular fa-eye"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" id="login-btn" class="submit-btn">
+                <i class="fa-solid fa-arrow-right-to-bracket" aria-hidden="true"></i>
+                <span>Sign In to PostPilot</span>
+            </button>
+        </form>
+
+        <footer class="login-footer">
+            <span>PostPilot Universal Suite &middot; Android / Termux / Server</span>
+        </footer>
+    </main>
 
     <script>
+        function togglePasswordVisibility() {
+            const passInput = document.getElementById('password');
+            const icon = document.getElementById('password-toggle-icon');
+            if (passInput.type === 'password') {
+                passInput.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                passInput.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        }
+
         async function handleLogin(e) {
             e.preventDefault();
             const alertBox = document.getElementById('login-alert');
+            const alertText = document.getElementById('alert-text');
             const submitBtn = document.getElementById('login-btn');
-            const username = document.getElementById('username').value.trim();
-            const password = document.getElementById('password').value;
+            const usernameInput = document.getElementById('username');
+            const passwordInput = document.getElementById('password');
             const csrfToken = document.getElementById('csrf_token').value;
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+                alertText.textContent = 'Please enter both username and password';
+                alertBox.style.display = 'flex';
+                return;
+            }
 
             alertBox.style.display = 'none';
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
+            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Signing in...</span>';
 
             try {
                 const res = await fetch('/api/auth/login', {
@@ -108,18 +406,22 @@
                 const data = await res.json();
 
                 if (res.ok && data.success) {
-                    window.location.href = '/';
+                    submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Success! Redirecting...</span>';
+                    submitBtn.style.background = '#059669';
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 250);
                 } else {
-                    alertBox.textContent = data.error || 'Authentication failed';
-                    alertBox.style.display = 'block';
+                    alertText.textContent = data.error || 'Invalid credentials. Please try again.';
+                    alertBox.style.display = 'flex';
                     submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In';
+                    submitBtn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> <span>Sign In to PostPilot</span>';
                 }
             } catch (err) {
-                alertBox.textContent = 'Network or server error. Please try again.';
-                alertBox.style.display = 'block';
+                alertText.textContent = 'Network or server error. Please verify connection.';
+                alertBox.style.display = 'flex';
                 submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In';
+                submitBtn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> <span>Sign In to PostPilot</span>';
             }
         }
     </script>
