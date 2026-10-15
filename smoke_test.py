@@ -17,6 +17,8 @@ import config
 import database
 import facebook_api
 
+__test__ = False
+
 def print_header(title):
     print("\n" + "=" * 60)
     print(f" SMOKE TEST: {title.upper()}")
@@ -40,7 +42,7 @@ def create_dummy_image(filename="smoke_test_image.jpg"):
         print(f"   - Failed to create dummy image: {e}")
         return None
 
-def test_module(module_name, post_function, post_file):
+def _run_module_smoke_test(module_name, post_function, post_file):
     """Generic test function for Nexora and Gaatha modules."""
     print_header(module_name)
     try:
@@ -67,6 +69,10 @@ def test_module(module_name, post_function, post_file):
         print(f"   - ERROR: {e}")
         print_result(module_name, False)
 
+# Backward compatibility alias with pytest disabled
+test_module = _run_module_smoke_test
+test_module.__test__ = False
+
 def main():
     print("==================================================")
     print(" PostPilot Application Module Smoke Test")
@@ -77,9 +83,9 @@ def main():
     if not dummy_img:
         print("[WARNING] Could not create dummy image.")
 
-    test_module("Nexora Suite (Tour)", "post_on_facebook", "nexora_suite.py")
-    test_module("Nexora Phoenix (Visa)", "post_on_facebook", "nexora_by_phoenix_international.py")
-    test_module("Gaatha AI", "post_to_facebook", "gaatha_loop.py")
+    _run_module_smoke_test("Nexora Suite (Tour)", "post_on_facebook", "nexora_suite.py")
+    _run_module_smoke_test("Nexora Phoenix (Visa)", "post_on_facebook", "nexora_by_phoenix_international.py")
+    _run_module_smoke_test("Gaatha AI", "post_to_facebook", "gaatha_loop.py")
     
     print("\nSmoke test complete.")
 

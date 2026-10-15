@@ -119,7 +119,7 @@ def test_production_security():
     print("=" * 65)
     
     shutil.rmtree(str(TEST_DIR), ignore_errors=True)
-    return True
 
 if __name__ == '__main__':
     test_production_security()
+

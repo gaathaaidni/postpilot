@@ -193,22 +193,30 @@ def _start_local_task(task_name):
 
     with local_threads_lock:
         if task_name in channel_runner.CHANNELS:
+            if task_name in local_worker_threads and local_worker_threads[task_name].is_alive():
+                logger.info(f"Task thread '{task_name}' already running; ignoring duplicate start.")
+                return
             ch = channel_runner.get_channel(task_name)
             state = database.get_task_state(task_name)
             ch.set_interval(state.get('interval', ch.default_interval))
             ch.stop_event.clear()
-            th = threading.Thread(target=ch.run, daemon=True)
+            th = threading.Thread(target=ch.run, daemon=True, name=f"Local-{task_name}")
             th.start()
             local_worker_threads[task_name] = th
         elif task_name == 'insta':
+            th1 = local_worker_threads.get('insta_suite')
+            th2 = local_worker_threads.get('insta_phoenix')
+            if (th1 and th1.is_alive()) or (th2 and th2.is_alive()):
+                logger.info("Instagram sync threads already running; ignoring duplicate start.")
+                return
             state = database.get_task_state('insta')
             interval = state.get('interval', config.INSTA_INTERVAL)
             insta_suite.set_interval(interval)
             insta_phoenix.set_interval(interval)
             insta_suite.stop_event.clear()
             insta_phoenix.stop_event.clear()
-            th1 = threading.Thread(target=insta_suite.run, daemon=True)
-            th2 = threading.Thread(target=insta_phoenix.run, daemon=True)
+            th1 = threading.Thread(target=insta_suite.run, daemon=True, name="Local-insta-suite")
+            th2 = threading.Thread(target=insta_phoenix.run, daemon=True, name="Local-insta-phoenix")
             th1.start()
             th2.start()
             local_worker_threads['insta_suite'] = th1

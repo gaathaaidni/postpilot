@@ -20,9 +20,12 @@ if REPO_ROOT not in sys.path:
 
 import config
 import channel_runner
+import posting_utils
+import facebook_api
 import nexora_suite
 import nexora_by_phoenix_international
 import gaatha_loop
+
 
 class TestChannelRunner(unittest.TestCase):
 
@@ -114,21 +117,115 @@ class TestChannelRunner(unittest.TestCase):
         # 1. nexora_suite
         self.assertEqual(nexora_suite.POST_TYPE, 'tour')
         self.assertEqual(nexora_suite.PAGE_ID, config.FB_PAGE_ID_SUITE)
+        self.assertIsInstance(nexora_suite.current_interval, int)
         self.assertTrue(callable(nexora_suite.run_nexora_suite))
         self.assertTrue(callable(nexora_suite.stop_nexora_suite))
 
         # 2. nexora_by_phoenix_international
         self.assertEqual(nexora_by_phoenix_international.POST_TYPE, 'nz')
         self.assertEqual(nexora_by_phoenix_international.PAGE_ID, config.FB_PAGE_ID_PHOENIX)
+        self.assertIsInstance(nexora_by_phoenix_international.current_interval, int)
         self.assertTrue(callable(nexora_by_phoenix_international.run_nexora_by_phoenix))
         self.assertTrue(callable(nexora_by_phoenix_international.stop_nexora_by_phoenix))
 
         # 3. gaatha_loop
         self.assertEqual(gaatha_loop.POST_TYPE, 'gaatha')
         self.assertEqual(gaatha_loop.PAGE_ID, config.FB_PAGE_ID_GAATHA_AI)
+        self.assertIsInstance(gaatha_loop.current_interval, int)
         self.assertTrue(callable(gaatha_loop.run_gaatha_loop))
         self.assertTrue(callable(gaatha_loop.stop_gaatha_loop))
         self.assertTrue(callable(gaatha_loop.post_to_facebook))
+
+    def test_dynamic_module_attributes_via_getattr(self):
+        """Tests that module __getattr__ correctly resolves dynamic PAGE_ID and current_interval."""
+        with patch.dict(os.environ, {'FB_PAGE_ID_SUITE': '999888777666'}):
+            self.assertEqual(nexora_suite.PAGE_ID, '999888777666')
+        with patch.dict(os.environ, {'FB_PAGE_ID_PHOENIX': '888777666555'}):
+            self.assertEqual(nexora_by_phoenix_international.PAGE_ID, '888777666555')
+        with patch.dict(os.environ, {'FB_PAGE_ID_GAATHA_AI': '777666555444'}):
+            self.assertEqual(gaatha_loop.PAGE_ID, '777666555444')
+
+    def test_all_channel_aliases_resolution(self):
+        """Verifies all supported environment variable aliases resolve predictably for each channel."""
+        tour_ch = channel_runner.get_channel('tour')
+        nz_ch = channel_runner.get_channel('nz')
+        gaatha_ch = channel_runner.get_channel('gaatha')
+
+        # tour aliases
+        with patch.dict(os.environ, {'TOUR_PAGE_ID': '1010101010'}):
+            with patch.dict(os.environ, {'FB_PAGE_ID_SUITE': '', 'FB_PAGE_ID_NEXORA_SUITE': ''}):
+                self.assertEqual(tour_ch.get_page_id(), '1010101010')
+
+        # nz aliases
+        with patch.dict(os.environ, {'VISA_PAGE_ID': '2020202020'}):
+            with patch.dict(os.environ, {'FB_PAGE_ID_PHOENIX': '', 'FB_PAGE_ID_NEXORA_BY_PHOENIX': ''}):
+                self.assertEqual(nz_ch.get_page_id(), '2020202020')
+
+        # gaatha aliases
+        with patch.dict(os.environ, {'FB_PAGE_ID_GAATHA': '3030303030'}):
+            with patch.dict(os.environ, {'FB_PAGE_ID_GAATHA_AI': ''}):
+                self.assertEqual(gaatha_ch.get_page_id(), '3030303030')
+
+    def test_invalid_page_id_rejection(self):
+        """Ensures non-numeric and empty Page IDs fail clearly with ValueError."""
+        ch = channel_runner.get_channel('tour')
+        with patch.dict(os.environ, {'FB_PAGE_ID_SUITE': 'not_a_valid_id'}):
+            with self.assertRaises(ValueError) as ctx:
+                ch.get_page_id()
+            self.assertIn("Page IDs must consist of numeric digits", str(ctx.exception))
+
+        custom_ch = channel_runner.Channel('custom', 'Custom', 'custom', ('CUSTOM_PAGE_ID',), '', 1800)
+        with patch.dict(os.environ, {'CUSTOM_PAGE_ID': ''}):
+            with self.assertRaises(ValueError) as ctx:
+                custom_ch.get_page_id()
+            self.assertIn("Missing Facebook Page ID configuration", str(ctx.exception))
+
+    def test_cross_channel_collision_detection(self):
+        """Verifies validate_channel_routing detects and rejects accidental duplicate mappings."""
+        # 1. Standard channels should pass validation with unique IDs
+        mapping = channel_runner.validate_channel_routing()
+        self.assertEqual(len(mapping), 3)
+        self.assertEqual(len(set(mapping.values())), 3)
+
+        # 2. Collision simulated: nz accidentally set to tour's Page ID
+        tour_id = channel_runner.get_channel('tour').get_page_id()
+        with patch.dict(os.environ, {'FB_PAGE_ID_PHOENIX': tour_id}):
+            with self.assertRaises(ValueError) as ctx:
+                channel_runner.validate_channel_routing()
+            self.assertIn("Cross-channel routing conflict", str(ctx.exception))
+
+    @patch('facebook_api.get_page_token')
+    @patch('facebook_api._request_with_retry')
+    def test_text_only_post_payload_construction(self, mock_req, mock_token):
+        """Verifies text-only posts route to /{page_id}/feed instead of failing on missing image."""
+        mock_token.return_value = 'MOCK_PAGE_TOKEN'
+        mock_req.return_value = {'id': 'feed_post_12345'}
+
+        res = posting_utils.post_on_facebook(
+            message="Text only announcement",
+            image_filename="",
+            page_id="967550829768297",
+            access_token="MOCK_USER_TOKEN"
+        )
+        self.assertTrue(res)
+        self.assertEqual(res['id'], 'feed_post_12345')
+
+        # Check call arguments
+        call_args = mock_req.call_args
+        self.assertEqual(call_args[0][0], "POST")
+        self.assertIn("/feed", call_args[0][1])
+        self.assertEqual(call_args[1]['data']['message'], "Text only announcement")
+        self.assertEqual(call_args[1]['data']['access_token'], "MOCK_PAGE_TOKEN")
+
+    def test_channel_isolated_instagram_binding(self):
+        """Ensures Instagram IDs are channel-specific and unconfigured channels don't cross-post."""
+        tour_ch = channel_runner.get_channel('tour')
+        nz_ch = channel_runner.get_channel('nz')
+        gaatha_ch = channel_runner.get_channel('gaatha')
+
+        self.assertEqual(tour_ch.get_insta_id(), config.INSTA_ID_SUITE)
+        self.assertEqual(nz_ch.get_insta_id(), config.INSTA_ID_PHOENIX)
+        self.assertIsNone(gaatha_ch.get_insta_id())
 
     def test_zero_secrets_in_channel_metadata(self):
         """Ensures channel metadata never stores or leaks access tokens."""

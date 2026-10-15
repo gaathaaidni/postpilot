@@ -13,6 +13,7 @@ Features:
 - Database-backed task state (safe for multi-worker WSGI servers)
 - Safe live database backup mechanism
 """
+import os
 import sqlite3
 import logging
 from pathlib import Path
@@ -34,8 +35,13 @@ def _get_sqlite_path():
     db_url = config.DATABASE_URL
     if db_url.startswith("sqlite:///"):
         path_str = db_url.replace("sqlite:///", "")
-        return Path(path_str)
+        p = Path(path_str)
+        if not p.is_absolute():
+            p = config.BASE_DIR / p
+        return p
     return config.DEFAULT_SQLITE_PATH
+
+
 
 class DBConnectionWrapper:
     """
@@ -430,7 +436,7 @@ def acquire_worker_lease(worker_id, lease_name='scheduler', ttl_seconds=30):
     """
     Attempts to acquire or renew a worker lease atomically.
     Returns True if lease acquired or renewed by worker_id, False if held by another active worker.
-    Automatically handles stale / crashed lease recovery.
+    Automatically handles stale / crashed lease recovery without race conditions.
     """
     now = _utcnow()
     new_expires = now + timedelta(seconds=ttl_seconds)
@@ -438,37 +444,21 @@ def acquire_worker_lease(worker_id, lease_name='scheduler', ttl_seconds=30):
     expires_str = new_expires.strftime("%Y-%m-%d %H:%M:%S")
 
     with get_db_connection() as conn:
-        row = conn.execute("SELECT worker_id, expires_at FROM worker_leases WHERE lease_name = ?", (lease_name,)).fetchone()
-        if not row:
-            conn.execute(
-                "INSERT INTO worker_leases (lease_name, worker_id, acquired_at, expires_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (lease_name, worker_id, now_str, expires_str, now_str)
-            )
-            conn.commit()
-            return True
+        # 1. Ensure lease row exists safely without primary key race condition
+        conn.execute(
+            "INSERT INTO worker_leases (lease_name, worker_id, acquired_at, expires_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(lease_name) DO NOTHING",
+            (lease_name, worker_id, now_str, expires_str, now_str)
+        )
 
-        curr_worker = row['worker_id']
-        curr_expires_raw = row['expires_at']
-        try:
-            if isinstance(curr_expires_raw, datetime):
-                curr_expires = curr_expires_raw
-            else:
-                curr_expires = datetime.fromisoformat(str(curr_expires_raw).replace(' ', 'T')[:19])
-        except Exception:
-            curr_expires = now - timedelta(seconds=1)
-
-        # If current worker owns it, or previous lease expired (crashed worker recovery)
-        if curr_worker == worker_id or curr_expires <= now:
-            conn.execute(
-                "UPDATE worker_leases SET worker_id = ?, expires_at = ?, updated_at = ? WHERE lease_name = ?",
-                (worker_id, expires_str, now_str, lease_name)
-            )
-            conn.commit()
-            return True
-
-        # Lease is held by another active worker
-        return False
+        # 2. Atomically acquire or renew if unheld, expired, or currently held by this worker
+        cur = conn.execute(
+            "UPDATE worker_leases SET worker_id = ?, expires_at = ?, updated_at = ? "
+            "WHERE lease_name = ? AND (worker_id = ? OR expires_at <= ?)",
+            (worker_id, expires_str, now_str, lease_name, worker_id, now_str)
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 def renew_worker_lease(worker_id, lease_name='scheduler', ttl_seconds=30):
     """Renews an existing lease if still held by worker_id."""

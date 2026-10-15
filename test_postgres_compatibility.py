@@ -136,7 +136,6 @@ def test_postgres_abstraction():
     print("=" * 65)
     print(">>> POSTGRESQL ABSTRACTION TESTS PASSED <<<")
     print("=" * 65)
-    return True
 
 def test_live_postgres_if_configured():
     pg_url = os.getenv('POSTPILOT_DATABASE_URL') or os.getenv('DATABASE_URL')
@@ -144,7 +143,7 @@ def test_live_postgres_if_configured():
         print("\n[LIVE POSTGRESQL RUNTIME CHECK]")
         print("  [STATUS: PENDING] POSTPILOT_DATABASE_URL is not configured.")
         print("  Isolated PostgreSQL server unavailable in local environment.")
-        return {'status': 'PENDING', 'reason': 'POSTPILOT_DATABASE_URL not set'}
+        return
 
     print("\n[LIVE POSTGRESQL RUNTIME CHECK]")
     print("  Connecting to live PostgreSQL database...")
@@ -193,10 +192,9 @@ def test_live_postgres_if_configured():
         assert len(rb_check) == 0
         print("  [OK] Transaction rollback on failure verified in live PostgreSQL")
         print("  >>> LIVE POSTGRESQL RUNTIME VALIDATION PASSED <<<")
-        return {'status': 'PASS'}
     except Exception as e:
         print(f"  [ERROR] Live PostgreSQL validation failed: {e}")
-        return {'status': 'FAIL', 'error': str(e)}
+        raise
 
 if __name__ == '__main__':
     test_postgres_abstraction()

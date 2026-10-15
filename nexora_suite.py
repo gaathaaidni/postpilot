@@ -9,12 +9,14 @@ _channel = channel_runner.get_channel('tour')
 
 # Expose backward-compatible module attributes
 stop_event = _channel.stop_event
-PAGE_ID = _channel.get_page_id()
 POST_TYPE = _channel.post_type
 
-@property
-def current_interval():
-    return _channel.current_interval
+def __getattr__(name):
+    if name == 'PAGE_ID':
+        return _channel.get_page_id()
+    if name == 'current_interval':
+        return _channel.current_interval
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 def load_posts():
     return _channel.load_posts()
@@ -33,3 +35,4 @@ def run_nexora_suite():
 
 def stop_nexora_suite():
     _channel.stop()
+
