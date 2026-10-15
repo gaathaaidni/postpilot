@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import time
 import json
@@ -21,6 +22,23 @@ def mask_token_preview(token):
     if len(token) <= 8:
         return "****"
     return f"{token[:4]}...{token[-4:]}"
+
+def sanitize_log_message(msg):
+    """
+    Sanitizes sensitive tokens or credential query parameters from log messages
+    to prevent accidental credential exposure in application logs.
+    """
+    if not msg:
+        return ""
+    if not isinstance(msg, str):
+        msg = str(msg)
+    # Redact URL query parameters like access_token=...
+    sanitized = re.sub(r'([?&]access_token=)[^&\s\'"]+', r'\1[REDACTED]', msg)
+    # Redact access_token key-value in string representations (e.g. 'access_token': '...')
+    sanitized = re.sub(r'(["\']access_token["\']\s*:\s*["\'])[^"\']+(["\'])', r'\1[REDACTED]\2', sanitized)
+    # Redact long Meta access tokens starting with EAA (20+ chars)
+    sanitized = re.sub(r'EAA[a-zA-Z0-9]{20,}', '[REDACTED_TOKEN]', sanitized)
+    return sanitized
 
 def classify_facebook_error(response_json, status_code=200):
     """
@@ -181,12 +199,12 @@ def get_page_token(user_token=None, page_id=None, channel_key=None):
         if 'error' in res_json:
             err_msg = res_json['error'].get('message', 'Unknown')
             err_code = res_json['error'].get('code')
-            logger.error(f"Graph API Error in get_page_token for page {page_id_str}: {err_msg} (code={err_code})")
+            logger.error(f"Graph API Error in get_page_token for page {page_id_str}: {sanitize_log_message(err_msg)} (code={err_code})")
         else:
             logger.error(f"Page ID {page_id_str} was not found among user's managed Facebook accounts.")
         return None
     except Exception as e:
-        logger.error(f"Exception in get_page_token for page {page_id_str}: {e}")
+        logger.error(f"Exception in get_page_token for page {page_id_str}: {sanitize_log_message(str(e))}")
         return None
 
 def audit_publishing_capabilities(token, page_id=None):
@@ -257,7 +275,7 @@ def get_token_info(token):
             return data
         return None
     except Exception as e:
-        logger.error(f"Failed to debug token: {e}")
+        logger.error(f"Failed to debug token: {sanitize_log_message(str(e))}")
         return None
 
 def _is_rate_limited(response_json, status_code):
@@ -293,7 +311,7 @@ def _request_with_retry(method, url, **kwargs):
             # Permanent errors: do not retry
             if err_category in ('AUTH_ERROR', 'PERMISSION_ERROR', 'CLIENT_ERROR', 'DUPLICATE_POST'):
                 err_msg = res_json['error'].get('message', 'Client Error') if isinstance(res_json.get('error'), dict) else str(res_json.get('error'))
-                logger.error(f"❌ Permanent Facebook API error ({err_category}): {err_msg}")
+                logger.error(f"❌ Permanent Facebook API error ({err_category}): {sanitize_log_message(err_msg)}")
                 return res_json
 
             # Rate limits or transient server errors: retry with backoff
@@ -313,15 +331,17 @@ def _request_with_retry(method, url, **kwargs):
 
             return res_json
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-            logger.warning(f"⚠️ Network error (attempt {attempt+1}/{MAX_RETRIES}): {e}")
+            safe_err = sanitize_log_message(str(e))
+            logger.warning(f"⚠️ Network error (attempt {attempt+1}/{MAX_RETRIES}): {safe_err}")
             if attempt == MAX_RETRIES - 1:
-                return {'error': {'message': f"Network error after {MAX_RETRIES} attempts: {e}", 'category': 'NETWORK_ERROR'}}
+                return {'error': {'message': f"Network error after {MAX_RETRIES} attempts: {safe_err}", 'category': 'NETWORK_ERROR'}}
             time.sleep(backoff)
             backoff *= 2
         except Exception as e:
-            logger.error(f"❌ Unexpected request exception: {e}")
+            safe_err = sanitize_log_message(str(e))
+            logger.error(f"❌ Unexpected request exception: {safe_err}")
             if attempt == MAX_RETRIES - 1:
-                return {'error': {'message': str(e), 'category': 'UNKNOWN_ERROR'}}
+                return {'error': {'message': safe_err, 'category': 'UNKNOWN_ERROR'}}
             time.sleep(backoff)
             backoff *= 2
 

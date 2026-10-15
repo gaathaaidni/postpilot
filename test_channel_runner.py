@@ -12,6 +12,7 @@ Verifies:
 import os
 import sys
 import unittest
+import requests
 from unittest.mock import patch, MagicMock
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -378,6 +379,122 @@ class TestChannelRunner(unittest.TestCase):
             access_token="MOCK_TOKEN"
         )
         self.assertFalse(res_none)
+
+    @patch('insta.post_to_instagram')
+    @patch('facebook_api._request_with_retry')
+    @patch('facebook_api.get_page_token')
+    def test_instagram_photo_url_retrieval_uses_params_not_url(self, mock_get_token, mock_req, mock_insta):
+        """
+        Verifies that photo URL retrieval for Instagram cross-posting passes the access token
+        in params, never embedded in the URL string.
+        """
+        mock_get_token.return_value = 'MOCK_PAGE_TOKEN_SECURE'
+        mock_insta.return_value = True
+
+        # First call: Photo upload response; Second call: Photo details response
+        mock_req.side_effect = [
+            {'id': 'photo_123456789'},
+            {'images': [{'source': 'https://fbcdn.net/sample_photo.jpg'}]}
+        ]
+
+        # Create temporary dummy file in upload folder
+        dummy_file = 'sec_test_photo.png'
+        dummy_path = os.path.join(str(config.UPLOAD_FOLDER), dummy_file)
+        os.makedirs(os.path.dirname(dummy_path), exist_ok=True)
+        with open(dummy_path, 'wb') as f:
+            f.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01')
+
+        try:
+            res = posting_utils.post_on_facebook(
+                message="Testing secure photo URL retrieval",
+                image_filename=dummy_file,
+                page_id="967550829768297",
+                access_token="MOCK_USER_TOKEN",
+                ig_user_id="17841449080283492"
+            )
+            self.assertTrue(res)
+            self.assertEqual(res['photo_id'], 'photo_123456789')
+            self.assertEqual(res['image_url'], 'https://fbcdn.net/sample_photo.jpg')
+
+            # Verify the second _request_with_retry call (GET photo details)
+            self.assertEqual(mock_req.call_count, 2)
+            photo_details_call = mock_req.call_args_list[1]
+            method = photo_details_call[0][0]
+            url = photo_details_call[0][1]
+            kwargs = photo_details_call[1]
+
+            self.assertEqual(method, "GET")
+            # CRITICAL SECURITY ASSERTION: URL MUST NOT embed access_token
+            self.assertNotIn("access_token", url)
+            self.assertNotIn("MOCK_PAGE_TOKEN_SECURE", url)
+            self.assertEqual(url, f"{facebook_api.BASE_URL}/photo_123456789")
+
+            # CRITICAL SECURITY ASSERTION: Access token passed in params dictionary
+            self.assertIn("params", kwargs)
+            self.assertEqual(kwargs['params']['fields'], 'images')
+            self.assertEqual(kwargs['params']['access_token'], 'MOCK_PAGE_TOKEN_SECURE')
+        finally:
+            if os.path.exists(dummy_path):
+                os.remove(dummy_path)
+
+    def test_sanitize_log_message_redacts_credentials(self):
+        """Verifies sanitize_log_message redacts access tokens and parameters in all formats."""
+        # 1. URL query parameters
+        url_with_token = "https://graph.facebook.com/v19.0/12345?fields=images&access_token=EAATsecretTokenValue1234567890"
+        sanitized = facebook_api.sanitize_log_message(url_with_token)
+        self.assertNotIn("EAATsecretTokenValue1234567890", sanitized)
+        self.assertIn("access_token=[REDACTED]", sanitized)
+
+        # 2. Key-value string representation
+        kv_with_token = "Payload sent: {'access_token': 'EAATsecretTokenValue1234567890', 'caption': 'Hello'}"
+        sanitized_kv = facebook_api.sanitize_log_message(kv_with_token)
+        self.assertNotIn("EAATsecretTokenValue1234567890", sanitized_kv)
+        self.assertIn("'access_token': '[REDACTED]'", sanitized_kv)
+
+        # 3. Meta error message with raw token
+        err_with_token = "Invalid OAuth access token EAATsuperSecretToken1234567890"
+        sanitized_err = facebook_api.sanitize_log_message(err_with_token)
+        self.assertNotIn("EAATsuperSecretToken1234567890", sanitized_err)
+        self.assertIn("[REDACTED_TOKEN]", sanitized_err)
+
+        # 4. Safe strings remain intact
+        safe_msg = "Successfully published post 12345 to page 967550829768297"
+        self.assertEqual(facebook_api.sanitize_log_message(safe_msg), safe_msg)
+
+    @patch('posting_utils.logger.error')
+    @patch('facebook_api.get_page_token')
+    def test_exception_logging_does_not_leak_token(self, mock_token, mock_log_err):
+        """Verifies that exceptions in posting_utils sanitize log messages and do not leak tokens."""
+        mock_token.side_effect = Exception("Failed connecting with access_token=EAATleakedSecret1234567890")
+
+        res = posting_utils.post_on_facebook(
+            message="Test message",
+            image_filename="",
+            page_id="967550829768297",
+            access_token="MOCK_TOKEN"
+        )
+        self.assertFalse(res)
+
+        mock_log_err.assert_called_once()
+        logged_msg = mock_log_err.call_args[0][0]
+        self.assertNotIn("EAATleakedSecret1234567890", logged_msg)
+        self.assertTrue("[REDACTED" in logged_msg)
+
+    @patch('time.sleep')
+    @patch('facebook_api.logger.warning')
+    @patch('requests.request')
+    def test_request_with_retry_exception_sanitizes_logs(self, mock_request, mock_log_warn, mock_sleep):
+        """Verifies that network exceptions in _request_with_retry never log tokens."""
+        mock_request.side_effect = requests.exceptions.ConnectionError(
+            "Connection failed for url: https://graph.facebook.com/?access_token=EAATsecretNetworkToken12345"
+        )
+
+        facebook_api._request_with_retry("GET", "https://graph.facebook.com/v19.0/12345")
+        self.assertTrue(mock_log_warn.called)
+        for call in mock_log_warn.call_args_list:
+            msg = call[0][0]
+            self.assertNotIn("EAATsecretNetworkToken12345", msg)
+            self.assertTrue("[REDACTED" in msg)
 
     def test_zero_secrets_in_channel_metadata(self):
         """Ensures channel metadata never stores or leaks access tokens."""

@@ -219,9 +219,9 @@ def cmd_inspect_account(args: Optional[argparse.Namespace] = None) -> int:
         return 0
 
     try:
-        resp = requests.get(f"{BASE_GRAPH_URL}/me?fields=id,name,email", params={'access_token': token}, timeout=10).json()
+        resp = requests.get(f"{BASE_GRAPH_URL}/me", params={'fields': 'id,name,email', 'access_token': token}, timeout=10).json()
         if 'error' in resp:
-            print(f"[API ERROR] {resp['error'].get('message')}")
+            print(f"[API ERROR] {facebook_api.sanitize_log_message(resp['error'].get('message'))}")
             return 1
         print("=" * 45)
         print(" META USER ACCOUNT PROFILE")
@@ -233,7 +233,7 @@ def cmd_inspect_account(args: Optional[argparse.Namespace] = None) -> int:
         print("=" * 45)
         return 0
     except Exception as e:
-        print(f"[NETWORK ERROR] {e}")
+        print(f"[ERROR] Failed to query user profile: {facebook_api.sanitize_log_message(str(e))}")
         return 1
 
 def cmd_health(args: Optional[argparse.Namespace] = None) -> int:

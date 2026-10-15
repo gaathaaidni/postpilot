@@ -104,7 +104,7 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
 
         if not res or 'error' in res:
             err_msg = res.get('error', {}).get('message', 'Unknown error') if isinstance(res.get('error'), dict) else str(res.get('error'))
-            logger.error(f"❌ Facebook API error for page {page_id}: {err_msg}")
+            logger.error(f"❌ Facebook API error for page {page_id}: {facebook_api.sanitize_log_message(err_msg)}")
             return False
 
         photo_id = res.get('id')
@@ -117,7 +117,8 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
                 try:
                     info = facebook_api._request_with_retry(
                         "GET",
-                        f"{facebook_api.BASE_URL}/{photo_id}?fields=images&access_token={page_token}"
+                        f"{facebook_api.BASE_URL}/{photo_id}",
+                        params={"fields": "images", "access_token": page_token}
                     )
                     images = info.get('images') or []
                     if images:
@@ -125,11 +126,11 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
                     if image_url:
                         insta.post_to_instagram(image_url, message, ig_user_id=ig_user_id, access_token=access_token)
                 except Exception as e:
-                    logger.warning(f"⚠️ Channel-specific Instagram cross-post warning: {e}")
+                    logger.warning(f"⚠️ Channel-specific Instagram cross-post warning: {facebook_api.sanitize_log_message(str(e))}")
 
         return {"photo_id": photo_id, "id": photo_id, "image_url": image_url, "response": res}
     except Exception as e:
-        logger.error(f"❌ Exception in post_on_facebook: {e}")
+        logger.error(f"❌ Exception in post_on_facebook: {facebook_api.sanitize_log_message(str(e))}")
         return False
 
 def run_posting_loop(stop_event, status_callback, get_interval_func, callback_key, post_type, page_id, access_token, ig_user_id=None, channel_key=None):
@@ -173,7 +174,7 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
                     )
                     success = bool(result)
                 except Exception as post_err:
-                    logger.error(f"Error publishing post {post.get('id')} on channel {callback_key}: {post_err}")
+                    logger.error(f"Error publishing post {post.get('id')} on channel {callback_key}: {facebook_api.sanitize_log_message(str(post_err))}")
                     success = False
                 
                 if success:
@@ -195,7 +196,7 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
                     break
 
         except Exception as loop_err:
-            logger.error(f"Unexpected error in posting loop for {callback_key}: {loop_err}")
+            logger.error(f"Unexpected error in posting loop for {callback_key}: {facebook_api.sanitize_log_message(str(loop_err))}")
             if status_callback:
                 status_callback(callback_key, True, f"Error: {loop_err}", None)
             else:

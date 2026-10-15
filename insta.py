@@ -42,14 +42,14 @@ def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
     res = facebook_api._request_with_retry("POST", create_url, data=payload)
     if not res or 'id' not in res:
         err_msg = res.get('error', {}).get('message', 'Unknown') if isinstance(res.get('error'), dict) else str(res.get('error'))
-        logger.error(f"Failed to create Instagram media container for user {ig_user_id}: {err_msg}")
+        logger.error(f"Failed to create Instagram media container for user {ig_user_id}: {facebook_api.sanitize_log_message(err_msg)}")
         return False
 
     time.sleep(5)  # Brief wait for Instagram container processing
     pub_res = facebook_api._request_with_retry("POST", publish_url, data={'creation_id': res['id'], 'access_token': access_token})
     if not pub_res or 'id' not in pub_res:
         err_msg = pub_res.get('error', {}).get('message', 'Unknown') if isinstance(pub_res.get('error'), dict) else str(pub_res.get('error'))
-        logger.error(f"Failed to publish Instagram media container {res['id']}: {err_msg}")
+        logger.error(f"Failed to publish Instagram media container {res['id']}: {facebook_api.sanitize_log_message(err_msg)}")
         return False
     return True
 
@@ -115,7 +115,8 @@ class InstaSync:
                 if self.stop_event.wait(timeout=self.interval):
                     break
             except Exception as e:
+                safe_err = facebook_api.sanitize_log_message(str(e))
                 if status_callback:
-                    status_callback(self.name, False, f"Error: {e}", None)
+                    status_callback(self.name, False, f"Error: {safe_err}", None)
                 if self.stop_event.wait(timeout=10):
                     break
