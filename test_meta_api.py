@@ -104,7 +104,7 @@ def run_meta_api_validation():
         print(f"  [ERROR] Failed to query /me endpoint: {e}")
 
     # 5. Page Token Resolution (/me/accounts)
-    print("[5/5] Resolving Connected Facebook Pages...")
+    print("[5/6] Resolving Connected Facebook Pages (/me/accounts)...")
     accounts_url = f"{facebook_api.BASE_URL}/me/accounts"
     resolved_pages = []
     try:
@@ -121,6 +121,26 @@ def run_meta_api_validation():
     except Exception as e:
         print(f"  [ERROR] Failed to query /me/accounts: {e}")
 
+    # 6. Channel-Specific Page Token Association & Capability Audit
+    print("[6/6] Verifying Channel-Specific Page Token Association & Capabilities...")
+    target_channels = {
+        'tour': ('Nexora Suite', '967550829768297'),
+        'nz': ('Nexora Phoenix', '954901604381882'),
+        'gaatha': ('Gaatha AI', '1028368893692590')
+    }
+    channel_audits = {}
+    for ch_key, (disp, pid) in target_channels.items():
+        page_token = facebook_api.get_page_token(token, pid, channel_key=ch_key)
+        has_page_tok = bool(page_token)
+        print(f"  [CHANNEL: {ch_key.upper()}] Page: {disp} (ID: {pid}) -> Token Resolved: {has_page_tok}")
+        if page_token:
+            audit = facebook_api.audit_publishing_capabilities(page_token, page_id=pid)
+            channel_audits[ch_key] = audit
+            print(f"    - Valid: {audit.get('valid')} | Token Type: {audit.get('token_type')} | Expires Never: {audit.get('expires_never')}")
+            print(f"    - Can Publish Facebook: {audit.get('can_publish_facebook')} | Can Publish Video: {audit.get('can_publish_video')} | Can Publish Instagram: {audit.get('can_publish_instagram')}")
+        else:
+            channel_audits[ch_key] = {'valid': False, 'error': 'Page token could not be resolved'}
+
     print("=" * 65)
     print(">>> META GRAPH API VALIDATION COMPLETE <<<")
     print("=" * 65)
@@ -132,7 +152,8 @@ def run_meta_api_validation():
         'user_id': user_id,
         'scopes': scopes,
         'missing_critical_scopes': missing_critical,
-        'resolved_pages': resolved_pages
+        'resolved_pages': resolved_pages,
+        'channel_audits': channel_audits
     }
 
 if __name__ == '__main__':

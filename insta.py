@@ -12,6 +12,10 @@ def set_status_callback(callback):
     global status_callback
     status_callback = callback
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def is_post_already_synced(post_id):
     """Checks database if a post ID has already been synced to Instagram."""
     return database.is_post_synced(str(post_id), 'instagram')
@@ -28,19 +32,26 @@ def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
         access_token = facebook_api.get_access_token()
         
     if not ig_user_id or not access_token:
+        logger.warning("Missing ig_user_id or access_token for Instagram cross-posting.")
         return False
 
-    create_url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media"
-    publish_url = f"https://graph.facebook.com/v19.0/{ig_user_id}/media_publish"
+    create_url = f"{facebook_api.BASE_URL}/{ig_user_id}/media"
+    publish_url = f"{facebook_api.BASE_URL}/{ig_user_id}/media_publish"
 
     payload = {'image_url': image_url, 'caption': caption, 'access_token': access_token}
     res = facebook_api._request_with_retry("POST", create_url, data=payload)
     if not res or 'id' not in res:
+        err_msg = res.get('error', {}).get('message', 'Unknown') if isinstance(res.get('error'), dict) else str(res.get('error'))
+        logger.error(f"Failed to create Instagram media container for user {ig_user_id}: {err_msg}")
         return False
 
     time.sleep(5)  # Brief wait for Instagram container processing
     pub_res = facebook_api._request_with_retry("POST", publish_url, data={'creation_id': res['id'], 'access_token': access_token})
-    return 'id' in pub_res
+    if not pub_res or 'id' not in pub_res:
+        err_msg = pub_res.get('error', {}).get('message', 'Unknown') if isinstance(pub_res.get('error'), dict) else str(pub_res.get('error'))
+        logger.error(f"Failed to publish Instagram media container {res['id']}: {err_msg}")
+        return False
+    return True
 
 class InstaSync:
     """Synchronizes Facebook posts to an Instagram business account."""
@@ -59,7 +70,7 @@ class InstaSync:
         self.stop_event.set()
 
     def get_recent_facebook_posts(self):
-        url = f"https://graph.facebook.com/v19.0/{self.page_id}/posts"
+        url = f"{facebook_api.BASE_URL}/{self.page_id}/posts"
         params = {
             'fields': 'id,message,attachments{media,type}',
             'access_token': self.access_token or facebook_api.get_access_token()

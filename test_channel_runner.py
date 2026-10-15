@@ -91,7 +91,9 @@ class TestChannelRunner(unittest.TestCase):
             'Hello World',
             'test.jpg',
             ch.get_page_id(),
-            'MOCK_TOKEN'
+            'MOCK_TOKEN',
+            ig_user_id=None,
+            channel_key='gaatha'
         )
         self.assertEqual(result, {'photo_id': '12345'})
 
@@ -107,6 +109,7 @@ class TestChannelRunner(unittest.TestCase):
         ch.run()
         mock_loop.assert_called_once()
         self.assertEqual(mock_loop.call_args[1]['callback_key'], 'tour')
+        self.assertEqual(mock_loop.call_args[1]['channel_key'], 'tour')
         self.assertEqual(mock_loop.call_args[1]['post_type'], 'tour')
 
         ch.stop()
@@ -226,6 +229,155 @@ class TestChannelRunner(unittest.TestCase):
         self.assertEqual(tour_ch.get_insta_id(), config.INSTA_ID_SUITE)
         self.assertEqual(nz_ch.get_insta_id(), config.INSTA_ID_PHOENIX)
         self.assertIsNone(gaatha_ch.get_insta_id())
+
+    def test_channel_specific_token_resolution(self):
+        """Verifies channel-specific token resolution and precedence over global tokens."""
+        tour_ch = channel_runner.get_channel('tour')
+        nz_ch = channel_runner.get_channel('nz')
+        gaatha_ch = channel_runner.get_channel('gaatha')
+
+        # 1. Channel-specific overrides take precedence
+        with patch.dict(os.environ, {
+            'FB_PAGE_TOKEN_TOUR': 'TOUR_SPECIFIC_TOKEN',
+            'FB_ACCESS_TOKEN_NZ': 'NZ_SPECIFIC_TOKEN',
+            'FB_PAGE_TOKEN_GAATHA': 'GAATHA_SPECIFIC_TOKEN',
+            'FB_ACCESS_TOKEN': 'GLOBAL_FALLBACK_TOKEN'
+        }):
+            self.assertEqual(tour_ch.get_access_token(), 'TOUR_SPECIFIC_TOKEN')
+            self.assertEqual(nz_ch.get_access_token(), 'NZ_SPECIFIC_TOKEN')
+            self.assertEqual(gaatha_ch.get_access_token(), 'GAATHA_SPECIFIC_TOKEN')
+
+        # 2. Page-ID-specific token override
+        with patch.dict(os.environ, {
+            'FB_PAGE_TOKEN_TOUR': '',
+            'FB_PAGE_TOKEN_SUITE': '',
+            'FB_ACCESS_TOKEN_TOUR': '',
+            f'FB_PAGE_TOKEN_{tour_ch.get_page_id()}': 'PID_SPECIFIC_TOKEN',
+            'FB_ACCESS_TOKEN': 'GLOBAL_FALLBACK_TOKEN'
+        }):
+            self.assertEqual(tour_ch.get_access_token(), 'PID_SPECIFIC_TOKEN')
+
+        # 3. Falls back to global when no channel token is set
+        with patch.dict(os.environ, {
+            'FB_PAGE_TOKEN_TOUR': '',
+            'FB_PAGE_TOKEN_SUITE': '',
+            'FB_ACCESS_TOKEN_TOUR': '',
+            f'FB_PAGE_TOKEN_{tour_ch.get_page_id()}': '',
+            'FB_ACCESS_TOKEN': 'GLOBAL_TOKEN_123'
+        }):
+            self.assertEqual(tour_ch.get_access_token(), 'GLOBAL_TOKEN_123')
+
+    @patch('requests.get')
+    def test_page_token_direct_match(self, mock_get):
+        """Verifies that if user_token is already a Page Access Token, it returns directly via /me."""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {'id': '967550829768297', 'name': 'Gaatha Suite'}
+        mock_get.return_value = mock_resp
+
+        tok = facebook_api.get_page_token(user_token='DIRECT_PAGE_TOKEN', page_id='967550829768297')
+        self.assertEqual(tok, 'DIRECT_PAGE_TOKEN')
+        # Only /me should have been queried, not /me/accounts
+        self.assertEqual(mock_get.call_count, 1)
+        self.assertIn('/me', mock_get.call_args[0][0])
+
+    @patch('requests.get')
+    def test_page_token_exchange_via_accounts(self, mock_get):
+        """Verifies user access token is exchanged for page token via /me/accounts."""
+        # Call 1: /me returns user profile (different ID)
+        me_resp = MagicMock()
+        me_resp.json.return_value = {'id': '10998877665544', 'name': 'Admin User'}
+        # Call 2: /me/accounts returns list of pages
+        accounts_resp = MagicMock()
+        accounts_resp.json.return_value = {
+            'data': [
+                {'id': '954901604381882', 'name': 'Nexora Phoenix', 'access_token': 'RESOLVED_PHOENIX_PAGE_TOKEN'},
+                {'id': '967550829768297', 'name': 'Nexora Suite', 'access_token': 'RESOLVED_SUITE_PAGE_TOKEN'}
+            ]
+        }
+        mock_get.side_effect = [me_resp, accounts_resp]
+
+        tok = facebook_api.get_page_token(user_token='USER_TOKEN_123', page_id='954901604381882')
+        self.assertEqual(tok, 'RESOLVED_PHOENIX_PAGE_TOKEN')
+
+    @patch('requests.get')
+    def test_page_token_direct_node_fallback(self, mock_get):
+        """Verifies direct /{page_id} lookup when page is missing from /me/accounts."""
+        me_resp = MagicMock()
+        me_resp.json.return_value = {'id': '10998877665544', 'name': 'Admin User'}
+        accounts_resp = MagicMock()
+        accounts_resp.json.return_value = {'data': []}
+        page_resp = MagicMock()
+        page_resp.json.return_value = {'id': '1028368893692590', 'name': 'Gaatha AI', 'access_token': 'DIRECT_NODE_PAGE_TOKEN'}
+        mock_get.side_effect = [me_resp, accounts_resp, page_resp]
+
+        tok = facebook_api.get_page_token(user_token='USER_TOKEN_123', page_id='1028368893692590')
+        self.assertEqual(tok, 'DIRECT_NODE_PAGE_TOKEN')
+
+    def test_error_classification_all_categories(self):
+        """Verifies Facebook API error classification for all expected error codes."""
+        # Auth errors
+        for code in (102, 190, 463, 467):
+            self.assertEqual(facebook_api.classify_facebook_error({'error': {'code': code}}), 'AUTH_ERROR')
+
+        # Permission errors
+        for code in (10, 200, 283):
+            self.assertEqual(facebook_api.classify_facebook_error({'error': {'code': code}}), 'PERMISSION_ERROR')
+
+        # Duplicate post
+        self.assertEqual(facebook_api.classify_facebook_error({'error': {'code': 506}}), 'DUPLICATE_POST')
+
+        # Rate limits
+        for code in (4, 17, 32, 613):
+            self.assertEqual(facebook_api.classify_facebook_error({'error': {'code': code}}), 'RATE_LIMIT')
+        self.assertEqual(facebook_api.classify_facebook_error({}, status_code=429), 'RATE_LIMIT')
+
+        # Server errors
+        for code in (1, 2):
+            self.assertEqual(facebook_api.classify_facebook_error({'error': {'code': code}}), 'SERVER_ERROR')
+        for status in (500, 502, 503, 504):
+            self.assertEqual(facebook_api.classify_facebook_error({}, status_code=status), 'SERVER_ERROR')
+
+        # Client errors
+        for code in (100, 368):
+            self.assertEqual(facebook_api.classify_facebook_error({'error': {'code': code}}), 'CLIENT_ERROR')
+
+    @patch('facebook_api.get_token_info')
+    def test_audit_publishing_capabilities(self, mock_info):
+        """Verifies audit_publishing_capabilities returns expected capability breakdown."""
+        mock_info.return_value = {
+            'is_valid': True,
+            'type': 'PAGE',
+            'expires_at': 0,
+            'profile_id': '967550829768297',
+            'scopes': ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list', 'publish_video', 'instagram_content_publish']
+        }
+
+        audit = facebook_api.audit_publishing_capabilities('SAMPLE_PAGE_TOKEN', page_id='967550829768297')
+        self.assertTrue(audit['valid'])
+        self.assertTrue(audit['expires_never'])
+        self.assertTrue(audit['matches_page'])
+        self.assertTrue(audit['can_publish_facebook'])
+        self.assertTrue(audit['can_publish_video'])
+        self.assertTrue(audit['can_publish_instagram'])
+        self.assertEqual(len(audit['missing_permissions']), 0)
+
+    def test_payload_validation_empty_text_post(self):
+        """Verifies text posts with whitespace/empty content fail pre-flight validation immediately."""
+        res_empty = posting_utils.post_on_facebook(
+            message="   ",
+            image_filename="",
+            page_id="967550829768297",
+            access_token="MOCK_TOKEN"
+        )
+        self.assertFalse(res_empty)
+
+        res_none = posting_utils.post_on_facebook(
+            message=None,
+            image_filename="",
+            page_id="967550829768297",
+            access_token="MOCK_TOKEN"
+        )
+        self.assertFalse(res_none)
 
     def test_zero_secrets_in_channel_metadata(self):
         """Ensures channel metadata never stores or leaks access tokens."""

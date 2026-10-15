@@ -29,6 +29,7 @@ class Channel:
         page_id_env_keys: tuple,
         default_page_id: str,
         default_interval: int,
+        token_env_keys: tuple = (),
         insta_id_env_keys: tuple = (),
         default_insta_id: str = ""
     ):
@@ -38,6 +39,7 @@ class Channel:
         self.page_id_env_keys = page_id_env_keys
         self.default_page_id = default_page_id
         self.default_interval = default_interval
+        self.token_env_keys = token_env_keys
         self.insta_id_env_keys = insta_id_env_keys
         self.default_insta_id = default_insta_id
         
@@ -76,6 +78,29 @@ class Channel:
             f"Set one of {self.page_id_env_keys} in .env or environment."
         )
 
+    def get_access_token(self) -> Optional[str]:
+        """
+        Resolves the access token for this specific channel.
+        Priority:
+        1. Channel-specific environment token keys
+        2. Direct Page ID token key (FB_PAGE_TOKEN_{page_id})
+        3. Global FB_ACCESS_TOKEN or FB_TOKEN
+        """
+        for env_key in self.token_env_keys:
+            val = os.getenv(env_key)
+            if val and val.strip():
+                return val.strip()
+
+        try:
+            pid = self.get_page_id()
+            pid_val = os.getenv(f"FB_PAGE_TOKEN_{pid}")
+            if pid_val and pid_val.strip():
+                return pid_val.strip()
+        except Exception:
+            pass
+
+        return facebook_api.get_access_token(channel_key=self.key)
+
     def get_insta_id(self) -> Optional[str]:
         """Resolves the linked Instagram Business Account ID for this channel, if configured."""
         for env_key in self.insta_id_env_keys:
@@ -101,20 +126,19 @@ class Channel:
 
     def post_on_facebook(self, message: str, image_filename: str):
         """Dispatches an immediate single-post execution for this channel."""
-        token = facebook_api.get_access_token()
+        token = self.get_access_token()
         page_id = self.get_page_id()
         ig_id = self.get_insta_id()
-        if ig_id:
-            return posting_utils.post_on_facebook(message, image_filename, page_id, token, ig_user_id=ig_id)
-        return posting_utils.post_on_facebook(message, image_filename, page_id, token)
-
+        return posting_utils.post_on_facebook(
+            message, image_filename, page_id, token, ig_user_id=ig_id, channel_key=self.key
+        )
 
     def run(self):
         """Executes the standard posting loop for this channel with pre-flight configuration validation."""
         try:
-            token = facebook_api.get_access_token()
+            token = self.get_access_token()
             if not token:
-                msg = "Configuration Error: Missing FB_ACCESS_TOKEN"
+                msg = f"Configuration Error: Missing access token for channel '{self.key}'"
                 logger.warning(f"Cannot start channel runner loop '{self.key}': {msg}")
                 if self.status_callback:
                     self.status_callback(self.key, False, msg, None)
@@ -144,7 +168,8 @@ class Channel:
             post_type=self.post_type,
             page_id=page_id,
             access_token=token,
-            ig_user_id=ig_id
+            ig_user_id=ig_id,
+            channel_key=self.key
         )
 
     def stop(self):
@@ -161,6 +186,7 @@ CHANNELS: Dict[str, Channel] = {
         page_id_env_keys=('FB_PAGE_ID_SUITE', 'FB_PAGE_ID_NEXORA_SUITE', 'TOUR_PAGE_ID'),
         default_page_id=config.FB_PAGE_ID_SUITE,
         default_interval=config.TOUR_INTERVAL,
+        token_env_keys=('FB_PAGE_TOKEN_TOUR', 'FB_PAGE_TOKEN_SUITE', 'FB_ACCESS_TOKEN_TOUR', 'FB_ACCESS_TOKEN_SUITE', 'FB_PAGE_TOKEN_NEXORA_SUITE'),
         insta_id_env_keys=('INSTA_ID_SUITE',),
         default_insta_id=config.INSTA_ID_SUITE
     ),
@@ -171,6 +197,7 @@ CHANNELS: Dict[str, Channel] = {
         page_id_env_keys=('FB_PAGE_ID_PHOENIX', 'FB_PAGE_ID_NEXORA_BY_PHOENIX', 'VISA_PAGE_ID'),
         default_page_id=config.FB_PAGE_ID_PHOENIX,
         default_interval=config.VISA_INTERVAL,
+        token_env_keys=('FB_PAGE_TOKEN_NZ', 'FB_PAGE_TOKEN_PHOENIX', 'FB_ACCESS_TOKEN_NZ', 'FB_ACCESS_TOKEN_PHOENIX', 'FB_PAGE_TOKEN_NEXORA_BY_PHOENIX'),
         insta_id_env_keys=('INSTA_ID_PHOENIX',),
         default_insta_id=config.INSTA_ID_PHOENIX
     ),
@@ -181,6 +208,7 @@ CHANNELS: Dict[str, Channel] = {
         page_id_env_keys=('FB_PAGE_ID_GAATHA_AI', 'FB_PAGE_ID_GAATHA'),
         default_page_id=config.FB_PAGE_ID_GAATHA_AI,
         default_interval=config.GAATHA_INTERVAL,
+        token_env_keys=('FB_PAGE_TOKEN_GAATHA', 'FB_PAGE_TOKEN_GAATHA_AI', 'FB_ACCESS_TOKEN_GAATHA', 'FB_ACCESS_TOKEN_GAATHA_AI'),
         insta_id_env_keys=('INSTA_ID_GAATHA',),
         default_insta_id=""
     ),

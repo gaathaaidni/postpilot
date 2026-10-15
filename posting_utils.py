@@ -26,7 +26,7 @@ def update_last_posted_timestamp(post_id):
     except Exception as e:
         logger.error(f"❌ Error updating last_posted_at for post {post_id}: {e}")
 
-def post_on_facebook(message, image_filename, page_id, access_token, image_folder=None, ig_user_id=None):
+def post_on_facebook(message, image_filename, page_id, access_token, image_folder=None, ig_user_id=None, channel_key=None):
     """
     Robust publishing logic supporting:
     - Text-only posts (to /{page_id}/feed)
@@ -38,12 +38,15 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
         logger.error("❌ post_on_facebook called without a valid page_id.")
         return False
 
-    if not access_token:
-        logger.error("❌ post_on_facebook called without an access_token.")
+    has_media = bool(image_filename and str(image_filename).strip())
+
+    # Pre-flight payload validation: text-only posts require non-empty message
+    if not has_media and (not message or not str(message).strip()):
+        logger.error("❌ Cannot publish text post: message content is empty.")
         return False
 
     try:
-        page_token = facebook_api.get_page_token(access_token, page_id)
+        page_token = facebook_api.get_page_token(access_token, page_id, channel_key=channel_key)
         if not page_token:
             logger.error(f"❌ Failed: Could not get page token for page {page_id}")
             return False
@@ -51,7 +54,6 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
         if not image_folder:
             image_folder = str(config.UPLOAD_FOLDER)
 
-        has_media = bool(image_filename and str(image_filename).strip())
         image_url = None
         photo_id = None
         res = None
@@ -66,16 +68,30 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
             ext = os.path.splitext(clean_filename)[1].lower()
 
             if ext in VIDEO_EXTENSIONS:
-                # Video upload payload
+                # Video upload payload with appropriate MIME type
+                mime_map = {
+                    '.mp4': 'video/mp4',
+                    '.mov': 'video/quicktime',
+                    '.avi': 'video/x-msvideo',
+                    '.mkv': 'video/x-matroska'
+                }
+                video_mime = mime_map.get(ext, 'video/mp4')
                 api_url = f"{facebook_api.BASE_URL}/{page_id}/videos"
                 with open(path, 'rb') as video_file:
-                    files = {'source': (clean_filename, video_file, 'video/mp4')}
+                    files = {'source': (clean_filename, video_file, video_mime)}
                     data = {"description": message or '', "access_token": page_token}
                     res = facebook_api._request_with_retry("POST", api_url, files=files, data=data)
             else:
                 # Photo upload payload
                 api_url = f"{facebook_api.BASE_URL}/{page_id}/photos"
-                mime = 'image/png' if ext == '.png' else ('image/gif' if ext == '.gif' else ('image/webp' if ext == '.webp' else 'image/jpeg'))
+                photo_mime_map = {
+                    '.png': 'image/png',
+                    '.gif': 'image/gif',
+                    '.webp': 'image/webp',
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg'
+                }
+                mime = photo_mime_map.get(ext, 'image/jpeg')
                 with open(path, 'rb') as img:
                     files = {'source': (clean_filename, img, mime)}
                     data = {"caption": message or '', "access_token": page_token}
@@ -116,9 +132,10 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
         logger.error(f"❌ Exception in post_on_facebook: {e}")
         return False
 
-def run_posting_loop(stop_event, status_callback, get_interval_func, callback_key, post_type, page_id, access_token, ig_user_id=None):
+def run_posting_loop(stop_event, status_callback, get_interval_func, callback_key, post_type, page_id, access_token, ig_user_id=None, channel_key=None):
     """Standardized background loop for posting modules with exception resilience."""
     post_count = 0
+    resolved_channel = channel_key or callback_key
     while not stop_event.is_set():
         try:
             posts = load_posts(post_type)
@@ -151,7 +168,8 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
                         image_filename=post.get("image_filename", ""),
                         page_id=page_id,
                         access_token=access_token,
-                        ig_user_id=ig_user_id
+                        ig_user_id=ig_user_id,
+                        channel_key=resolved_channel
                     )
                     success = bool(result)
                 except Exception as post_err:

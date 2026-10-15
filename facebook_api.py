@@ -26,10 +26,11 @@ def classify_facebook_error(response_json, status_code=200):
     """
     Classifies Facebook API errors into distinct categories:
     - RATE_LIMIT: Transient rate limit (codes 4, 17, 32, 613, HTTP 429)
-    - AUTH_ERROR: Permanent token invalidation, expiration, or revocation (code 190)
-    - PERMISSION_ERROR: Missing required Page permissions (codes 10, 200)
-    - CLIENT_ERROR: Invalid parameter or payload (code 100)
-    - SERVER_ERROR: Transient Meta server errors (HTTP 500, 502, 503, 504)
+    - AUTH_ERROR: Permanent token invalidation, expiration, or revocation (codes 102, 190, 463, 467)
+    - PERMISSION_ERROR: Missing required Page permissions (codes 10, 200, 283)
+    - DUPLICATE_POST: Identical post content rejected by Meta (code 506)
+    - CLIENT_ERROR: Invalid parameter, blocked policy, or payload error (codes 100, 368)
+    - SERVER_ERROR: Transient Meta server errors (codes 1, 2, HTTP 500, 502, 503, 504)
     - NETWORK_ERROR: Connection or timeout failures
     """
     if status_code in (500, 502, 503, 504):
@@ -42,19 +43,33 @@ def classify_facebook_error(response_json, status_code=200):
         code = err.get('code') if isinstance(err, dict) else None
         if code in (4, 17, 32, 613):
             return 'RATE_LIMIT'
-        if code == 190:
+        if code in (102, 190, 463, 467):
             return 'AUTH_ERROR'
-        if code in (10, 200):
+        if code in (10, 200, 283):
             return 'PERMISSION_ERROR'
-        if code == 100:
+        if code == 506:
+            return 'DUPLICATE_POST'
+        if code in (1, 2):
+            return 'SERVER_ERROR'
+        if code in (100, 368):
             return 'CLIENT_ERROR'
     return 'UNKNOWN_ERROR'
 
-def get_access_token():
+def get_access_token(channel_key=None):
     """
-    Retrieves the Facebook user access token.
-    Priority: Environment Variable (FB_ACCESS_TOKEN or FB_TOKEN) > .env file.
+    Retrieves Facebook access token.
+    Priority:
+    1. Channel-specific environment variable (if channel_key provided)
+    2. FB_ACCESS_TOKEN or FB_TOKEN environment variable
+    3. .env file fallback
     """
+    if channel_key:
+        ck = channel_key.upper()
+        for k in (f'FB_ACCESS_TOKEN_{ck}', f'FB_PAGE_TOKEN_{ck}', f'FB_TOKEN_{ck}'):
+            val = os.getenv(k)
+            if val and val.strip():
+                return val.strip()
+
     token = os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN')
     if token:
         return token.strip()
@@ -76,28 +91,69 @@ def get_access_token():
 
     return None
 
-def get_page_token(user_token, page_id):
+def get_page_token(user_token=None, page_id=None, channel_key=None):
     """
-    Exchanges a User Access Token for a Page Access Token for a specific page.
-    This ensures API calls are made on behalf of the page.
-    Supports channel-specific page token overrides and direct page tokens.
+    Resolves a Page Access Token for a specific page.
+    Priority:
+    1. Direct channel/page token override in environment:
+       - FB_PAGE_TOKEN_{page_id}
+       - FB_PAGE_TOKEN_{channel_key} / FB_ACCESS_TOKEN_{channel_key}
+       - Known alias page tokens (FB_PAGE_TOKEN_TOUR, FB_PAGE_TOKEN_SUITE, etc.)
+       - FB_PAGE_ACCESS_TOKEN
+    2. Check if user_token is ALREADY a Page Access Token for this page (GET /me?fields=id,name)
+    3. Exchange User Access Token for Page Access Token via GET /me/accounts
+    4. Direct Page token lookup via GET /{page_id}?fields=id,name,access_token
     """
     if not page_id:
         logger.error("No page_id provided to get_page_token.")
         return None
 
-    # Check for direct channel/page token override in environment
-    page_token_override = (
-        os.getenv(f'FB_PAGE_TOKEN_{page_id}') or
-        os.getenv('FB_PAGE_ACCESS_TOKEN')
-    )
-    if page_token_override and page_token_override.strip():
-        return page_token_override.strip()
+    page_id_str = str(page_id).strip()
+
+    # Step 1: Check environment overrides
+    env_keys_to_check = [f'FB_PAGE_TOKEN_{page_id_str}']
+    if channel_key:
+        ck = channel_key.upper()
+        env_keys_to_check.extend([f'FB_PAGE_TOKEN_{ck}', f'FB_ACCESS_TOKEN_{ck}', f'FB_TOKEN_{ck}'])
+
+    # Map known page IDs to alias keys
+    known_aliases = {
+        '967550829768297': ['FB_PAGE_TOKEN_TOUR', 'FB_PAGE_TOKEN_SUITE', 'FB_PAGE_TOKEN_NEXORA_SUITE', 'FB_ACCESS_TOKEN_TOUR', 'FB_ACCESS_TOKEN_SUITE'],
+        '954901604381882': ['FB_PAGE_TOKEN_NZ', 'FB_PAGE_TOKEN_PHOENIX', 'FB_PAGE_TOKEN_NEXORA_BY_PHOENIX', 'FB_ACCESS_TOKEN_NZ', 'FB_ACCESS_TOKEN_PHOENIX'],
+        '1028368893692590': ['FB_PAGE_TOKEN_GAATHA', 'FB_PAGE_TOKEN_GAATHA_AI', 'FB_ACCESS_TOKEN_GAATHA', 'FB_ACCESS_TOKEN_GAATHA_AI'],
+    }
+    if page_id_str in known_aliases:
+        env_keys_to_check.extend(known_aliases[page_id_str])
+
+    env_keys_to_check.append('FB_PAGE_ACCESS_TOKEN')
+
+    for k in env_keys_to_check:
+        override = os.getenv(k)
+        if override and override.strip():
+            logger.info(f"Using direct page token override from {k} for page {page_id_str}")
+            return override.strip()
 
     if not user_token:
-        logger.error("No user token provided to get_page_token.")
+        user_token = get_access_token(channel_key=channel_key)
+
+    if not user_token:
+        logger.error(f"No user or page token available for page {page_id_str}.")
         return None
 
+    # Step 2: Check if user_token is ALREADY a Page Access Token for this page
+    try:
+        me_resp = requests.get(
+            f"{BASE_URL}/me",
+            params={"access_token": user_token, "fields": "id,name"},
+            timeout=DEFAULT_TIMEOUT
+        ).json()
+        if str(me_resp.get('id')) == page_id_str:
+            logger.info(f"Verified token is already a Page Access Token for '{me_resp.get('name')}' (ID: {page_id_str})")
+            return user_token
+    except Exception as e:
+        logger.debug(f"Could not verify token via /me: {e}")
+
+    # Step 3: Exchange User Access Token for Page Access Token via /me/accounts
     try:
         url = f"{BASE_URL}/me/accounts"
         params = {"access_token": user_token, "limit": 100}
@@ -105,26 +161,78 @@ def get_page_token(user_token, page_id):
         res_json = resp.json()
         if 'data' in res_json:
             for page in res_json['data']:
-                if str(page.get('id')) == str(page_id):
+                if str(page.get('id')) == page_id_str:
+                    logger.info(f"Successfully resolved Page Access Token for page '{page.get('name')}' (ID: {page_id_str})")
                     return page.get('access_token')
 
-        # If user_token is already a Page Access Token for this page, /me/accounts may fail or be empty.
-        # Verify if /me corresponds directly to this page_id.
+        # Step 4: Fallback direct lookup via /{page_id}?fields=id,name,access_token
         try:
-            me_resp = requests.get(f"{BASE_URL}/me", params={"access_token": user_token, "fields": "id"}, timeout=DEFAULT_TIMEOUT).json()
-            if str(me_resp.get('id')) == str(page_id):
-                return user_token
+            page_resp = requests.get(
+                f"{BASE_URL}/{page_id_str}",
+                params={"access_token": user_token, "fields": "id,name,access_token"},
+                timeout=DEFAULT_TIMEOUT
+            ).json()
+            if page_resp.get('access_token'):
+                logger.info(f"Resolved Page Access Token directly from /{page_id_str}")
+                return page_resp.get('access_token')
         except Exception:
             pass
 
         if 'error' in res_json:
             err_msg = res_json['error'].get('message', 'Unknown')
             err_code = res_json['error'].get('code')
-            logger.error(f"Graph API Error in get_page_token for page {page_id}: {err_msg} (code={err_code})")
+            logger.error(f"Graph API Error in get_page_token for page {page_id_str}: {err_msg} (code={err_code})")
+        else:
+            logger.error(f"Page ID {page_id_str} was not found among user's managed Facebook accounts.")
         return None
     except Exception as e:
-        logger.error(f"Exception in get_page_token for page {page_id}: {e}")
+        logger.error(f"Exception in get_page_token for page {page_id_str}: {e}")
         return None
+
+def audit_publishing_capabilities(token, page_id=None):
+    """
+    Audits token validity, expiration, and granted publishing permissions without exposing credentials.
+    Returns structured audit results.
+    """
+    if not token:
+        return {'valid': False, 'reason': 'Missing token'}
+
+    debug_data = get_token_info(token)
+    if not debug_data:
+        return {'valid': False, 'reason': 'Could not query Meta debug_token endpoint'}
+
+    is_valid = bool(debug_data.get('is_valid', False))
+    scopes = set(debug_data.get('scopes', []))
+    expires_at = debug_data.get('expires_at', 0)
+    profile_id = str(debug_data.get('profile_id', ''))
+    token_type = debug_data.get('type', 'USER')
+
+    can_manage_posts = 'pages_manage_posts' in scopes
+    can_read_engagement = 'pages_read_engagement' in scopes
+    can_publish_video = 'publish_video' in scopes
+    can_publish_instagram = 'instagram_content_publish' in scopes
+    can_show_pages = 'pages_show_list' in scopes
+
+    matches_page = bool(page_id and profile_id == str(page_id))
+
+    return {
+        'valid': is_valid,
+        'token_type': token_type,
+        'expires_never': expires_at == 0,
+        'expires_at': expires_at,
+        'profile_id': profile_id,
+        'matches_page': matches_page,
+        'scopes_count': len(scopes),
+        'can_publish_facebook': is_valid and can_manage_posts,
+        'can_publish_video': is_valid and can_publish_video,
+        'can_publish_instagram': is_valid and can_publish_instagram,
+        'can_read_engagement': can_read_engagement,
+        'can_show_pages': can_show_pages,
+        'missing_permissions': [
+            perm for perm in ['pages_manage_posts', 'pages_read_engagement', 'pages_show_list']
+            if perm not in scopes
+        ]
+    }
 
 def get_token_info(token):
     """
@@ -183,7 +291,7 @@ def _request_with_retry(method, url, **kwargs):
             err_category = classify_facebook_error(res_json, resp.status_code)
 
             # Permanent errors: do not retry
-            if err_category in ('AUTH_ERROR', 'PERMISSION_ERROR', 'CLIENT_ERROR'):
+            if err_category in ('AUTH_ERROR', 'PERMISSION_ERROR', 'CLIENT_ERROR', 'DUPLICATE_POST'):
                 err_msg = res_json['error'].get('message', 'Client Error') if isinstance(res_json.get('error'), dict) else str(res_json.get('error'))
                 logger.error(f"❌ Permanent Facebook API error ({err_category}): {err_msg}")
                 return res_json
