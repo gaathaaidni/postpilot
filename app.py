@@ -734,9 +734,11 @@ def upload_media_asset_route():
     file_size = file.tell()
     file.seek(0)
 
-    # Max size 50MB
-    if file_size > 50 * 1024 * 1024:
-        return jsonify({'error': 'File exceeds maximum permitted size of 50MB'}), 400
+    # Enforce configured max file size limit (config.MAX_CONTENT_LENGTH, default 16MB)
+    max_upload_bytes = getattr(config, 'MAX_CONTENT_LENGTH', 16 * 1024 * 1024)
+    if file_size > max_upload_bytes:
+        max_mb = max_upload_bytes // (1024 * 1024)
+        return jsonify({'error': f'File exceeds maximum permitted size of {max_mb}MB'}), 400
 
     # Determine file type
     if extension in {'.mp4', '.mov'}:
