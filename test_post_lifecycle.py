@@ -501,5 +501,74 @@ class TestPostLifecycle(unittest.TestCase):
         self.assertEqual(len(transition_events), 1, "Only the winning transition should be recorded in audit log")
         self.assertEqual(transition_events[0]['to_status'], expected_status)
 
+    def test_13_publishing_completion_tenant_channel_and_worker_isolation(self):
+        """
+        Verifies publishing completion enforces claim ownership, tenant isolation,
+        and channel matching when updating last_posted_at on base posts.
+        """
+        with database.get_db_connection() as conn:
+            # 1. Base post in Org 1, channel 'tour'
+            conn.execute(
+                "INSERT INTO posts (id, post_type, message, organization_id, last_posted_at) "
+                "VALUES (1001, 'tour', 'Org 1 Tour Post', 1, NULL) "
+                "ON CONFLICT(id) DO UPDATE SET last_posted_at = NULL"
+            )
+            # 2. Base post in Org 2, channel 'tour'
+            conn.execute(
+                "INSERT INTO posts (id, post_type, message, organization_id, last_posted_at) "
+                "VALUES (1002, 'tour', 'Org 2 Tour Post', 2, NULL) "
+                "ON CONFLICT(id) DO UPDATE SET last_posted_at = NULL"
+            )
+            # 3. Base post in Org 1, channel 'nz'
+            conn.execute(
+                "INSERT INTO posts (id, post_type, message, organization_id, last_posted_at) "
+                "VALUES (1003, 'nz', 'Org 1 NZ Post', 1, NULL) "
+                "ON CONFLICT(id) DO UPDATE SET last_posted_at = NULL"
+            )
+            conn.commit()
+
+        past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+
+        # Schedule post in Org 1 referencing post 1001
+        sched_rec = database.create_scheduled_post(
+            post_type='tour',
+            scheduled_for=past_time,
+            post_id=1001,
+            organization_id=1,
+            allow_past=True
+        )
+        sched_id = sched_rec['id']
+
+        # Worker A claims the post
+        claimed = database.claim_due_scheduled_posts("worker-proc-alpha", limit=5)
+        self.assertIn(sched_id, [p['id'] for p in claimed])
+
+        # Wrong worker attempts completion -> MUST BE REJECTED
+        wrong_res = database.complete_scheduled_post(sched_id, "worker-proc-imposter", success=True)
+        self.assertFalse(wrong_res, "Imposter worker must NOT be allowed to complete a post claimed by worker-proc-alpha")
+
+        # Verify post 1001 last_posted_at is still NULL
+        with database.get_db_connection() as conn:
+            p1001 = conn.execute("SELECT last_posted_at FROM posts WHERE id = 1001").fetchone()
+            self.assertIsNone(p1001['last_posted_at'])
+
+        # Valid worker completes publishing successfully
+        valid_res = database.complete_scheduled_post(sched_id, "worker-proc-alpha", success=True)
+        self.assertTrue(valid_res)
+
+        # Post 1001 (matching Org 1 and channel 'tour') MUST have updated last_posted_at
+        with database.get_db_connection() as conn:
+            p1001 = conn.execute("SELECT last_posted_at FROM posts WHERE id = 1001").fetchone()
+            self.assertIsNotNone(p1001['last_posted_at'])
+            # Verify Org 2 post 1002 and Org 1 post 1003 remain untouched
+            p1002 = conn.execute("SELECT last_posted_at FROM posts WHERE id = 1002").fetchone()
+            self.assertIsNone(p1002['last_posted_at'], "Cross-tenant post must NEVER have last_posted_at updated")
+            p1003 = conn.execute("SELECT last_posted_at FROM posts WHERE id = 1003").fetchone()
+            self.assertIsNone(p1003['last_posted_at'], "Cross-channel post must NEVER have last_posted_at updated")
+
+        # Calling complete again on already-published post returns False (claim already released)
+        double_res = database.complete_scheduled_post(sched_id, "worker-proc-alpha", success=True)
+        self.assertFalse(double_res)
+
 if __name__ == '__main__':
     unittest.main()

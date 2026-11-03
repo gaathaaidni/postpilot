@@ -1270,33 +1270,51 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
 def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=None):
     """
     Marks a claimed scheduled post as published or failed/retried.
-    Sanitizes any error message before storage.
+    Enforces worker claim ownership, tenant & channel isolation,
+    and sanitizes any error message before storage.
     """
     now = _utcnow()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    try:
-        import facebook_api
-        safe_err = facebook_api.sanitize_log_message(str(error_message)) if error_message else None
-    except Exception:
-        safe_err = str(error_message) if error_message else None
+    safe_err = None
+    if error_message:
+        try:
+            import facebook_api
+            safe_err = facebook_api.sanitize_log_message(str(error_message))
+        except Exception:
+            clean = str(error_message)
+            for s in ('token=', 'access_token=', 'password=', 'secret=', 'bearer '):
+                if s in clean.lower():
+                    clean = re.sub(r'(?i)(' + s + r')[^\s&"\']+', r'\1[REDACTED]', clean)
+            safe_err = clean
 
     with get_db_connection() as conn:
-        post = conn.execute("SELECT * FROM scheduled_posts WHERE id = ? AND locked_by = ?", (schedule_id, worker_id)).fetchone()
+        post = conn.execute(
+            "SELECT * FROM scheduled_posts WHERE id = ? AND locked_by = ? AND status = 'publishing'",
+            (schedule_id, worker_id)
+        ).fetchone()
         if not post:
+            logger.warning(
+                f"Worker '{worker_id}' rejected completion on scheduled post #{schedule_id}: "
+                f"no active claim held in 'publishing' status."
+            )
             return False
 
         if success:
-            conn.execute(
+            res = conn.execute(
                 "UPDATE scheduled_posts SET status = 'published', published_at = ?, locked_by = NULL, locked_at = NULL, "
-                "updated_at = ? WHERE id = ? AND locked_by = ?",
+                "updated_at = ? WHERE id = ? AND locked_by = ? AND status = 'publishing'",
                 (now_str, now_str, schedule_id, worker_id)
             )
-            # If associated with a base post_id, update last_posted_at
+            if res.rowcount == 0:
+                return False
+
+            # Strictly scoped to channel and organization
             if post['post_id']:
                 conn.execute(
-                    "UPDATE posts SET last_posted_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (post['post_id'],)
+                    "UPDATE posts SET last_posted_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND post_type = ? AND organization_id = ?",
+                    (post['post_id'], post['post_type'], post['organization_id'])
                 )
             log_post_transition(
                 scheduled_post_id=schedule_id,
@@ -1310,11 +1328,15 @@ def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=
             new_retries = (post['retry_count'] or 0) + 1
             max_r = post['max_retries'] or 3
             new_status = 'failed' if new_retries >= max_r else 'scheduled'
-            conn.execute(
+            res = conn.execute(
                 "UPDATE scheduled_posts SET status = ?, retry_count = ?, error_message = ?, "
-                "locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ? AND locked_by = ?",
+                "locked_by = NULL, locked_at = NULL, updated_at = ? "
+                "WHERE id = ? AND locked_by = ? AND status = 'publishing'",
                 (new_status, new_retries, safe_err, now_str, schedule_id, worker_id)
             )
+            if res.rowcount == 0:
+                return False
+
             log_post_transition(
                 scheduled_post_id=schedule_id,
                 from_status='publishing',
