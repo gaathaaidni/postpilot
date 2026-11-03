@@ -700,6 +700,8 @@ def get_media_assets_route():
 @csrf_protect
 def upload_media_asset_route():
     """Uploads a media asset to the organization media library with strict validation."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
 
@@ -784,6 +786,8 @@ def upload_media_asset_route():
 @csrf_protect
 def delete_media_asset_route(asset_id):
     """Deletes a media asset record and unlinks its file from storage."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     try:
         deleted = database.delete_media_asset(asset_id, organization_id=org_id)
@@ -1318,6 +1322,8 @@ def get_brand_profile(brand_id):
 @csrf_protect
 def save_brand_profile(brand_id):
     """Creates or updates the brand marketing profile."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     data = request.get_json(silent=True) or {}
     try:
@@ -1370,6 +1376,8 @@ def get_campaigns():
 @csrf_protect
 def add_campaign():
     """Creates a new campaign strictly scoped to organization and brand."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
@@ -1438,6 +1446,8 @@ def get_campaign(campaign_id):
 @csrf_protect
 def update_campaign_route(campaign_id):
     """Updates campaign fields with mass-assignment protection."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     data = request.get_json(silent=True) or {}
 
@@ -1481,6 +1491,8 @@ def update_campaign_route(campaign_id):
 @csrf_protect
 def delete_campaign_route(campaign_id):
     """Deletes a campaign and its associated drafts."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     try:
         deleted = database.delete_campaign(campaign_id, organization_id=org_id)
@@ -1508,6 +1520,8 @@ def get_campaign_strategy_route(campaign_id):
 @csrf_protect
 def generate_campaign_strategy_route(campaign_id):
     """Generates or regenerates an AI marketing strategy for a campaign."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     data = request.get_json(silent=True) or {}
 
@@ -1585,6 +1599,8 @@ def generate_campaign_strategy_route(campaign_id):
 @csrf_protect
 def update_campaign_strategy_route(campaign_id):
     """Manually updates or customizes sections of a campaign strategy."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     data = request.get_json(silent=True) or {}
 
@@ -1612,6 +1628,8 @@ def update_campaign_strategy_route(campaign_id):
 @csrf_protect
 def generate_campaign_content_plan_route(campaign_id):
     """Generates an intelligent weekly or monthly editorial content plan for a campaign."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     data = request.get_json(silent=True) or {}
     period_type = str(data.get('period_type', 'weekly')).strip().lower()
@@ -1729,6 +1747,8 @@ def get_content_plan_by_id_route(plan_id):
 @csrf_protect
 def convert_plan_entry_to_draft_route(entry_id):
     """Converts a planned content plan entry into an editable content draft."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     try:
@@ -1741,6 +1761,24 @@ def convert_plan_entry_to_draft_route(entry_id):
     except Exception as e:
         logger.error(f"Error converting plan entry {entry_id} to draft: {e}")
         return jsonify({'error': 'Failed to convert plan entry to draft'}), 500
+
+@app.route('/api/content-plans/<int:plan_id>/convert-drafts', methods=['POST'])
+@login_required
+@csrf_protect
+def convert_all_plan_drafts_route(plan_id):
+    """Converts all planned entries in a content plan into content drafts."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        drafts = database.convert_all_plan_entries_to_drafts(plan_id, organization_id=org_id, user_id=user_id)
+        return jsonify({'status': 'success', 'drafts': drafts, 'drafts_count': len(drafts)}), 201
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error converting content plan #{plan_id} to drafts: {e}")
+        return jsonify({'error': 'Failed to convert plan to drafts'}), 500
 
 _RECENT_GENERATION_CACHE = {}  # {key: (timestamp, status_code, response_data)}
 
@@ -1770,6 +1808,8 @@ def generate_campaign_content_route(campaign_id):
     Enforces input validation, rate limiting, token limits, idempotency deduplication,
     and partial failure preservation.
     """
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
@@ -1994,6 +2034,8 @@ def get_draft(draft_id):
 @csrf_protect
 def update_draft(draft_id):
     """Updates editable draft copy, headline, hashtags, or CTA with mass-assignment protection and revision tracking."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
@@ -2038,6 +2080,7 @@ def update_draft(draft_id):
 
 @app.route('/api/drafts/<int:draft_id>/validate-creative', methods=['POST', 'GET'])
 @login_required
+@csrf_protect
 def validate_draft_creative_route(draft_id):
     """Validates draft creative, character counts, hashtags, and media attachments against platform rules."""
     org_id = session.get('organization_id', 1)
@@ -2100,6 +2143,8 @@ def get_draft_revision_route(draft_id, rev_num):
 @csrf_protect
 def restore_draft_revision_route(draft_id, rev_num):
     """Restores an earlier revision as the latest revision without mutating prior history."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     try:
@@ -2128,6 +2173,8 @@ def restore_draft_revision_route(draft_id, rev_num):
 @csrf_protect
 def regenerate_draft_route(draft_id):
     """Regenerates copy for a draft using AI and appends as a new revision."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
 
@@ -2232,6 +2279,8 @@ def regenerate_draft_route(draft_id):
 @csrf_protect
 def transition_draft(draft_id):
     """Explicitly transitions a content draft lifecycle status."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     data = request.get_json(silent=True) or {}
     to_status = data.get('status')
     reason = data.get('reason')
@@ -2321,6 +2370,8 @@ def reject_draft(draft_id):
 @csrf_protect
 def delete_draft(draft_id):
     """Deletes a content draft."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
     org_id = session.get('organization_id', 1)
     try:
         deleted = database.delete_content_draft(draft_id, organization_id=org_id)

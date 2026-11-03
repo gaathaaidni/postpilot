@@ -3214,6 +3214,23 @@ def convert_plan_entry_to_draft(entry_id, organization_id=1, user_id=None):
 
     return draft
 
+def convert_all_plan_entries_to_drafts(plan_id, organization_id=1, user_id=None):
+    """
+    Converts all entries in a content plan into editable content drafts.
+    Guarantees organization ownership check and immutable revision 1 creation.
+    """
+    org_id = int(organization_id)
+    p_id = int(plan_id)
+    plan = get_content_plan_by_id(p_id, organization_id=org_id)
+    if not plan:
+        raise TenantIsolationError(f"Content plan #{p_id} does not exist or does not belong to active organization.")
+
+    drafts = []
+    for entry in plan.get('entries', []):
+        draft = convert_plan_entry_to_draft(entry['id'], organization_id=org_id, user_id=user_id)
+        drafts.append(draft)
+    return drafts
+
 
 
 

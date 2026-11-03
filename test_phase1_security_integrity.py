@@ -499,6 +499,102 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         self.assertEqual(p['message'], 'Pre-Migration Post')
         self.assertEqual(p['organization_id'], 1)
 
+    def test_13_role_authorization_viewer_read_only(self):
+        """
+        Unit M Security Hardening:
+        Verify that users with 'viewer' role have strictly read-only access and cannot
+        create, mutate, generate, or delete marketing campaigns, drafts, or media.
+        """
+        # Ensure session is viewer
+        with self.client.session_transaction() as sess:
+            sess['user_id'] = 999
+            sess['username'] = 'test_viewer'
+            sess['organization_id'] = 1
+            sess['role'] = 'viewer'
+            sess['csrf_token'] = 'csrf-test-token-viewer'
+
+        headers = {'X-CSRFToken': 'csrf-test-token-viewer'}
+
+        # Attempt to create campaign
+        res = self.client.post('/api/campaigns', json={'brand_id': 1, 'name': 'Viewer Illegal Camp'}, headers=headers)
+        self.assertEqual(res.status_code, 403)
+        self.assertIn('read-only', res.get_json().get('error', '').lower())
+
+        # Attempt to update campaign
+        res = self.client.put('/api/campaigns/1', json={'name': 'Viewer Update'}, headers=headers)
+        self.assertEqual(res.status_code, 403)
+
+        # Attempt to delete campaign
+        res = self.client.delete('/api/campaigns/1', headers=headers)
+        self.assertEqual(res.status_code, 403)
+
+        # Attempt to generate copy
+        res = self.client.post('/api/campaigns/1/generate', json={'platforms': ['facebook']}, headers=headers)
+        self.assertEqual(res.status_code, 403)
+
+        # Attempt to upload media
+        res = self.client.post('/api/media/upload', data={'file': (io.BytesIO(b'dummy'), 'test.png')}, headers=headers)
+        self.assertEqual(res.status_code, 403)
+
+        # Attempt to delete media
+        res = self.client.delete('/api/media/1', headers=headers)
+        self.assertEqual(res.status_code, 403)
+
+    def test_14_convert_all_plan_entries_to_drafts(self):
+        """
+        Unit M Reliability Hardening:
+        Verify convert_all_plan_entries_to_drafts correctly translates all planned roadmap
+        items into content drafts with revision 1 and tenant scoping.
+        """
+        with self.client.session_transaction() as sess:
+            sess['user_id'] = 1
+            sess['username'] = 'secadmin'
+            sess['organization_id'] = 1
+            sess['role'] = 'admin'
+            sess['csrf_token'] = 'csrf-test-token-admin'
+
+        headers = {'X-CSRFToken': 'csrf-test-token-admin'}
+
+        # Create campaign and content plan directly in database
+        brand_id = database.get_brands_by_organization(1)[0]['id']
+        camp = database.create_campaign(1, brand_id, 'Plan Conversion Campaign', 'Awareness', 'Brief')
+        plan = database.create_content_plan(1, brand_id, camp['id'], 'weekly', '2026-11-10', '2026-11-17', [
+            {'day_number': 1, 'suggested_date': '2026-11-10', 'platform': 'facebook', 'topic': 'Brand launch post', 'headline': 'Hello World'},
+            {'day_number': 2, 'suggested_date': '2026-11-11', 'platform': 'linkedin', 'topic': 'B2B Insight post', 'headline': 'Market Shift'}
+        ])
+
+        # Convert all to drafts via API
+        res = self.client.post(f"/api/content-plans/{plan['id']}/convert-drafts", headers=headers)
+        self.assertEqual(res.status_code, 201)
+        data = res.get_json()
+        self.assertEqual(data.get('drafts_count'), 2)
+        self.assertEqual(len(data.get('drafts', [])), 2)
+
+        # Verify revision 1 created on each
+        for d in data['drafts']:
+            self.assertEqual(d['current_revision'], 1)
+            self.assertEqual(d['organization_id'], 1)
+
+    def test_15_creative_validation_csrf_enforcement(self):
+        """
+        Unit M Security Hardening:
+        Verify validate-creative endpoint requires CSRF protection on POST requests.
+        """
+        with self.client.session_transaction() as sess:
+            sess['user_id'] = 1
+            sess['organization_id'] = 1
+            sess['role'] = 'admin'
+            sess['csrf_token'] = 'valid-csrf-token'
+
+        # POST without CSRF header must fail with 403
+        res = self.client.post('/api/drafts/1/validate-creative')
+        self.assertEqual(res.status_code, 403)
+
+        # GET request without CSRF is allowed (safe read-only)
+        res_get = self.client.get('/api/drafts/1/validate-creative')
+        # Either 404 (draft 1 not found) or 200 (draft found), but NOT 403 CSRF rejected
+        self.assertIn(res_get.status_code, [200, 404])
+
 
 if __name__ == '__main__':
     unittest.main()
