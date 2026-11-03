@@ -620,6 +620,7 @@ def init_db():
         _ensure_column_exists(conn, 'posts', 'brand_id', 'INTEGER')
         _ensure_column_exists(conn, 'users', 'organization_id', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'is_active', 'INTEGER DEFAULT 1')
+        _ensure_column_exists(conn, 'users', 'email', 'TEXT')
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_by', 'INTEGER')
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_at', 'TIMESTAMP')
         _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
@@ -3458,3 +3459,252 @@ def get_marketing_dashboard_analytics(organization_id=1, brand_id=None, campaign
                 'message': 'Meta social credentials not configured; live social engagement metrics unavailable.' if not getattr(config, 'FB_ACCESS_TOKEN', None) else 'Live engagement connected.'
             }
         }
+
+
+def register_organization_with_owner(org_name, org_slug=None, owner_username="",
+                                     owner_password="", owner_email=None,
+                                     timezone_name="UTC", plan="starter"):
+    """
+    Self-service registration for a new multi-tenant organization.
+    Atomically creates the organization, its initial owner account, and default brand workspace.
+    """
+    clean_org_name = str(org_name or "").strip()
+    if not clean_org_name:
+        raise ValueError("Organization name is required.")
+
+    if not org_slug or not str(org_slug).strip():
+        base_slug = re.sub(r'[^a-z0-9]+', '-', clean_org_name.lower()).strip('-')
+        clean_slug = base_slug or f"org-{int(time.time())}"
+    else:
+        clean_slug = re.sub(r'[^a-z0-9]+', '-', str(org_slug).lower()).strip('-')
+
+    clean_username = str(owner_username or "").strip()
+    if not clean_username:
+        raise ValueError("Owner username is required.")
+
+    if not owner_password or len(str(owner_password)) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+
+    valid_tz = timezone_utils.validate_timezone_name(timezone_name or 'UTC')
+
+    with get_db_connection() as conn:
+        # Check slug uniqueness
+        existing_org = conn.execute("SELECT id FROM organizations WHERE slug = ?", (clean_slug,)).fetchone()
+        if existing_org:
+            raise ValueError(f"Organization slug '{clean_slug}' is already taken.")
+
+        # Check username uniqueness
+        existing_user = conn.execute("SELECT id FROM users WHERE username = ?", (clean_username,)).fetchone()
+        if existing_user:
+            raise ValueError(f"Username '{clean_username}' is already taken.")
+
+        # Create organization
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO organizations (name, slug, plan, timezone, is_active) "
+                "VALUES (?, ?, ?, ?, 1) RETURNING id",
+                (clean_org_name, clean_slug, plan, valid_tz)
+            )
+            org_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO organizations (name, slug, plan, timezone, is_active) "
+                "VALUES (?, ?, ?, ?, 1)",
+                (clean_org_name, clean_slug, plan, valid_tz)
+            )
+            org_id = cur.lastrowid
+
+        # Hash owner password and insert owner user
+        pw_hash = generate_password_hash(owner_password)
+        clean_email = str(owner_email).strip().lower() if owner_email else None
+
+        if is_postgres():
+            ucur = conn.execute(
+                "INSERT INTO users (organization_id, username, password_hash, role, email, is_active) "
+                "VALUES (?, ?, ?, 'owner', ?, 1) RETURNING id",
+                (org_id, clean_username, pw_hash, clean_email)
+            )
+            user_id = ucur.fetchone()['id']
+        else:
+            ucur = conn.execute(
+                "INSERT INTO users (organization_id, username, password_hash, role, email, is_active) "
+                "VALUES (?, ?, ?, 'owner', ?, 1)",
+                (org_id, clean_username, pw_hash, clean_email)
+            )
+            user_id = ucur.lastrowid
+
+        # Create initial default brand workspace
+        conn.execute(
+            "INSERT INTO brands (organization_id, name, slug, description, is_active) "
+            "VALUES (?, ?, 'default', 'Default brand workspace', 1)",
+            (org_id, f"{clean_org_name} Workspace")
+        )
+
+        conn.commit()
+
+        org_row = conn.execute("SELECT * FROM organizations WHERE id = ?", (org_id,)).fetchone()
+        user_row = conn.execute("SELECT id, organization_id, username, role, email, is_active, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+
+        return {
+            'organization': dict(org_row),
+            'user': dict(user_row)
+        }
+
+def get_organization_settings(organization_id):
+    """Retrieves organization details, brand counts, and current tier."""
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        org_row = conn.execute("SELECT * FROM organizations WHERE id = ?", (org_id,)).fetchone()
+        if not org_row:
+            return None
+        org_dict = dict(org_row)
+
+        brand_count = conn.execute("SELECT COUNT(*) as cnt FROM brands WHERE organization_id = ? AND is_active = 1", (org_id,)).fetchone()['cnt']
+        member_count = conn.execute("SELECT COUNT(*) as cnt FROM users WHERE organization_id = ? AND is_active = 1", (org_id,)).fetchone()['cnt']
+        campaign_count = conn.execute("SELECT COUNT(*) as cnt FROM campaigns WHERE organization_id = ?", (org_id,)).fetchone()['cnt']
+
+        org_dict['brand_count'] = brand_count
+        org_dict['member_count'] = member_count
+        org_dict['campaign_count'] = campaign_count
+        return org_dict
+
+def update_organization_settings(organization_id, name=None, timezone_name=None):
+    """Updates organization name and timezone."""
+    org_id = int(organization_id)
+    updates = []
+    params = []
+
+    if name is not None:
+        clean_name = str(name).strip()
+        if not clean_name:
+            raise ValueError("Organization name cannot be empty.")
+        updates.append("name = ?")
+        params.append(clean_name)
+
+    if timezone_name is not None:
+        valid_tz = timezone_utils.validate_timezone_name(timezone_name)
+        updates.append("timezone = ?")
+        params.append(valid_tz)
+
+    if not updates:
+        return get_organization_settings(org_id)
+
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(org_id)
+
+    with get_db_connection() as conn:
+        conn.execute(f"UPDATE organizations SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        conn.commit()
+
+    return get_organization_settings(org_id)
+
+def get_organization_members(organization_id):
+    """Lists team members belonging to the organization."""
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, organization_id, username, role, email, is_active, created_at "
+            "FROM users WHERE organization_id = ? ORDER BY id ASC",
+            (org_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def add_organization_member(organization_id, username, password, role="contributor", email=None):
+    """Adds a new team member to an organization."""
+    org_id = int(organization_id)
+    clean_username = str(username or "").strip()
+    if not clean_username:
+        raise ValueError("Username is required.")
+
+    if not password or len(str(password)) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+
+    clean_role = str(role or "contributor").strip().lower()
+    if clean_role not in ('admin', 'manager', 'contributor'):
+        raise ValueError(f"Invalid member role '{role}'. Allowed roles: admin, manager, contributor.")
+
+    clean_email = str(email).strip().lower() if email else None
+
+    with get_db_connection() as conn:
+        existing = conn.execute("SELECT id FROM users WHERE username = ?", (clean_username,)).fetchone()
+        if existing:
+            raise ValueError(f"Username '{clean_username}' is already taken.")
+
+        pw_hash = generate_password_hash(password)
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO users (organization_id, username, password_hash, role, email, is_active) "
+                "VALUES (?, ?, ?, ?, ?, 1) RETURNING id",
+                (org_id, clean_username, pw_hash, clean_role, clean_email)
+            )
+            uid = cur.fetchone()['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO users (organization_id, username, password_hash, role, email, is_active) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                (org_id, clean_username, pw_hash, clean_role, clean_email)
+            )
+            uid = cur.lastrowid
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT id, organization_id, username, role, email, is_active, created_at "
+            "FROM users WHERE id = ?", (uid,)
+        ).fetchone()
+        return dict(row)
+
+def update_organization_member(organization_id, user_id, role=None, is_active=None):
+    """Updates a team member's role or active status within an organization."""
+    org_id = int(organization_id)
+    u_id = int(user_id)
+
+    with get_db_connection() as conn:
+        user = conn.execute(
+            "SELECT * FROM users WHERE id = ? AND organization_id = ?",
+            (u_id, org_id)
+        ).fetchone()
+        if not user:
+            raise TenantIsolationError(f"User #{u_id} does not exist or does not belong to active organization.")
+
+        curr_role = user['role']
+        updates = []
+        params = []
+
+        if role is not None:
+            clean_role = str(role).strip().lower()
+            if clean_role not in ('owner', 'admin', 'manager', 'contributor'):
+                raise ValueError(f"Invalid role '{role}'.")
+            if curr_role == 'owner' and clean_role != 'owner':
+                # Check that another active owner exists
+                owners = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM users WHERE organization_id = ? AND role = 'owner' AND is_active = 1 AND id != ?",
+                    (org_id, u_id)
+                ).fetchone()['cnt']
+                if owners == 0:
+                    raise ValueError("Cannot demote the only active owner in the organization.")
+            updates.append("role = ?")
+            params.append(clean_role)
+
+        if is_active is not None:
+            act_int = 1 if is_active else 0
+            if curr_role == 'owner' and act_int == 0:
+                owners = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM users WHERE organization_id = ? AND role = 'owner' AND is_active = 1 AND id != ?",
+                    (org_id, u_id)
+                ).fetchone()['cnt']
+                if owners == 0:
+                    raise ValueError("Cannot deactivate the only active owner in the organization.")
+            updates.append("is_active = ?")
+            params.append(act_int)
+
+        if updates:
+            params.append(u_id)
+            params.append(org_id)
+            conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ? AND organization_id = ?", tuple(params))
+            conn.commit()
+
+        row = conn.execute(
+            "SELECT id, organization_id, username, role, email, is_active, created_at "
+            "FROM users WHERE id = ?", (u_id,)
+        ).fetchone()
+        return dict(row)

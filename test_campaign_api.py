@@ -1373,5 +1373,86 @@ class TestCampaignAPI(unittest.TestCase):
         # Org 2 has far fewer or 0 campaigns compared to Org 1
         self.assertLess(data_org2['campaigns']['total'], data['campaigns']['total'] + 1)
 
+
+    def test_organization_onboarding_and_member_roles(self):
+        # 1. Register a new tenant via self-service onboarding
+        reg_payload = {
+            'org_name': 'Acme Global Ventures',
+            'org_slug': 'acme-global',
+            'username': 'acme_founder',
+            'password': 'SecurePassword999!',
+            'email': 'founder@acme.com',
+            'timezone': 'America/New_York'
+        }
+        res_reg = self.client.post('/api/auth/register-org', json=reg_payload)
+        self.assertEqual(res_reg.status_code, 201)
+        data = res_reg.get_json()
+        new_org = data['organization']
+        new_user = data['user']
+        csrf_token = data['csrf_token']
+        headers = {'X-CSRFToken': csrf_token}
+
+        self.assertEqual(new_org['slug'], 'acme-global')
+        self.assertEqual(new_user['role'], 'owner')
+
+        # Check default brand created for the new tenant
+        brands = database.get_brands_by_organization(new_org['id'])
+        self.assertGreaterEqual(len(brands), 1)
+        self.assertEqual(brands[0]['slug'], 'default')
+
+        # Prevent duplicate username or slug registration
+        res_dup = self.client.post('/api/auth/register-org', json=reg_payload)
+        self.assertEqual(res_dup.status_code, 400)
+
+        # 2. Query organization settings
+        res_settings = self.client.get('/api/org/settings', headers=headers)
+        self.assertEqual(res_settings.status_code, 200)
+        settings = res_settings.get_json()['settings']
+        self.assertEqual(settings['id'], new_org['id'])
+        self.assertEqual(settings['timezone'], 'America/New_York')
+
+        # 3. Update organization settings
+        res_up_sett = self.client.put('/api/org/settings', json={
+            'name': 'Acme Global Enterprises',
+            'timezone': 'Europe/London'
+        }, headers=headers)
+        self.assertEqual(res_up_sett.status_code, 200)
+        up_sett = res_up_sett.get_json()['settings']
+        self.assertEqual(up_sett['name'], 'Acme Global Enterprises')
+        self.assertEqual(up_sett['timezone'], 'Europe/London')
+
+        # 4. Add a team member
+        res_add_mem = self.client.post('/api/org/members', json={
+            'username': 'acme_marketing_lead',
+            'password': 'LeadPassword123!',
+            'role': 'manager',
+            'email': 'marketing@acme.com'
+        }, headers=headers)
+        self.assertEqual(res_add_mem.status_code, 201)
+        mem = res_add_mem.get_json()['member']
+        self.assertEqual(mem['role'], 'manager')
+        mem_id = mem['id']
+
+        # 5. List team members
+        res_members = self.client.get('/api/org/members', headers=headers)
+        self.assertEqual(res_members.status_code, 200)
+        m_list = res_members.get_json()['members']
+        self.assertEqual(len(m_list), 2)
+        self.assertTrue(any(m['id'] == mem_id for m in m_list))
+
+        # 6. Demoting sole owner should fail
+        res_demote_owner = self.client.put(f'/api/org/members/{new_user["id"]}', json={
+            'role': 'contributor'
+        }, headers=headers)
+        self.assertEqual(res_demote_owner.status_code, 400)
+        self.assertIn("only active owner", res_demote_owner.get_json()['error'])
+
+        # 7. Tenant isolation: Org 1 cannot see Acme members
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+        res_org1_members = self.client.get('/api/org/members', headers=headers_org1)
+        self.assertEqual(res_org1_members.status_code, 200)
+        org1_mems = res_org1_members.get_json()['members']
+        self.assertFalse(any(m['id'] == mem_id for m in org1_mems))
+
 if __name__ == '__main__':
     unittest.main()

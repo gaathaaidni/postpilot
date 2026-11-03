@@ -100,7 +100,7 @@ def csrf_protect(f):
     def decorated_function(*args, **kwargs):
         if request.method in ('POST', 'PUT', 'DELETE'):
             # Allow login without CSRF token since session is not established yet
-            if request.path == '/api/auth/login':
+            if request.path in ('/api/auth/login', '/api/auth/register-org'):
                 return f(*args, **kwargs)
 
             # Check header, form, or JSON
@@ -330,6 +330,51 @@ def api_login():
         'csrf_token': token
     })
 
+
+@app.route('/api/auth/register-org', methods=['POST'])
+def register_organization_route():
+    """Public self-service SaaS registration: creates new organization and initial owner account."""
+    data = request.get_json(silent=True) or request.form or {}
+    org_name = data.get('org_name')
+    org_slug = data.get('org_slug')
+    username = data.get('username')
+    password = data.get('password')
+    email = data.get('email')
+    timezone_name = data.get('timezone', 'UTC')
+
+    if not org_name or not username or not password:
+        return jsonify({'error': 'org_name, username, and password are required', 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        res = database.register_organization_with_owner(
+            org_name=org_name,
+            org_slug=org_slug,
+            owner_username=username,
+            owner_password=password,
+            owner_email=email,
+            timezone_name=timezone_name
+        )
+        user = res['user']
+        org = res['organization']
+
+        session['user_id'] = user['id']
+        session['username'] = user['username']
+        session['role'] = user['role']
+        session['organization_id'] = org['id']
+        session['csrf_token'] = secrets.token_hex(16)
+
+        return jsonify({
+            'status': 'success',
+            'organization': org,
+            'user': user,
+            'csrf_token': session['csrf_token']
+        }), 201
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error registering organization: {e}")
+        return jsonify({'error': 'Failed to register organization'}), 500
+
 @app.route('/api/auth/logout', methods=['POST'])
 def api_logout():
     """Terminates the user session."""
@@ -460,6 +505,109 @@ def serve_image(filename):
     safe_filename = os.path.basename(filename)
     return send_from_directory(config.UPLOAD_FOLDER, safe_filename)
 
+
+
+# --- Organization Settings & Team Management Endpoints ---
+
+@app.route('/api/org/settings', methods=['GET'])
+@login_required
+def get_org_settings_route():
+    """Retrieves current organization settings, metrics, and tier."""
+    org_id = session.get('organization_id', 1)
+    settings = database.get_organization_settings(org_id)
+    if not settings:
+        return jsonify({'error': 'Organization not found'}), 404
+    return jsonify({'status': 'success', 'settings': settings}), 200
+
+@app.route('/api/org/settings', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_org_settings_route():
+    """Updates organization name or timezone. Restricted to owner or admin."""
+    org_id = session.get('organization_id', 1)
+    caller_role = session.get('role', 'contributor')
+    if caller_role not in ('owner', 'admin'):
+        return jsonify({'error': 'Forbidden: only organization owners and admins can update settings.'}), 403
+
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = database.update_organization_settings(
+            organization_id=org_id,
+            name=data.get('name'),
+            timezone_name=data.get('timezone')
+        )
+        return jsonify({'status': 'success', 'settings': updated}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error updating org settings: {e}")
+        return jsonify({'error': 'Failed to update organization settings'}), 500
+
+@app.route('/api/org/members', methods=['GET'])
+@login_required
+def get_org_members_route():
+    """Lists team members belonging to the active organization."""
+    org_id = session.get('organization_id', 1)
+    members = database.get_organization_members(org_id)
+    return jsonify({'status': 'success', 'members': members}), 200
+
+@app.route('/api/org/members', methods=['POST'])
+@login_required
+@csrf_protect
+def add_org_member_route():
+    """Adds a new team member to the organization. Restricted to owner or admin."""
+    org_id = session.get('organization_id', 1)
+    caller_role = session.get('role', 'contributor')
+    if caller_role not in ('owner', 'admin'):
+        return jsonify({'error': 'Forbidden: only owners and admins can add team members.'}), 403
+
+    data = request.get_json(silent=True) or {}
+    username = data.get('username')
+    password = data.get('password')
+    role = data.get('role', 'contributor')
+    email = data.get('email')
+
+    try:
+        new_member = database.add_organization_member(
+            organization_id=org_id,
+            username=username,
+            password=password,
+            role=role,
+            email=email
+        )
+        return jsonify({'status': 'success', 'member': new_member}), 201
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error adding organization member: {e}")
+        return jsonify({'error': 'Failed to add organization member'}), 500
+
+@app.route('/api/org/members/<int:member_id>', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_org_member_route(member_id):
+    """Updates team member role or active status. Restricted to owner or admin."""
+    org_id = session.get('organization_id', 1)
+    caller_role = session.get('role', 'contributor')
+    if caller_role not in ('owner', 'admin'):
+        return jsonify({'error': 'Forbidden: only owners and admins can modify team members.'}), 403
+
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = database.update_organization_member(
+            organization_id=org_id,
+            user_id=member_id,
+            role=data.get('role'),
+            is_active=data.get('is_active')
+        )
+        return jsonify({'status': 'success', 'member': updated}), 200
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error updating member #{member_id}: {e}")
+        return jsonify({'error': 'Failed to update member'}), 500
 
 # --- Central Media Library Endpoints ---
 
