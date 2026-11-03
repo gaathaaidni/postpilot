@@ -555,77 +555,131 @@ def set_interval(post_type):
 
 # --- Calendar Scheduling API Endpoints ---
 
+@app.route('/api/timezones', methods=['GET'])
+@login_required
+def get_timezones():
+    """Lists standard supported IANA timezones and the active organization's default."""
+    import timezone_utils
+    org_id = session.get('organization_id', 1)
+    org_tz = database.get_organization_timezone(org_id)
+    return jsonify({
+        'success': True,
+        'default': org_tz,
+        'timezones': timezone_utils.COMMON_TIMEZONES
+    })
+
 @app.route('/api/schedule', methods=['GET'])
 @login_required
 def get_scheduled():
-    """Retrieves scheduled posts for the active organization."""
+    """Retrieves scheduled posts for the active organization with optional filtering."""
     post_type = request.args.get('post_type')
     status = request.args.get('status')
+    brand_id = request.args.get('brand_id')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    tz_param = request.args.get('timezone')
+    limit = min(int(request.args.get('limit', 100)), 500)
     org_id = session.get('organization_id', 1)
-    posts = database.get_scheduled_posts(organization_id=org_id, post_type=post_type, status=status)
+
+    posts = database.get_scheduled_posts(
+        organization_id=org_id,
+        post_type=post_type,
+        status=status,
+        brand_id=brand_id,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        target_timezone=tz_param
+    )
     return jsonify(posts)
 
 @app.route('/api/schedule', methods=['POST'])
 @login_required
 @csrf_protect
 def add_scheduled():
-    """Schedules a post with persistent date/time and idempotency."""
+    """Schedules a post with strict validation, persistent date/time, and idempotency."""
     data = request.get_json() or {}
     post_type = data.get('post_type')
-    if post_type not in VALID_POST_TYPES:
-        return jsonify({'error': 'Invalid post type'}), 400
+    if not post_type or post_type not in VALID_POST_TYPES:
+        return jsonify({'error': 'Invalid post type', 'code': 'INVALID_POST_TYPE'}), 400
+
     scheduled_for = data.get('scheduled_for')
-    if not scheduled_for:
-        return jsonify({'error': 'scheduled_for is required'}), 400
+    if scheduled_for is None or str(scheduled_for).strip() == "":
+        return jsonify({'error': 'scheduled_for is required and cannot be empty', 'code': 'VALIDATION_ERROR'}), 400
 
     org_id = session.get('organization_id', 1)
     brand_id = data.get('brand_id')
-    message = data.get('message', '').strip()
-    image_filename = data.get('image_filename', '').strip()
+    message = data.get('message', '').strip() if data.get('message') else ''
+    image_filename = data.get('image_filename', '').strip() if data.get('image_filename') else None
     post_id = data.get('post_id')
+    timezone_name = data.get('timezone')
     idempotency_key = data.get('idempotency_key')
+    allow_past = bool(data.get('allow_past', False))
+    initial_status = data.get('status', 'scheduled')
 
-    record = database.create_scheduled_post(
-        post_type=post_type,
-        scheduled_for=scheduled_for,
-        message=message,
-        image_filename=image_filename,
-        post_id=post_id,
-        organization_id=org_id,
-        brand_id=brand_id,
-        idempotency_key=idempotency_key,
-        created_by=session.get('user_id')
-    )
-    return jsonify(record), 201
+    try:
+        record = database.create_scheduled_post(
+            post_type=post_type,
+            scheduled_for=scheduled_for,
+            message=message,
+            image_filename=image_filename,
+            post_id=post_id,
+            organization_id=org_id,
+            brand_id=brand_id,
+            timezone_name=timezone_name,
+            idempotency_key=idempotency_key,
+            created_by=session.get('user_id'),
+            initial_status=initial_status,
+            allow_past=allow_past
+        )
+        return jsonify(record), 201
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error creating scheduled post: {e}")
+        return jsonify({'error': 'Internal server error scheduling post'}), 500
 
 @app.route('/api/schedule/<int:schedule_id>', methods=['PUT'])
 @login_required
 @csrf_protect
 def update_scheduled(schedule_id):
-    """Updates a scheduled post."""
+    """Updates a scheduled post with strict validation."""
     data = request.get_json() or {}
     org_id = session.get('organization_id', 1)
-    success = database.update_scheduled_post(
-        schedule_id=schedule_id,
-        message=data.get('message'),
-        image_filename=data.get('image_filename'),
-        scheduled_for=data.get('scheduled_for'),
-        organization_id=org_id
-    )
-    if not success:
-        return jsonify({'error': 'Scheduled post not found or cannot be modified'}), 404
-    return jsonify({'success': True})
+    try:
+        success = database.update_scheduled_post(
+            schedule_id=schedule_id,
+            message=data.get('message'),
+            image_filename=data.get('image_filename'),
+            scheduled_for=data.get('scheduled_for'),
+            timezone_name=data.get('timezone'),
+            brand_id=data.get('brand_id'),
+            organization_id=org_id,
+            allow_past=bool(data.get('allow_past', False))
+        )
+        if not success:
+            return jsonify({'error': 'Scheduled post not found or cannot be modified', 'code': 'NOT_FOUND'}), 404
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error updating scheduled post #{schedule_id}: {e}")
+        return jsonify({'error': 'Internal server error updating post'}), 500
 
 @app.route('/api/schedule/<int:schedule_id>', methods=['DELETE'])
 @login_required
 @csrf_protect
 def cancel_scheduled(schedule_id):
-    """Cancels a scheduled post."""
+    """Cancels a scheduled post scoped to organization."""
     org_id = session.get('organization_id', 1)
-    success = database.cancel_scheduled_post(schedule_id=schedule_id, organization_id=org_id)
-    if not success:
-        return jsonify({'error': 'Scheduled post not found'}), 404
-    return jsonify({'success': True})
+    try:
+        success = database.cancel_scheduled_post(schedule_id=schedule_id, organization_id=org_id)
+        if not success:
+            return jsonify({'error': 'Scheduled post not found or cannot be cancelled', 'code': 'NOT_FOUND'}), 404
+        return jsonify({'success': True})
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+
 
 # --- Multi-Organization & Brand Workspaces Endpoints ---
 

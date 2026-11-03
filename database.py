@@ -20,6 +20,98 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 import config
+import timezone_utils
+
+SAFE_MEDIA_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4'}
+
+def validate_media_reference(filename):
+    """
+    Validates that a media reference does not contain path traversal sequences
+    and uses an allowed media file extension.
+    """
+    if not filename:
+        return None
+    if not isinstance(filename, str):
+        raise ValueError("Media reference must be a string filename.")
+    clean = filename.strip()
+    if not clean:
+        return None
+    if ".." in clean or "/" in clean or "\\" in clean or "\0" in clean:
+        raise ValueError("Invalid media reference: path traversal characters are forbidden.")
+    base = os.path.basename(clean)
+    if base != clean:
+        raise ValueError("Invalid media reference: directory paths are forbidden.")
+    _, ext = os.path.splitext(base)
+    if ext.lower() not in SAFE_MEDIA_EXTENSIONS:
+        raise ValueError(f"Unsupported media file extension '{ext}'. Allowed: {', '.join(sorted(SAFE_MEDIA_EXTENSIONS))}")
+    return base
+
+def validate_brand_ownership(brand_id, organization_id):
+    """
+    Validates that brand_id exists and belongs to the given organization.
+    """
+    if brand_id is None or brand_id == "":
+        return True
+    try:
+        b_id = int(brand_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid brand ID '{brand_id}'. Must be an integer.")
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT id, organization_id FROM brands WHERE id = ?",
+            (b_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Brand ID {b_id} does not exist.")
+        if row['organization_id'] != organization_id:
+            raise ValueError(f"Brand ID {b_id} belongs to a different organization and cannot be accessed.")
+        return True
+
+def validate_post_ownership(post_id, post_type, organization_id):
+    """
+    Validates that referenced post_id exists, belongs to the channel, and belongs to the organization.
+    """
+    if post_id is None or post_id == "":
+        return True
+    try:
+        p_id = int(post_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid post ID '{post_id}'. Must be an integer.")
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT id, post_type, organization_id FROM posts WHERE id = ?",
+            (p_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Referenced post ID {p_id} does not exist.")
+        if row['organization_id'] != organization_id:
+            raise ValueError(f"Referenced post ID {p_id} belongs to a different organization.")
+        if row['post_type'] != post_type:
+            raise ValueError(f"Referenced post ID {p_id} belongs to channel '{row['post_type']}', not '{post_type}'.")
+        return True
+
+def get_organization_timezone(organization_id=1):
+    """Returns the IANA timezone configured for the organization (defaults to UTC)."""
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT timezone FROM organizations WHERE id = ?", (organization_id,)).fetchone()
+        if row and row['timezone']:
+            try:
+                return timezone_utils.validate_timezone_name(row['timezone'])
+            except ValueError:
+                return "UTC"
+        return "UTC"
+
+def set_organization_timezone(organization_id, tz_name):
+    """Sets and validates the organization's default timezone."""
+    clean_tz = timezone_utils.validate_timezone_name(tz_name)
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE organizations SET timezone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (clean_tz, organization_id)
+        )
+        conn.commit()
+    return clean_tz
+
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +260,7 @@ def init_db():
                 name TEXT NOT NULL,
                 slug TEXT UNIQUE NOT NULL,
                 plan TEXT DEFAULT 'growth',
+                timezone TEXT DEFAULT 'UTC',
                 is_active INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -280,6 +373,7 @@ def init_db():
         conn.commit()
 
         # Non-destructive migrations for existing tables
+        _ensure_column_exists(conn, 'organizations', 'timezone', "TEXT DEFAULT 'UTC'")
         _ensure_column_exists(conn, 'posts', 'organization_id', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'posts', 'brand_id', 'INTEGER')
         _ensure_column_exists(conn, 'users', 'organization_id', 'INTEGER DEFAULT 1')
@@ -343,12 +437,15 @@ def init_default_admin():
 def init_default_organizations_and_brands():
     """Initializes default GAATHA organization and initial brand workspaces."""
     with get_db_connection() as conn:
-        org = conn.execute("SELECT id FROM organizations WHERE id = 1").fetchone()
+        org = conn.execute("SELECT id, timezone FROM organizations WHERE id = 1").fetchone()
         if not org:
             conn.execute(
-                "INSERT INTO organizations (id, name, slug, plan, is_active) VALUES (1, ?, ?, ?, 1)",
+                "INSERT INTO organizations (id, name, slug, plan, timezone, is_active) VALUES (1, ?, ?, ?, 'Asia/Kolkata', 1)",
                 ('GAATHA', 'gaatha', 'enterprise')
             )
+            conn.commit()
+        elif not org['timezone'] or org['timezone'] == 'UTC':
+            conn.execute("UPDATE organizations SET timezone = 'Asia/Kolkata' WHERE id = 1")
             conn.commit()
 
         initial_brands = [
@@ -813,26 +910,41 @@ def get_all_synced_post_ids(target_platform='instagram'):
         return {r['post_id'] for r in rows}
 
 # --- Persistent Calendar Scheduler Engine ---
-def create_scheduled_post(post_type, scheduled_for, message=None, image_filename=None, post_id=None,
+def create_scheduled_post(post_type, scheduled_for, message="", image_filename=None, post_id=None,
                           organization_id=1, brand_id=None, idempotency_key=None, created_by=None,
-                          timezone_str='UTC'):
+                          timezone_name=None, initial_status='scheduled', allow_past=True, **kwargs):
     """
-    Creates a persistent scheduled post.
-    scheduled_for must be ISO datetime string (e.g. 2026-11-03T12:00:00) or datetime object.
-    Internal storage is standardized to UTC YYYY-MM-DD HH:MM:SS format.
+    Creates a persistent scheduled post with strict validation, timezone normalization to UTC,
+    channel/brand ownership check, and idempotency protection.
     """
     import secrets
     import time
-    if isinstance(scheduled_for, datetime):
-        scheduled_utc_str = scheduled_for.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        try:
-            dt = datetime.fromisoformat(str(scheduled_for).replace('Z', '+00:00'))
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-            scheduled_utc_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-        except Exception:
-            scheduled_utc_str = str(scheduled_for)[:19].replace('T', ' ')
+
+    if post_type not in ('tour', 'nz', 'gaatha', 'insta'):
+        raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of tour, nz, gaatha, insta.")
+
+    # Validate brand ownership
+    if brand_id:
+        validate_brand_ownership(brand_id, organization_id)
+
+    # Validate referenced post ownership and channel match
+    if post_id:
+        validate_post_ownership(post_id, post_type, organization_id)
+
+    # Validate media path
+    safe_image = validate_media_reference(image_filename) if image_filename else None
+
+    # Resolve organization timezone
+    org_tz = get_organization_timezone(organization_id)
+    target_tz = timezone_name or kwargs.get('timezone_str') or org_tz
+
+    # Parse and convert to UTC
+    utc_dt, resolved_tz, scheduled_utc_str = timezone_utils.parse_and_convert_to_utc(
+        str(scheduled_for),
+        tz_name=target_tz,
+        org_default_tz=org_tz,
+        allow_past=allow_past
+    )
 
     if not idempotency_key:
         idempotency_key = f"sched-{organization_id}-{post_type}-{int(time.time())}-{secrets.token_hex(4)}"
@@ -844,15 +956,18 @@ def create_scheduled_post(post_type, scheduled_for, message=None, image_filename
             (idempotency_key,)
         ).fetchone()
         if existing:
-            return dict(existing)
+            if existing['organization_id'] != organization_id:
+                raise ValueError("Idempotency key collision across organizations.")
+            return get_scheduled_post_by_id(existing['id'], organization_id=organization_id)
 
+        msg_val = message if message is not None else ""
         if is_postgres():
             cur = conn.execute(
                 "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
                 "scheduled_for, timezone, status, idempotency_key, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?) RETURNING id",
-                (organization_id, brand_id, post_type, post_id, message, image_filename,
-                 scheduled_utc_str, timezone_str, idempotency_key, created_by)
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (organization_id, brand_id, post_type, post_id, msg_val, safe_image,
+                 scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by)
             )
             row = cur.fetchone()
             conn.commit()
@@ -861,14 +976,21 @@ def create_scheduled_post(post_type, scheduled_for, message=None, image_filename
             cur = conn.execute(
                 "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
                 "scheduled_for, timezone, status, idempotency_key, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)",
-                (organization_id, brand_id, post_type, post_id, message, image_filename,
-                 scheduled_utc_str, timezone_str, idempotency_key, created_by)
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (organization_id, brand_id, post_type, post_id, msg_val, safe_image,
+                 scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by)
             )
             conn.commit()
             return get_scheduled_post_by_id(cur.lastrowid, post_type=post_type, organization_id=organization_id)
 
-def get_scheduled_posts(organization_id=1, post_type=None, status=None, limit=50):
+def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id=None,
+                        start_date=None, end_date=None, limit=100, target_timezone=None):
+    """
+    Retrieves scheduled posts for an organization with optional filtering by channel,
+    brand, status, and date range. Automatically augments each post with localized times.
+    """
+    org_tz = target_timezone or get_organization_timezone(organization_id)
+
     with get_db_connection() as conn:
         query = "SELECT * FROM scheduled_posts WHERE organization_id = ?"
         params = [organization_id]
@@ -878,12 +1000,47 @@ def get_scheduled_posts(organization_id=1, post_type=None, status=None, limit=50
         if status:
             query += " AND status = ?"
             params.append(status)
+        if brand_id:
+            query += " AND brand_id = ?"
+            params.append(int(brand_id))
+        if start_date:
+            try:
+                _, _, start_utc = timezone_utils.parse_and_convert_to_utc(str(start_date), tz_name=org_tz, allow_past=True)
+                query += " AND scheduled_for >= ?"
+                params.append(start_utc)
+            except Exception:
+                query += " AND scheduled_for >= ?"
+                params.append(str(start_date))
+        if end_date:
+            try:
+                _, _, end_utc = timezone_utils.parse_and_convert_to_utc(str(end_date), tz_name=org_tz, allow_past=True)
+                query += " AND scheduled_for <= ?"
+                params.append(end_utc)
+            except Exception:
+                query += " AND scheduled_for <= ?"
+                params.append(str(end_date))
+
         query += " ORDER BY scheduled_for ASC, id ASC LIMIT ?"
         params.append(limit)
-        rows = conn.execute(query, tuple(params)).fetchall()
-        return [dict(r) for r in rows]
 
-def get_scheduled_post_by_id(schedule_id, post_type=None, organization_id=None):
+        rows = conn.execute(query, tuple(params)).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            try:
+                loc = timezone_utils.convert_utc_to_local(d['scheduled_for'], tz_name=org_tz)
+                d['local_scheduled_for'] = loc['local_iso']
+                d['local_display'] = loc['local_display']
+                d['display_timezone'] = loc['timezone']
+            except Exception:
+                d['local_scheduled_for'] = str(d['scheduled_for'])
+                d['local_display'] = str(d['scheduled_for'])
+                d['display_timezone'] = 'UTC'
+            results.append(d)
+        return results
+
+def get_scheduled_post_by_id(schedule_id, post_type=None, organization_id=None, target_timezone=None):
+    """Retrieves a single scheduled post with localized date fields."""
     with get_db_connection() as conn:
         query = "SELECT * FROM scheduled_posts WHERE id = ?"
         params = [schedule_id]
@@ -894,53 +1051,89 @@ def get_scheduled_post_by_id(schedule_id, post_type=None, organization_id=None):
             query += " AND organization_id = ?"
             params.append(organization_id)
         row = conn.execute(query, tuple(params)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        org_tz = target_timezone or get_organization_timezone(d.get('organization_id', 1))
+        try:
+            loc = timezone_utils.convert_utc_to_local(d['scheduled_for'], tz_name=org_tz)
+            d['local_scheduled_for'] = loc['local_iso']
+            d['local_display'] = loc['local_display']
+            d['display_timezone'] = loc['timezone']
+        except Exception:
+            d['local_scheduled_for'] = str(d['scheduled_for'])
+            d['local_display'] = str(d['scheduled_for'])
+            d['display_timezone'] = 'UTC'
+        return d
 
 def update_scheduled_post(schedule_id, message=None, image_filename=None, scheduled_for=None,
-                          post_type=None, organization_id=None):
+                          timezone_name=None, brand_id=None, post_type=None, organization_id=None,
+                          allow_past=False):
+    """Updates an existing scheduled post with validation and timezone normalization."""
+    existing = get_scheduled_post_by_id(schedule_id, post_type=post_type, organization_id=organization_id)
+    if not existing:
+        return False
+
+    if existing['status'] in ('publishing', 'published', 'cancelled'):
+        raise ValueError(f"Cannot update scheduled post #{schedule_id} with status '{existing['status']}'.")
+
+    updates = []
+    params = []
+    if message is not None:
+        updates.append("message = ?")
+        params.append(message)
+    if image_filename is not None:
+        safe_media = validate_media_reference(image_filename) if image_filename else ""
+        updates.append("image_filename = ?")
+        params.append(safe_media)
+    if brand_id is not None:
+        if brand_id != 0 and brand_id != "":
+            target_org = organization_id or existing['organization_id']
+            validate_brand_ownership(brand_id, target_org)
+            updates.append("brand_id = ?")
+            params.append(int(brand_id))
+        else:
+            updates.append("brand_id = NULL")
+    if scheduled_for is not None:
+        target_org = organization_id or existing['organization_id']
+        org_tz = get_organization_timezone(target_org)
+        target_tz = timezone_name or existing.get('timezone') or org_tz
+        utc_dt, resolved_tz, utc_str = timezone_utils.parse_and_convert_to_utc(
+            str(scheduled_for),
+            tz_name=target_tz,
+            org_default_tz=org_tz,
+            allow_past=allow_past
+        )
+        updates.append("scheduled_for = ?")
+        params.append(utc_str)
+        updates.append("timezone = ?")
+        params.append(resolved_tz)
+
+    if not updates:
+        return True
+
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    query = f"UPDATE scheduled_posts SET {', '.join(updates)} WHERE id = ?"
+    params.append(schedule_id)
+    if organization_id:
+        query += " AND organization_id = ?"
+        params.append(organization_id)
+
     with get_db_connection() as conn:
-        updates = []
-        params = []
-        if message is not None:
-            updates.append("message = ?")
-            params.append(message)
-        if image_filename is not None:
-            updates.append("image_filename = ?")
-            params.append(image_filename)
-        if scheduled_for is not None:
-            if isinstance(scheduled_for, datetime):
-                dt_str = scheduled_for.strftime("%Y-%m-%d %H:%M:%S")
-            else:
-                try:
-                    dt = datetime.fromisoformat(str(scheduled_for).replace('Z', '+00:00'))
-                    if dt.tzinfo is not None:
-                        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-                    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    dt_str = str(scheduled_for)[:19].replace('T', ' ')
-            updates.append("scheduled_for = ?")
-            params.append(dt_str)
-
-        if not updates:
-            return True
-
-        updates.append("updated_at = CURRENT_TIMESTAMP")
-        query = f"UPDATE scheduled_posts SET {', '.join(updates)} WHERE id = ? AND status IN ('scheduled', 'draft', 'failed')"
-        params.append(schedule_id)
-        if post_type:
-            query += " AND post_type = ?"
-            params.append(post_type)
-        if organization_id:
-            query += " AND organization_id = ?"
-            params.append(organization_id)
-
         res = conn.execute(query, tuple(params))
         conn.commit()
         return res.rowcount > 0
 
 def cancel_scheduled_post(schedule_id, post_type=None, organization_id=None):
+    """Cancels a scheduled post if not already published or cancelled."""
+    existing = get_scheduled_post_by_id(schedule_id, post_type=post_type, organization_id=organization_id)
+    if not existing:
+        return False
+    if existing['status'] in ('publishing', 'published', 'cancelled'):
+        raise ValueError(f"Cannot cancel scheduled post #{schedule_id} with status '{existing['status']}'.")
+
     with get_db_connection() as conn:
-        query = "UPDATE scheduled_posts SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('scheduled', 'draft', 'failed')"
+        query = "UPDATE scheduled_posts SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?"
         params = [schedule_id]
         if post_type:
             query += " AND post_type = ?"
