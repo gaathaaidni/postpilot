@@ -46,6 +46,7 @@ class TestCampaignAPI(unittest.TestCase):
         with database.get_db_connection() as conn:
             conn.execute("INSERT OR IGNORE INTO organizations (id, name, slug) VALUES (1, 'Org One', 'org-1')")
             conn.execute("INSERT OR IGNORE INTO organizations (id, name, slug) VALUES (2, 'Org Two', 'org-2')")
+            conn.execute("UPDATE organizations SET plan = 'enterprise' WHERE id = 1")
             conn.execute("INSERT OR IGNORE INTO brands (id, organization_id, name, slug, description) VALUES (10, 1, 'Brand Alpha', 'alpha', 'Brand Alpha consultancy')")
             conn.execute("INSERT OR IGNORE INTO brands (id, organization_id, name, slug, description) VALUES (20, 2, 'Brand Beta', 'beta', 'Brand Beta products')")
             conn.commit()
@@ -1453,6 +1454,62 @@ class TestCampaignAPI(unittest.TestCase):
         self.assertEqual(res_org1_members.status_code, 200)
         org1_mems = res_org1_members.get_json()['members']
         self.assertFalse(any(m['id'] == mem_id for m in org1_mems))
+
+
+    def test_saas_subscription_plans_and_quota_enforcement(self):
+        headers_admin = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Fetch available commercial plans
+        res_plans = self.client.get('/api/saas/plans')
+        self.assertEqual(res_plans.status_code, 200)
+        plans = res_plans.get_json()['plans']
+        plan_codes = {p['code'] for p in plans}
+        self.assertIn('starter', plan_codes)
+        self.assertIn('growth', plan_codes)
+        self.assertIn('enterprise', plan_codes)
+
+        # 2. Fetch current subscription and quota usage for Org 1
+        res_sub = self.client.get('/api/saas/subscription', headers=headers_admin)
+        self.assertEqual(res_sub.status_code, 200)
+        sub_data = res_sub.get_json()
+        self.assertIn('subscription', sub_data)
+        self.assertIn('quotas', sub_data)
+        self.assertIn('campaigns', sub_data['quotas'])
+        self.assertIn('used', sub_data['quotas']['campaigns'])
+        self.assertIn('limit', sub_data['quotas']['campaigns'])
+
+        # 3. Upgrade / change subscription to starter
+        res_up = self.client.post('/api/saas/subscription/upgrade', json={
+            'plan_code': 'starter'
+        }, headers=headers_admin)
+        self.assertEqual(res_up.status_code, 200)
+        self.assertEqual(res_up.get_json()['subscription']['plan_code'], 'starter')
+
+        # Check quota function reflects starter limits (max_campaigns = 5)
+        sub_check = database.get_organization_subscription(1)
+        self.assertEqual(sub_check['plan_code'], 'starter')
+        self.assertEqual(sub_check['max_campaigns'], 5)
+
+        # 4. Role restriction: Contributor cannot change plans
+        headers_contrib = self._login(user_id=10, role='contributor', org_id=1)
+        res_contrib_up = self.client.post('/api/saas/subscription/upgrade', json={
+            'plan_code': 'enterprise'
+        }, headers=headers_contrib)
+        self.assertEqual(res_contrib_up.status_code, 403)
+
+        # 5. Restore back to enterprise
+        headers_admin = self._login(user_id=1, role='admin', org_id=1)
+        res_restore = self.client.post('/api/saas/subscription/upgrade', json={
+            'plan_code': 'enterprise'
+        }, headers=headers_admin)
+        self.assertEqual(res_restore.status_code, 200)
+        self.assertEqual(res_restore.get_json()['subscription']['plan_code'], 'enterprise')
+
+        # 6. Tenant isolation: Org 2 subscription is independent
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res_org2_sub = self.client.get('/api/saas/subscription', headers=headers_org2)
+        self.assertEqual(res_org2_sub.status_code, 200)
+        self.assertEqual(res_org2_sub.get_json()['subscription']['organization_id'], 2)
 
 if __name__ == '__main__':
     unittest.main()

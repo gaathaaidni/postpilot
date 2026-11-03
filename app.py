@@ -507,6 +507,63 @@ def serve_image(filename):
 
 
 
+
+# --- Commercial SaaS Subscription Endpoints ---
+
+@app.route('/api/saas/plans', methods=['GET'])
+def list_saas_plans_route():
+    """Lists available commercial subscription plans and quotas."""
+    plans = database.get_subscription_plans()
+    return jsonify({'status': 'success', 'plans': plans}), 200
+
+@app.route('/api/saas/subscription', methods=['GET'])
+@login_required
+def get_saas_subscription_route():
+    """Retrieves current organization's subscription tier and quota usage."""
+    org_id = session.get('organization_id', 1)
+    sub = database.get_organization_subscription(org_id)
+
+    _, brand_usage, brand_limit, _ = database.check_organization_quota(org_id, 'brand')
+    _, camp_usage, camp_limit, _ = database.check_organization_quota(org_id, 'campaign')
+    _, post_usage, post_limit, _ = database.check_organization_quota(org_id, 'post')
+    _, token_usage, token_limit, _ = database.check_organization_quota(org_id, 'ai_token')
+
+    usage_metrics = {
+        'brands': {'used': brand_usage, 'limit': brand_limit},
+        'campaigns': {'used': camp_usage, 'limit': camp_limit},
+        'monthly_posts': {'used': post_usage, 'limit': post_limit},
+        'monthly_ai_tokens': {'used': token_usage, 'limit': token_limit}
+    }
+    return jsonify({
+        'status': 'success',
+        'subscription': sub,
+        'quotas': usage_metrics
+    }), 200
+
+@app.route('/api/saas/subscription/upgrade', methods=['POST'])
+@login_required
+@csrf_protect
+def upgrade_saas_subscription_route():
+    """Changes/upgrades an organization's subscription tier. Restricted to owner or admin."""
+    org_id = session.get('organization_id', 1)
+    caller_role = session.get('role', 'contributor')
+    if caller_role not in ('owner', 'admin'):
+        return jsonify({'error': 'Forbidden: only organization owners and admins can manage subscriptions.'}), 403
+
+    data = request.get_json(silent=True) or {}
+    plan_code = data.get('plan_code')
+    if not plan_code:
+        return jsonify({'error': 'plan_code is required', 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        updated = database.set_organization_subscription(org_id, plan_code)
+        return jsonify({'status': 'success', 'subscription': updated}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error upgrading subscription for org #{org_id}: {e}")
+        return jsonify({'error': 'Failed to upgrade subscription'}), 500
+
 # --- Organization Settings & Team Management Endpoints ---
 
 @app.route('/api/org/settings', methods=['GET'])
@@ -1322,6 +1379,16 @@ def add_campaign():
     objective = data.get('objective')
     brief = data.get('brief')
 
+    allowed, usage, limit, msg = database.check_organization_quota(org_id, 'campaign')
+    if not allowed:
+        return jsonify({
+            'error': msg,
+            'code': 'PLAN_QUOTA_EXCEEDED',
+            'resource': 'campaign',
+            'usage': usage,
+            'limit': limit
+        }), 402
+
     if not brand_id:
         return jsonify({'error': 'brand_id is required'}), 400
     if not name or not str(name).strip():
@@ -1706,6 +1773,17 @@ def generate_campaign_content_route(campaign_id):
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
+
+    # Check monthly token quota
+    allowed, usage, limit, msg = database.check_organization_quota(org_id, 'ai_token')
+    if not allowed:
+        return jsonify({
+            'error': msg,
+            'code': 'PLAN_QUOTA_EXCEEDED',
+            'resource': 'ai_token',
+            'usage': usage,
+            'limit': limit
+        }), 402
 
     # Check organizational hourly rate limit
     hourly_limit = getattr(config, 'AI_ORG_HOURLY_GENERATION_LIMIT', 60)

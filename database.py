@@ -264,6 +264,8 @@ def _ensure_indexes(conn):
         ("idx_plan_entries_plan", "CREATE INDEX IF NOT EXISTS idx_plan_entries_plan ON content_plan_entries(organization_id, plan_id, suggested_date)"),
         ("idx_media_assets_org_brand", "CREATE INDEX IF NOT EXISTS idx_media_assets_org_brand ON media_assets(organization_id, brand_id)"),
         ("idx_media_assets_org_created", "CREATE INDEX IF NOT EXISTS idx_media_assets_org_created ON media_assets(organization_id, created_at)"),
+        ("idx_sub_plans_code", "CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_plans_code ON subscription_plans(code)"),
+        ("idx_org_subs_org", "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_subs_org ON organization_subscriptions(organization_id)"),
     ]
     for name, sql in indexes:
         try:
@@ -612,6 +614,38 @@ def init_db():
             )
         ''')
 
+
+        # 18. Subscription plans table
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS subscription_plans (
+                id {auto_id},
+                code TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                max_brands INTEGER DEFAULT 5,
+                max_campaigns INTEGER DEFAULT 10,
+                max_monthly_posts INTEGER DEFAULT 500,
+                max_monthly_ai_tokens INTEGER DEFAULT 100000,
+                price_cents INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 19. Organization subscriptions table
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS organization_subscriptions (
+                id {auto_id},
+                organization_id INTEGER UNIQUE NOT NULL,
+                plan_code TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                current_period_start TIMESTAMP,
+                current_period_end TIMESTAMP,
+                cancel_at_period_end INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         conn.commit()
 
         # Non-destructive migrations for existing tables
@@ -621,6 +655,33 @@ def init_db():
         _ensure_column_exists(conn, 'users', 'organization_id', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'is_active', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'email', 'TEXT')
+
+        # Seed default commercial subscription plans
+        default_plans = [
+            ('starter', 'Starter Tier', 3, 5, 200, 50000, 2900),
+            ('growth', 'Growth Tier', 10, 25, 1000, 250000, 7900),
+            ('enterprise', 'Enterprise Tier', 100, 500, 10000, 2000000, 29900)
+        ]
+        for p_code, p_name, p_brands, p_camps, p_posts, p_tokens, p_price in default_plans:
+            try:
+                if is_postgres():
+                    conn.execute(
+                        "INSERT INTO subscription_plans (code, name, max_brands, max_campaigns, "
+                        "max_monthly_posts, max_monthly_ai_tokens, price_cents) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (code) DO NOTHING",
+                        (p_code, p_name, p_brands, p_camps, p_posts, p_tokens, p_price)
+                    )
+                else:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO subscription_plans (code, name, max_brands, max_campaigns, "
+                        "max_monthly_posts, max_monthly_ai_tokens, price_cents) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (p_code, p_name, p_brands, p_camps, p_posts, p_tokens, p_price)
+                    )
+            except Exception as e:
+                logger.warning(f"Notice seeding plan {p_code}: {e}")
+        conn.commit()
+
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_by', 'INTEGER')
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_at', 'TIMESTAMP')
         _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
@@ -3708,3 +3769,140 @@ def update_organization_member(organization_id, user_id, role=None, is_active=No
             "FROM users WHERE id = ?", (u_id,)
         ).fetchone()
         return dict(row)
+
+
+def get_subscription_plans():
+    """Lists available commercial subscription tiers and entitlements."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, code, name, max_brands, max_campaigns, max_monthly_posts, "
+            "max_monthly_ai_tokens, price_cents, is_active "
+            "FROM subscription_plans WHERE is_active = 1 ORDER BY price_cents ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def get_organization_subscription(organization_id):
+    """Retrieves an organization's active subscription tier and quota limits."""
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT os.*, sp.name as plan_name, sp.max_brands, sp.max_campaigns, "
+            "sp.max_monthly_posts, sp.max_monthly_ai_tokens, sp.price_cents "
+            "FROM organization_subscriptions os "
+            "JOIN subscription_plans sp ON os.plan_code = sp.code "
+            "WHERE os.organization_id = ?",
+            (org_id,)
+        ).fetchone()
+
+        if row:
+            return dict(row)
+
+        # Fallback: check organization table plan or default to growth/starter
+        org = conn.execute("SELECT plan FROM organizations WHERE id = ?", (org_id,)).fetchone()
+        plan_code = (org['plan'] if org and org['plan'] else 'growth').lower()
+
+        sp_row = conn.execute("SELECT * FROM subscription_plans WHERE code = ?", (plan_code,)).fetchone()
+        if not sp_row:
+            sp_row = conn.execute("SELECT * FROM subscription_plans WHERE code = 'growth'").fetchone()
+
+        if sp_row:
+            sp = dict(sp_row)
+            return {
+                'organization_id': org_id,
+                'plan_code': sp['code'],
+                'plan_name': sp['name'],
+                'status': 'active',
+                'max_brands': sp['max_brands'],
+                'max_campaigns': sp['max_campaigns'],
+                'max_monthly_posts': sp['max_monthly_posts'],
+                'max_monthly_ai_tokens': sp['max_monthly_ai_tokens'],
+                'price_cents': sp['price_cents']
+            }
+
+        return {
+            'organization_id': org_id,
+            'plan_code': 'growth',
+            'plan_name': 'Growth Tier',
+            'status': 'active',
+            'max_brands': 10,
+            'max_campaigns': 25,
+            'max_monthly_posts': 1000,
+            'max_monthly_ai_tokens': 250000,
+            'price_cents': 7900
+        }
+
+def set_organization_subscription(organization_id, plan_code, status='active'):
+    """Updates an organization's subscription tier."""
+    org_id = int(organization_id)
+    clean_code = str(plan_code).strip().lower()
+
+    with get_db_connection() as conn:
+        plan = conn.execute("SELECT * FROM subscription_plans WHERE code = ?", (clean_code,)).fetchone()
+        if not plan:
+            raise ValueError(f"Unknown subscription plan code: '{plan_code}'.")
+
+        # Upsert subscription
+        existing = conn.execute("SELECT id FROM organization_subscriptions WHERE organization_id = ?", (org_id,)).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE organization_subscriptions SET plan_code = ?, status = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE organization_id = ?",
+                (clean_code, status, org_id)
+            )
+        else:
+            conn.execute(
+                "INSERT INTO organization_subscriptions (organization_id, plan_code, status) "
+                "VALUES (?, ?, ?)",
+                (org_id, clean_code, status)
+            )
+
+        # Update organization plan column
+        conn.execute("UPDATE organizations SET plan = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (clean_code, org_id))
+        conn.commit()
+
+    return get_organization_subscription(org_id)
+
+def check_organization_quota(organization_id, resource_type):
+    """
+    Evaluates whether the organization has remaining quota for a given resource.
+    resource_type: 'brand', 'campaign', 'post', or 'ai_token'
+    Returns (is_allowed: bool, current_usage: int, limit: int, message: str)
+    """
+    org_id = int(organization_id)
+    sub = get_organization_subscription(org_id)
+    clean_type = str(resource_type).strip().lower()
+
+    with get_db_connection() as conn:
+        if clean_type == 'brand':
+            limit = sub.get('max_brands', 10)
+            usage = conn.execute(
+                "SELECT COUNT(*) as cnt FROM brands WHERE organization_id = ? AND is_active = 1",
+                (org_id,)
+            ).fetchone()['cnt']
+        elif clean_type == 'campaign':
+            limit = sub.get('max_campaigns', 25)
+            usage = conn.execute(
+                "SELECT COUNT(*) as cnt FROM campaigns WHERE organization_id = ? AND status != 'archived'",
+                (org_id,)
+            ).fetchone()['cnt']
+        elif clean_type == 'post':
+            limit = sub.get('max_monthly_posts', 1000)
+            if is_postgres():
+                post_query = "SELECT COUNT(*) as cnt FROM scheduled_posts WHERE organization_id = ? AND created_at >= NOW() - make_interval(days => 30)"
+            else:
+                post_query = "SELECT COUNT(*) as cnt FROM scheduled_posts WHERE organization_id = ? AND created_at >= datetime('now', '-30 days')"
+            usage = conn.execute(post_query, (org_id,)).fetchone()['cnt']
+        elif clean_type == 'ai_token':
+            limit = sub.get('max_monthly_ai_tokens', 250000)
+            if is_postgres():
+                token_query = "SELECT COALESCE(SUM(total_tokens), 0) as cnt FROM ai_usage_logs WHERE organization_id = ? AND created_at >= NOW() - make_interval(days => 30)"
+            else:
+                token_query = "SELECT COALESCE(SUM(total_tokens), 0) as cnt FROM ai_usage_logs WHERE organization_id = ? AND created_at >= datetime('now', '-30 days')"
+            usage = conn.execute(token_query, (org_id,)).fetchone()['cnt']
+        else:
+            return (True, 0, 999999, "Unconstrained resource.")
+
+        if usage >= limit:
+            msg = f"Subscription quota reached for {clean_type}s ({usage}/{limit}). Please upgrade your plan."
+            return (False, usage, limit, msg)
+        return (True, usage, limit, "Within subscription quota.")
