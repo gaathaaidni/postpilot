@@ -51,6 +51,10 @@ class TenantIsolationError(ValueError):
     """Raised when an operation attempts to access or mutate resources of another tenant/organization."""
     pass
 
+class ConcurrencyConflictError(ValueError):
+    """Raised when an operation encounters an optimistic concurrency conflict."""
+    pass
+
 def validate_brand_ownership(brand_id, organization_id):
     """
     Validates that brand_id exists and belongs to the given organization.
@@ -251,6 +255,8 @@ def _ensure_indexes(conn):
         ("idx_campaigns_status", "CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(organization_id, status)"),
         ("idx_drafts_org_campaign", "CREATE INDEX IF NOT EXISTS idx_drafts_org_campaign ON content_drafts(organization_id, campaign_id, target_platform)"),
         ("idx_drafts_org_brand", "CREATE INDEX IF NOT EXISTS idx_drafts_org_brand ON content_drafts(organization_id, brand_id, status)"),
+        ("idx_cdr_draft_rev", "CREATE INDEX IF NOT EXISTS idx_cdr_draft_rev ON content_draft_revisions(organization_id, draft_id, revision_number)"),
+        ("idx_cdr_campaign", "CREATE INDEX IF NOT EXISTS idx_cdr_campaign ON content_draft_revisions(organization_id, campaign_id)"),
     ]
     for name, sql in indexes:
         try:
@@ -463,9 +469,31 @@ def init_db():
                 ai_model TEXT,
                 metadata TEXT,
                 status TEXT DEFAULT 'draft',
+                current_revision INTEGER DEFAULT 1,
                 created_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 12. Content draft revisions table (immutable versioned audit history)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS content_draft_revisions (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL,
+                draft_id INTEGER NOT NULL,
+                revision_number INTEGER NOT NULL,
+                headline TEXT,
+                caption TEXT NOT NULL,
+                hashtags TEXT,
+                call_to_action TEXT,
+                content_format TEXT DEFAULT 'post',
+                change_source TEXT DEFAULT 'manual_edit',
+                change_summary TEXT,
+                edited_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -480,6 +508,29 @@ def init_db():
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_by', 'INTEGER')
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_at', 'TIMESTAMP')
         _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
+        _ensure_column_exists(conn, 'content_drafts', 'current_revision', 'INTEGER DEFAULT 1')
+
+        # Non-destructive backfill of revision 1 for legacy drafts lacking revisions
+        conn.execute('''
+            INSERT INTO content_draft_revisions (
+                organization_id, brand_id, campaign_id, draft_id,
+                revision_number, headline, caption, hashtags, call_to_action,
+                content_format, change_source, change_summary, edited_by, created_at
+            )
+            SELECT
+                cd.organization_id, cd.brand_id, cd.campaign_id, cd.id,
+                COALESCE(cd.current_revision, 1), cd.headline, cd.caption, cd.hashtags, cd.call_to_action,
+                COALESCE(cd.content_format, 'post'),
+                CASE WHEN cd.ai_provider IS NOT NULL THEN 'ai_generated' ELSE 'manual_creation' END,
+                'Initial draft creation',
+                cd.created_by,
+                cd.created_at
+            FROM content_drafts cd
+            WHERE NOT EXISTS (
+                SELECT 1 FROM content_draft_revisions cdr
+                WHERE cdr.draft_id = cd.id
+            )
+        ''')
 
         # Create indexes
         _ensure_indexes(conn)
@@ -1962,6 +2013,7 @@ def delete_campaign(campaign_id, organization_id=1):
     validate_campaign_ownership(campaign_id, organization_id)
     c_id = int(campaign_id)
     with get_db_connection() as conn:
+        conn.execute("DELETE FROM content_draft_revisions WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         conn.execute("DELETE FROM content_drafts WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         res = conn.execute("DELETE FROM campaigns WHERE id = ? AND organization_id = ?", (c_id, organization_id))
         conn.commit()
@@ -1999,8 +2051,8 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
             cur = conn.execute(
                 "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
                 "language, content_format, headline, caption, hashtags, call_to_action, "
-                "ai_provider, ai_model, metadata, status, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                "ai_provider, ai_model, metadata, status, current_revision, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) RETURNING id",
                 (organization_id, int(brand_id), int(campaign_id), clean_platform,
                  language or 'en', content_format or 'post', headline, clean_caption,
                  hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by)
@@ -2010,13 +2062,25 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
             cur = conn.execute(
                 "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
                 "language, content_format, headline, caption, hashtags, call_to_action, "
-                "ai_provider, ai_model, metadata, status, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "ai_provider, ai_model, metadata, status, current_revision, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
                 (organization_id, int(brand_id), int(campaign_id), clean_platform,
                  language or 'en', content_format or 'post', headline, clean_caption,
                  hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by)
             )
             did = cur.lastrowid
+
+        # Insert initial immutable revision 1
+        initial_source = 'ai_generated' if ai_provider else 'manual_creation'
+        conn.execute(
+            "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
+            "revision_number, headline, caption, hashtags, call_to_action, content_format, "
+            "change_source, change_summary, edited_by) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (organization_id, int(brand_id), int(campaign_id), did,
+             headline, clean_caption, hashtags, call_to_action, content_format or 'post',
+             initial_source, 'Initial draft creation', created_by)
+        )
         conn.commit()
 
         row = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (did,)).fetchone()
@@ -2075,8 +2139,10 @@ def list_content_drafts(organization_id=1, campaign_id=None, brand_id=None,
 
 def update_content_draft(draft_id, organization_id=1, caption=None, headline=None,
                          hashtags=None, call_to_action=None, status=None,
-                         content_format=None, metadata=None, allow_privileged_status=False):
-    """Updates a content draft ensuring organization ownership and lifecycle validity."""
+                         content_format=None, metadata=None, allow_privileged_status=False,
+                         expected_revision=None, edited_by=None, change_source='manual_edit',
+                         change_summary=None):
+    """Updates a content draft ensuring organization ownership, optimistic concurrency, and lifecycle validity."""
     try:
         d_id = int(draft_id)
     except (ValueError, TypeError):
@@ -2090,23 +2156,60 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
         if not existing:
             raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
 
+        curr_rev = existing['current_revision'] if existing['current_revision'] is not None else 1
+        if expected_revision is not None:
+            try:
+                exp_int = int(expected_revision)
+            except (ValueError, TypeError):
+                raise ValueError(f"expected_revision must be an integer, got '{expected_revision}'.")
+            if exp_int != curr_rev:
+                raise ConcurrencyConflictError(
+                    f"Conflict: Draft #{d_id} was modified by another request. Expected revision {exp_int}, but current revision is {curr_rev}."
+                )
+
         current_status = (existing['status'] or 'draft').lower()
         updates = []
         params = []
+
+        new_caption = str(caption).strip() if caption is not None else existing['caption']
+        new_headline = str(headline).strip() if (headline is not None and str(headline).strip() != '') else (None if headline == '' else existing['headline'])
+        new_hashtags = str(hashtags).strip() if (hashtags is not None and str(hashtags).strip() != '') else (None if hashtags == '' else existing['hashtags'])
+        new_cta = str(call_to_action).strip() if (call_to_action is not None and str(call_to_action).strip() != '') else (None if call_to_action == '' else existing['call_to_action'])
+        new_format = str(content_format).strip() if content_format is not None else (existing['content_format'] or 'post')
+
+        content_changed = False
         if caption is not None:
             if not str(caption).strip():
                 raise ValueError("Caption cannot be empty.")
+            if new_caption != existing['caption']:
+                content_changed = True
             updates.append("caption = ?")
-            params.append(str(caption).strip())
+            params.append(new_caption)
+
         if headline is not None:
+            if new_headline != existing['headline']:
+                content_changed = True
             updates.append("headline = ?")
-            params.append(str(headline).strip() if headline else None)
+            params.append(new_headline)
+
         if hashtags is not None:
+            if new_hashtags != existing['hashtags']:
+                content_changed = True
             updates.append("hashtags = ?")
-            params.append(str(hashtags).strip() if hashtags else None)
+            params.append(new_hashtags)
+
         if call_to_action is not None:
+            if new_cta != existing['call_to_action']:
+                content_changed = True
             updates.append("call_to_action = ?")
-            params.append(str(call_to_action).strip() if call_to_action else None)
+            params.append(new_cta)
+
+        if content_format is not None:
+            if new_format != (existing['content_format'] or 'post'):
+                content_changed = True
+            updates.append("content_format = ?")
+            params.append(new_format)
+
         if status is not None:
             clean_status = str(status).strip().lower()
             if clean_status not in VALID_DRAFT_STATUSES:
@@ -2123,13 +2226,27 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
                 )
             updates.append("status = ?")
             params.append(clean_status)
-        if content_format is not None:
-            updates.append("content_format = ?")
-            params.append(str(content_format).strip())
+
         if metadata is not None:
             meta_str = json.dumps(metadata) if isinstance(metadata, (dict, list)) else str(metadata)
             updates.append("metadata = ?")
             params.append(meta_str)
+
+        # Append revision if content changed or if explicit regenerated/restored_revision source
+        if content_changed or change_source in ('regenerated', 'restored_revision'):
+            next_rev = curr_rev + 1
+            updates.append("current_revision = ?")
+            params.append(next_rev)
+            summary = change_summary or ("Updated draft content" if change_source == 'manual_edit' else f"Updated content ({change_source})")
+            conn.execute(
+                "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
+                "revision_number, headline, caption, hashtags, call_to_action, content_format, "
+                "change_source, change_summary, edited_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (organization_id, existing['brand_id'], existing['campaign_id'], d_id,
+                 next_rev, new_headline, new_caption, new_hashtags, new_cta, new_format,
+                 change_source, summary, edited_by)
+            )
 
         if not updates:
             return dict(existing)
@@ -2202,14 +2319,117 @@ def transition_content_draft_status(draft_id, to_status, user_id=None, reason=No
         return dict(updated) if updated else None
 
 def delete_content_draft(draft_id, organization_id=1):
-    """Deletes a content draft strictly scoped to organization."""
+    """Deletes a content draft and its revision history strictly scoped to organization."""
     try:
         d_id = int(draft_id)
     except (ValueError, TypeError):
         return False
     with get_db_connection() as conn:
+        conn.execute("DELETE FROM content_draft_revisions WHERE draft_id = ? AND organization_id = ?", (d_id, organization_id))
         res = conn.execute("DELETE FROM content_drafts WHERE id = ? AND organization_id = ?", (d_id, organization_id))
         conn.commit()
         return res.rowcount > 0
+
+def list_draft_revisions(draft_id, organization_id=1):
+    """Returns chronological list of revisions for a draft within an organization."""
+    try:
+        d_id = int(draft_id)
+    except (ValueError, TypeError):
+        return []
+
+    with get_db_connection() as conn:
+        draft = conn.execute(
+            "SELECT id FROM content_drafts WHERE id = ? AND organization_id = ?",
+            (d_id, organization_id)
+        ).fetchone()
+        if not draft:
+            raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+
+        rows = conn.execute(
+            "SELECT * FROM content_draft_revisions "
+            "WHERE draft_id = ? AND organization_id = ? "
+            "ORDER BY revision_number ASC",
+            (d_id, organization_id)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def get_draft_revision(draft_id, revision_number, organization_id=1):
+    """Retrieves a single specific revision for a content draft."""
+    try:
+        d_id = int(draft_id)
+        r_num = int(revision_number)
+    except (ValueError, TypeError):
+        return None
+
+    with get_db_connection() as conn:
+        draft = conn.execute(
+            "SELECT id FROM content_drafts WHERE id = ? AND organization_id = ?",
+            (d_id, organization_id)
+        ).fetchone()
+        if not draft:
+            raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+
+        row = conn.execute(
+            "SELECT * FROM content_draft_revisions "
+            "WHERE draft_id = ? AND revision_number = ? AND organization_id = ?",
+            (d_id, r_num, organization_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+def restore_draft_revision(draft_id, revision_number, organization_id=1, restored_by=None):
+    """
+    Restores the content of an earlier revision as the newest revision.
+    Never mutates or truncates historical revisions; appends a new revision with change_source='restored_revision'.
+    """
+    try:
+        d_id = int(draft_id)
+        r_num = int(revision_number)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid draft ID '{draft_id}' or revision number '{revision_number}'.")
+
+    with get_db_connection() as conn:
+        draft = conn.execute(
+            "SELECT * FROM content_drafts WHERE id = ? AND organization_id = ?",
+            (d_id, organization_id)
+        ).fetchone()
+        if not draft:
+            raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+
+        target_rev = conn.execute(
+            "SELECT * FROM content_draft_revisions "
+            "WHERE draft_id = ? AND revision_number = ? AND organization_id = ?",
+            (d_id, r_num, organization_id)
+        ).fetchone()
+        if not target_rev:
+            raise ValueError(f"Revision #{r_num} does not exist for draft #{d_id}.")
+
+        current_rev = draft['current_revision'] if draft['current_revision'] is not None else 1
+        next_rev = current_rev + 1
+
+        # Update draft with restored content
+        conn.execute(
+            "UPDATE content_drafts SET headline = ?, caption = ?, hashtags = ?, call_to_action = ?, "
+            "content_format = ?, current_revision = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND organization_id = ?",
+            (target_rev['headline'], target_rev['caption'], target_rev['hashtags'],
+             target_rev['call_to_action'], target_rev['content_format'], next_rev,
+             d_id, organization_id)
+        )
+
+        # Append new revision record
+        conn.execute(
+            "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
+            "revision_number, headline, caption, hashtags, call_to_action, content_format, "
+            "change_source, change_summary, edited_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restored_revision', ?, ?)",
+            (organization_id, draft['brand_id'], draft['campaign_id'], d_id,
+             next_rev, target_rev['headline'], target_rev['caption'], target_rev['hashtags'],
+             target_rev['call_to_action'], target_rev['content_format'],
+             f"Restored from revision #{r_num}", restored_by)
+        )
+        conn.commit()
+
+        updated = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (d_id,)).fetchone()
+        return dict(updated) if updated else None
 
 

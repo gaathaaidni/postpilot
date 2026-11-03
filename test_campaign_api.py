@@ -435,5 +435,100 @@ class TestCampaignAPI(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.get_json()['draft']['status'], 'rejected')
 
+    def test_draft_immutable_revision_history_and_optimistic_locking(self):
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Create campaign and draft
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Revision Test Camp', 'objective': 'Test revisions', 'brief': 'Brief'
+        }, headers=headers_org1)
+        camp_id = res.get_json()['id']
+
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'provider': 'mock', 'platforms': ['facebook']
+        }, headers=headers_org1)
+        draft = res.get_json()['drafts'][0]
+        draft_id = draft['id']
+        self.assertEqual(draft['current_revision'], 1)
+
+        # 2. Check initial revision in /revisions
+        res = self.client.get(f'/api/drafts/{draft_id}/revisions', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['count'], 1)
+        rev1 = data['revisions'][0]
+        self.assertEqual(rev1['revision_number'], 1)
+        self.assertEqual(rev1['change_source'], 'ai_generated')
+        self.assertEqual(rev1['caption'], draft['caption'])
+
+        # 3. Update draft caption -> creates revision 2
+        res = self.client.put(f'/api/drafts/{draft_id}', json={
+            'caption': 'Revised caption for unit testing',
+            'expected_revision': 1
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        updated1 = res.get_json()
+        self.assertEqual(updated1['current_revision'], 2)
+        self.assertEqual(updated1['caption'], 'Revised caption for unit testing')
+
+        # 4. Optimistic locking: Attempt edit with stale expected_revision 1 -> HTTP 409 CONCURRENT_EDIT_CONFLICT
+        res = self.client.put(f'/api/drafts/{draft_id}', json={
+            'caption': 'Conflict edit attempt',
+            'expected_revision': 1
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.get_json()['code'], 'CONCURRENT_EDIT_CONFLICT')
+
+        # 5. Successful edit with expected_revision 2 -> creates revision 3
+        res = self.client.put(f'/api/drafts/{draft_id}', json={
+            'caption': 'Third version of caption',
+            'expected_revision': 2
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['current_revision'], 3)
+
+        # 6. Check full revision history
+        res = self.client.get(f'/api/drafts/{draft_id}/revisions', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        revs = res.get_json()['revisions']
+        self.assertEqual(len(revs), 3)
+        self.assertEqual(revs[0]['revision_number'], 1)
+        self.assertEqual(revs[1]['revision_number'], 2)
+        self.assertEqual(revs[2]['revision_number'], 3)
+
+        # 7. Fetch single revision by number
+        res = self.client.get(f'/api/drafts/{draft_id}/revisions/1', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['caption'], draft['caption'])
+
+        # 8. Restore revision 1 -> appends as revision 4 with source 'restored_revision'
+        res = self.client.post(f'/api/drafts/{draft_id}/revisions/1/restore', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        restore_data = res.get_json()
+        self.assertEqual(restore_data['current_revision'], 4)
+        self.assertEqual(restore_data['draft']['caption'], draft['caption'])
+
+        # Prior revisions are intact!
+        res = self.client.get(f'/api/drafts/{draft_id}/revisions', headers=headers_org1)
+        self.assertEqual(res.get_json()['count'], 4)
+        self.assertEqual(res.get_json()['revisions'][3]['change_source'], 'restored_revision')
+
+        # 9. AI regeneration creates revision 5
+        res = self.client.post(f'/api/drafts/{draft_id}/regenerate', json={
+            'provider': 'mock',
+            'expected_revision': 4
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        regen_draft = res.get_json()['draft']
+        self.assertEqual(regen_draft['current_revision'], 5)
+
+        # 10. Tenant isolation: Org 2 cannot view or restore Org 1's draft revisions
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res = self.client.get(f'/api/drafts/{draft_id}/revisions', headers=headers_org2)
+        self.assertEqual(res.status_code, 404)
+
+        res = self.client.post(f'/api/drafts/{draft_id}/revisions/1/restore', headers=headers_org2)
+        self.assertEqual(res.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

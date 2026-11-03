@@ -3497,13 +3497,23 @@ function renderStudioDraftCard(draft) {
     return `
         <div class="studio-draft-card" id="draft-card-${draft.id}">
             <div class="studio-draft-header">
-                <span class="platform-badge ${plat}">
-                    <i class="${platIcons[plat] || 'fa-solid fa-share-nodes'}"></i>
-                    ${platLabels[plat] || plat.toUpperCase()}
-                </span>
-                <span style="font-size: 0.72rem; color: var(--text-muted);">
-                    ${escapeHtml(draft.ai_provider || 'ai')} · ${draft.created_at ? formatReadableDateTime(draft.created_at) : 'Draft'}
-                </span>
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <span class="platform-badge ${plat}">
+                        <i class="${platIcons[plat] || 'fa-solid fa-share-nodes'}"></i>
+                        ${platLabels[plat] || plat.toUpperCase()}
+                    </span>
+                    <span class="badge badge-secondary" style="font-size: 0.7rem; font-weight: 500;" id="draft-rev-badge-${draft.id}">
+                        Rev #${draft.current_revision || 1}
+                    </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" style="padding: 0.15rem 0.4rem; font-size: 0.72rem;" onclick="viewDraftRevisions(${draft.id})" title="View revision history">
+                        <i class="fa-solid fa-clock-rotate-left"></i> History
+                    </button>
+                    <span style="font-size: 0.72rem; color: var(--text-muted);">
+                        ${escapeHtml(draft.ai_provider || 'ai')} · ${draft.created_at ? formatReadableDateTime(draft.created_at) : 'Draft'}
+                    </span>
+                </div>
             </div>
 
             ${plat === 'whatsapp' ? `
@@ -3548,9 +3558,12 @@ function renderStudioDraftCard(draft) {
 
             <!-- Action Controls -->
             <div class="studio-draft-actions">
-                <div style="display: flex; gap: 0.4rem;">
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
                     <button type="button" class="btn btn-secondary btn-sm" onclick="saveStudioDraft(${draft.id})" title="Save manual edits to this draft">
                         <i class="fa-solid fa-floppy-disk"></i> Save
+                    </button>
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="regenerateStudioDraft(${draft.id})" id="btn-regen-${draft.id}" title="Regenerate copy with AI (creates new revision)">
+                        <i class="fa-solid fa-arrows-rotate"></i> Regenerate
                     </button>
                     <button type="button" class="btn btn-primary btn-sm" onclick="scheduleStudioDraft(${draft.id})" title="Send this draft into Post Composer / Scheduler">
                         <i class="fa-solid fa-paper-plane"></i> Schedule
@@ -3767,6 +3780,7 @@ async function generateStudioCopy() {
 
 // Save Edited Draft
 async function saveStudioDraft(draftId) {
+    const draft = studioDrafts.find(d => d.id === draftId);
     const headline = document.getElementById(`draft-headline-${draftId}`)?.value.trim();
     const caption = document.getElementById(`draft-caption-${draftId}`)?.value.trim();
     const hashtags = document.getElementById(`draft-hashtags-${draftId}`)?.value.trim();
@@ -3784,22 +3798,183 @@ async function saveStudioDraft(draftId) {
                 headline,
                 caption,
                 hashtags,
-                call_to_action: cta
+                call_to_action: cta,
+                expected_revision: draft ? (draft.current_revision || 1) : 1
             })
         });
 
         if (res.ok) {
             const updated = await res.json();
-            // Update in local array
             const idx = studioDrafts.findIndex(d => d.id === draftId);
             if (idx !== -1) studioDrafts[idx] = updated;
+            const revBadge = document.getElementById(`draft-rev-badge-${draftId}`);
+            if (revBadge) revBadge.textContent = `Rev #${updated.current_revision || 1}`;
             showToast("Draft saved successfully!", "success");
+        } else if (res.status === 409) {
+            showToast("Conflict: Draft was modified by another session. Please refresh to load latest revision.", "warning");
         } else {
             const err = await res.json();
             showToast(err.error || "Failed to update draft", "danger");
         }
     } catch (e) {
         showToast(e.message || "Network error", "danger");
+    }
+}
+
+// Regenerate Copy for a Draft (Appends as New Revision)
+async function regenerateStudioDraft(draftId) {
+    const draft = studioDrafts.find(d => d.id === draftId);
+    const btn = document.getElementById(`btn-regen-${draftId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+    }
+
+    try {
+        const res = await authFetch(`/api/drafts/${draftId}/regenerate`, {
+            method: 'POST',
+            body: JSON.stringify({
+                expected_revision: draft ? (draft.current_revision || 1) : 1
+            })
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            const updated = data.draft;
+            const idx = studioDrafts.findIndex(d => d.id === draftId);
+            if (idx !== -1) studioDrafts[idx] = updated;
+
+            const headlineEl = document.getElementById(`draft-headline-${draftId}`);
+            if (headlineEl) headlineEl.value = updated.headline || '';
+            const captionEl = document.getElementById(`draft-caption-${draftId}`);
+            if (captionEl) {
+                captionEl.value = updated.caption || '';
+                const cnt = document.getElementById(`draft-count-${draftId}`);
+                if (cnt) cnt.textContent = `${(updated.caption || '').length} chars`;
+            }
+            const tagsEl = document.getElementById(`draft-hashtags-${draftId}`);
+            if (tagsEl) tagsEl.value = updated.hashtags || '';
+            const ctaEl = document.getElementById(`draft-cta-${draftId}`);
+            if (ctaEl) ctaEl.value = updated.call_to_action || '';
+            const revBadge = document.getElementById(`draft-rev-badge-${draftId}`);
+            if (revBadge) revBadge.textContent = `Rev #${updated.current_revision || 1}`;
+
+            showToast(`✨ Regenerated copy! Created Rev #${updated.current_revision}.`, "success");
+        } else if (res.status === 409) {
+            showToast("Conflict: Draft was modified by another session. Please refresh.", "warning");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to regenerate copy", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i> Regenerate`;
+        }
+    }
+}
+
+// View Revision History
+async function viewDraftRevisions(draftId) {
+    try {
+        const res = await authFetch(`/api/drafts/${draftId}/revisions`);
+        if (!res.ok) {
+            showToast("Failed to fetch revisions", "danger");
+            return;
+        }
+        const data = await res.json();
+        const revisions = data.revisions || [];
+        if (revisions.length === 0) {
+            showToast("No revisions recorded yet.", "info");
+            return;
+        }
+
+        const listHtml = revisions.map(r => `
+            <div style="border-bottom: 1px solid var(--border-color); padding: 0.6rem 0; display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+                <div style="flex: 1; min-width: 0;">
+                    <div style="font-weight: 600; font-size: 0.85rem;">Rev #${r.revision_number} <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal;">(${escapeHtml(r.change_source || 'manual')})</span></div>
+                    <div style="font-size: 0.78rem; color: var(--text-secondary); margin: 0.2rem 0;">${escapeHtml(r.change_summary || '')}</div>
+                    <div style="font-size: 0.72rem; color: var(--text-muted);">${formatReadableDateTime(r.created_at)}</div>
+                    <div style="font-size: 0.8rem; background: var(--bg-tertiary); padding: 0.3rem 0.5rem; border-radius: 4px; margin-top: 0.3rem; max-height: 80px; overflow-y: auto; white-space: pre-wrap;">${escapeHtml(r.caption || '')}</div>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-outline-primary btn-sm" style="font-size: 0.75rem;" onclick="restoreRevision(${draftId}, ${r.revision_number})">
+                        Restore
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        let revModal = document.getElementById('draft-revisions-modal');
+        if (!revModal) {
+            revModal = document.createElement('div');
+            revModal.id = 'draft-revisions-modal';
+            revModal.className = 'modal-backdrop';
+            document.body.appendChild(revModal);
+        }
+
+        revModal.innerHTML = `
+            <div class="modal-card" style="max-width: 600px; max-height: 85vh; display: flex; flex-direction: column;">
+                <div class="modal-header">
+                    <h3>Draft #${draftId} Revision History</h3>
+                    <button type="button" class="modal-close" onclick="document.getElementById('draft-revisions-modal').classList.remove('active')">&times;</button>
+                </div>
+                <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                    ${listHtml}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('draft-revisions-modal').classList.remove('active')">Close</button>
+                </div>
+            </div>
+        `;
+        revModal.classList.add('active');
+    } catch (e) {
+        showToast(e.message || "Failed to load revisions", "danger");
+    }
+}
+
+// Restore a Specific Revision
+async function restoreRevision(draftId, revNum) {
+    if (!confirm(`Restore content from Revision #${revNum}? This creates a new revision with that content.`)) return;
+
+    try {
+        const res = await authFetch(`/api/drafts/${draftId}/revisions/${revNum}/restore`, {
+            method: 'POST'
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            const updated = data.draft;
+            const idx = studioDrafts.findIndex(d => d.id === draftId);
+            if (idx !== -1) studioDrafts[idx] = updated;
+
+            const headlineEl = document.getElementById(`draft-headline-${draftId}`);
+            if (headlineEl) headlineEl.value = updated.headline || '';
+            const captionEl = document.getElementById(`draft-caption-${draftId}`);
+            if (captionEl) {
+                captionEl.value = updated.caption || '';
+                const cnt = document.getElementById(`draft-count-${draftId}`);
+                if (cnt) cnt.textContent = `${(updated.caption || '').length} chars`;
+            }
+            const tagsEl = document.getElementById(`draft-hashtags-${draftId}`);
+            if (tagsEl) tagsEl.value = updated.hashtags || '';
+            const ctaEl = document.getElementById(`draft-cta-${draftId}`);
+            if (ctaEl) ctaEl.value = updated.call_to_action || '';
+            const revBadge = document.getElementById(`draft-rev-badge-${draftId}`);
+            if (revBadge) revBadge.textContent = `Rev #${updated.current_revision || 1}`;
+
+            const revModal = document.getElementById('draft-revisions-modal');
+            if (revModal) revModal.classList.remove('active');
+
+            showToast(`Restored content from Rev #${revNum} as Rev #${updated.current_revision}!`, "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to restore revision", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Restore network error", "danger");
     }
 }
 

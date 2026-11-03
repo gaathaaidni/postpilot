@@ -1254,8 +1254,9 @@ def get_draft(draft_id):
 @login_required
 @csrf_protect
 def update_draft(draft_id):
-    """Updates editable draft copy, headline, hashtags, or CTA."""
+    """Updates editable draft copy, headline, hashtags, or CTA with revision tracking and optimistic concurrency."""
     org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
     try:
         updated = database.update_content_draft(
@@ -1267,17 +1268,156 @@ def update_draft(draft_id):
             call_to_action=data.get('call_to_action'),
             content_format=data.get('content_format'),
             status=data.get('status'),
-            allow_privileged_status=False
+            allow_privileged_status=False,
+            expected_revision=data.get('expected_revision'),
+            edited_by=user_id,
+            change_source=data.get('change_source', 'manual_edit'),
+            change_summary=data.get('change_summary')
         )
         if not updated:
             return jsonify({'error': 'Draft not found'}), 404
         return jsonify(updated)
+    except database.ConcurrencyConflictError as e:
+        return jsonify({'error': str(e), 'code': 'CONCURRENT_EDIT_CONFLICT'}), 409
     except (database.TenantIsolationError, ValueError) as e:
         status_code = 404 if 'Tenant' in type(e).__name__ or 'ownership' in str(e).lower() else 400
         return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), status_code
     except Exception as e:
         logger.error(f"Error updating draft: {e}")
         return jsonify({'error': 'Failed to update draft'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/revisions', methods=['GET'])
+@login_required
+def get_draft_revisions_route(draft_id):
+    """Retrieves full immutable revision audit history for a draft."""
+    org_id = session.get('organization_id', 1)
+    try:
+        revisions = database.list_draft_revisions(draft_id, organization_id=org_id)
+        return jsonify({'draft_id': draft_id, 'revisions': revisions, 'count': len(revisions)})
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error fetching revisions for draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to retrieve revision history'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/revisions/<int:rev_num>', methods=['GET'])
+@login_required
+def get_draft_revision_route(draft_id, rev_num):
+    """Retrieves a single specific revision for a draft."""
+    org_id = session.get('organization_id', 1)
+    try:
+        revision = database.get_draft_revision(draft_id, rev_num, organization_id=org_id)
+        if not revision:
+            return jsonify({'error': f'Revision #{rev_num} not found'}), 404
+        return jsonify(revision)
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error fetching revision #{rev_num} for draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to retrieve revision'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/revisions/<int:rev_num>/restore', methods=['POST'])
+@login_required
+@csrf_protect
+def restore_draft_revision_route(draft_id, rev_num):
+    """Restores an earlier revision as the latest revision without mutating prior history."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        updated = database.restore_draft_revision(
+            draft_id=draft_id,
+            revision_number=rev_num,
+            organization_id=org_id,
+            restored_by=user_id
+        )
+        return jsonify({
+            'success': True,
+            'draft': updated,
+            'restored_from_revision': rev_num,
+            'current_revision': updated.get('current_revision')
+        })
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error restoring revision #{rev_num} on draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to restore revision'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/regenerate', methods=['POST'])
+@login_required
+@csrf_protect
+def regenerate_draft_route(draft_id):
+    """Regenerates copy for a draft using AI and appends as a new revision."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    draft = database.get_content_draft_by_id(draft_id, organization_id=org_id)
+    if not draft:
+        return jsonify({'error': 'Draft not found'}), 404
+
+    camp = database.get_campaign_by_id(draft['campaign_id'], organization_id=org_id)
+    if not camp:
+        return jsonify({'error': 'Associated campaign not found'}), 404
+
+    brand = database.get_brand_by_id(draft['brand_id'], organization_id=org_id)
+    if not brand:
+        return jsonify({'error': 'Associated brand not found'}), 404
+
+    profile = database.get_brand_marketing_profile(draft['brand_id'], organization_id=org_id) or {}
+    brand_info = {
+        'name': brand.get('name', 'Brand'),
+        'description': brand.get('description', ''),
+        'positioning': profile.get('positioning') or brand.get('description', ''),
+        'voice_and_tone': profile.get('voice_and_tone', 'Professional, authoritative, customer-focused'),
+        'messaging_guidelines': profile.get('messaging_guidelines', ''),
+        'approved_product_facts': profile.get('approved_product_facts', ''),
+        'prohibited_claims': profile.get('prohibited_claims', ''),
+        'preferred_ctas': profile.get('preferred_ctas', '')
+    }
+
+    data = request.get_json(silent=True) or {}
+    provider_name = data.get('provider') or draft.get('ai_provider')
+    model_name = data.get('model') or draft.get('ai_model')
+
+    try:
+        ai_provider = ai_service.get_ai_provider(provider_name=provider_name, model=model_name)
+        gen_res = ai_service.generate_campaign_content(
+            provider=ai_provider,
+            brand_info=brand_info,
+            campaign_info=camp,
+            target_platform=draft['target_platform'],
+            language=draft.get('language', 'en'),
+            content_format=draft.get('content_format', 'post'),
+            model=model_name
+        )
+
+        updated = database.update_content_draft(
+            draft_id=draft_id,
+            organization_id=org_id,
+            caption=gen_res.caption,
+            headline=gen_res.headline,
+            hashtags=gen_res.hashtags,
+            call_to_action=gen_res.call_to_action,
+            content_format=draft.get('content_format', 'post'),
+            edited_by=user_id,
+            change_source='regenerated',
+            change_summary='AI regenerated copy',
+            expected_revision=data.get('expected_revision')
+        )
+        return jsonify({'success': True, 'draft': updated})
+    except database.ConcurrencyConflictError as e:
+        return jsonify({'error': str(e), 'code': 'CONCURRENT_EDIT_CONFLICT'}), 409
+    except ai_service.AIConfigurationError as e:
+        return jsonify({'error': str(e)}), 400
+    except ai_service.AIRateLimitError as e:
+        return jsonify({'error': str(e), 'code': 'RATE_LIMIT_EXCEEDED'}), 429
+    except ai_service.AITimeoutError as e:
+        return jsonify({'error': str(e), 'code': 'TIMEOUT'}), 504
+    except (ai_service.AIResponseValidationError, ai_service.AIProviderError) as e:
+        return jsonify({'error': str(e), 'code': 'AI_PROVIDER_ERROR'}), 502
+    except Exception as e:
+        logger.error(f"Error regenerating draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to regenerate draft'}), 500
 
 @app.route('/api/drafts/<int:draft_id>/transition', methods=['POST'])
 @login_required
