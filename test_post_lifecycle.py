@@ -313,5 +313,16 @@ class TestPostLifecycle(unittest.TestCase):
         hist_res = self.client.get(f'/api/schedule/{post_id}/history')
         self.assertEqual(hist_res.status_code, 404)
 
+    def test_09_ui_dashboard_renders_workflow_sections(self):
+        """Verifies dashboard template renders calendar, approvals, and queue navigation and modals."""
+        res = self.client.get('/')
+        self.assertEqual(res.status_code, 200)
+        self.assertIn(b"Calendar", res.data)
+        self.assertIn(b"Approvals", res.data)
+        self.assertIn(b"Publishing Queue", res.data)
+        self.assertIn(b"post-details-modal", res.data)
+        self.assertIn(b"reject-reason-modal", res.data)
+        self.assertIn(b"reschedule-modal", res.data)
+
 if __name__ == '__main__':
     unittest.main()

@@ -171,6 +171,9 @@ function loadTab(tab) {
         'dashboard': 'System Overview',
         'accounts': 'Connected Social Accounts',
         'composer': 'Post Composer',
+        'calendar': 'Content Calendar',
+        'approvals': 'Approvals Centre',
+        'queue': 'Publishing Queue',
         'tour': 'Nexora Suite Management',
         'nz': 'Phoenix International Management',
         'gaatha': 'Gaatha AI Automation',
@@ -191,6 +194,12 @@ function loadTab(tab) {
         renderAccounts(content);
     } else if (tab === 'composer') {
         renderComposerView(content);
+    } else if (tab === 'calendar') {
+        renderCalendarView(content);
+    } else if (tab === 'approvals') {
+        renderApprovalsView(content);
+    } else if (tab === 'queue') {
+        renderQueueView(content);
     } else if (['tour', 'nz', 'gaatha', 'insta'].includes(tab)) {
         renderModule(content, tab);
     }
@@ -233,6 +242,9 @@ async function updateStatus() {
         } else if (['tour', 'nz', 'gaatha', 'insta'].includes(currentTab)) {
             updateModuleStatus(currentTab, data);
         }
+
+        // Poll pending approvals badge
+        updatePendingApprovalsBadge();
     } catch (e) {
         console.warn("Status poll update skipped", e);
     }
@@ -852,21 +864,29 @@ function renderComposerView(container) {
                         <i class="fa-solid fa-feather-pointed" style="color: var(--primary);"></i>
                         <span>Social Post Studio</span>
                     </div>
-                    <div class="card-subtitle">Draft and schedule rich social content with instant live mockup validation</div>
+                    <div class="card-subtitle">Draft, schedule, and submit rich social content with instant live mockup validation</div>
                 </div>
             </div>
 
             <div class="composer-grid">
                 <!-- Editor Column -->
                 <div>
-                    <div class="form-group">
-                        <label for="view-composer-type" class="form-label">Destination Channel</label>
-                        <select id="view-composer-type" class="form-control" onchange="handleComposerChannelChange(this.value)">
-                            <option value="tour">Nexora Suite (Tour & Travel · Facebook & IG)</option>
-                            <option value="nz">Phoenix Intl (Visa & Migration · Facebook & IG)</option>
-                            <option value="gaatha">Gaatha AI (Cultural & AI Storytelling · Facebook)</option>
-                            <option value="insta">Instagram Sync (Dual Sync Engine)</option>
-                        </select>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                        <div class="form-group">
+                            <label for="view-composer-type" class="form-label">Destination Channel</label>
+                            <select id="view-composer-type" class="form-control" onchange="handleComposerChannelChange(this.value)">
+                                <option value="tour">Nexora Suite (Tour & Travel · Facebook & IG)</option>
+                                <option value="nz">Phoenix Intl (Visa & Migration · Facebook & IG)</option>
+                                <option value="gaatha">Gaatha AI (Cultural & AI Storytelling · Facebook)</option>
+                                <option value="insta">Instagram Sync (Dual Sync Engine)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="view-composer-brand" class="form-label">Brand Workspace</label>
+                            <select id="view-composer-brand" class="form-control">
+                                <option value="">Default (Core Brand)</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -876,7 +896,7 @@ function renderComposerView(container) {
                         </div>
                         <textarea 
                             id="view-composer-caption" 
-                            rows="5" 
+                            rows="4" 
                             class="form-control" 
                             placeholder="Write your post caption..."
                             oninput="handleCaptionInput(this.value)"
@@ -914,12 +934,39 @@ function renderComposerView(container) {
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
-                        <button type="button" class="btn btn-primary btn-lg" onclick="saveViewComposerPost()" style="flex: 1;">
-                            <i class="fa-solid fa-paper-plane"></i> Save & Queue Post
+                    <!-- Scheduling Section -->
+                    <div style="background: var(--bg-app); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; margin-top: 1rem;">
+                        <div style="font-weight: 700; font-size: 0.88rem; margin-bottom: 0.65rem; display: flex; align-items: center; gap: 0.4rem;">
+                            <i class="fa-solid fa-clock" style="color: var(--primary);"></i>
+                            <span>Schedule &amp; Timezone Context</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="view-composer-datetime" class="form-label" style="font-size: 0.8rem;">Date &amp; Time (Local)</label>
+                                <input type="datetime-local" id="view-composer-datetime" class="form-control" style="font-size: 0.85rem;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="view-composer-timezone" class="form-label" style="font-size: 0.8rem;">Timezone</label>
+                                <select id="view-composer-timezone" class="form-control" style="font-size: 0.85rem;">
+                                    <option value="UTC">UTC</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; margin-top: 1.25rem;">
+                        <button type="button" class="btn btn-primary btn-lg" onclick="handleComposerSubmit('scheduled')" style="grid-column: span 2;">
+                            <i class="fa-solid fa-calendar-check"></i> Schedule Post
                         </button>
-                        <button type="button" class="btn btn-secondary btn-lg" onclick="resetViewComposer()">
-                            <i class="fa-solid fa-rotate-left"></i> Reset
+                        <button type="button" class="btn btn-secondary" onclick="handleComposerSubmit('draft')">
+                            <i class="fa-solid fa-file-pen"></i> Save as Draft
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="handleComposerSubmit('pending_approval')">
+                            <i class="fa-solid fa-paper-plane"></i> Submit for Approval
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="saveViewComposerPost()" style="grid-column: span 2; font-size: 0.82rem; margin-top: 0.25rem;">
+                            <i class="fa-solid fa-bolt"></i> Direct Loop Queue (Continuous Periodic Posting)
                         </button>
                     </div>
                 </div>
@@ -1003,6 +1050,7 @@ function renderComposerView(container) {
     `;
 
     handleComposerChannelChange('tour');
+    initComposerView();
 }
 
 // ==========================================================================
@@ -1940,4 +1988,1245 @@ function highlightMatch(text, query) {
     if (!query) return text;
     const regex = new RegExp(`(${query})`, 'gi');
     return text.replace(regex, '<mark style="background:#fef08a; padding:0 2px; border-radius:2px;">$1</mark>');
+}
+
+// ==========================================================================
+// Phase 2: Composer Advanced Handlers (Brands, Timezones, Multiple Actions)
+// ==========================================================================
+
+async function initComposerView() {
+    // 1. Set default scheduled datetime to 2 hours from now in local time
+    const dtInput = document.getElementById('view-composer-datetime');
+    if (dtInput) {
+        const d = new Date(Date.now() + 2 * 3600 * 1000);
+        const pad = (n) => String(n).padStart(2, '0');
+        const formatted = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        dtInput.value = formatted;
+        dtInput.min = `${new Date().getFullYear()}-${pad(new Date().getMonth() + 1)}-${pad(new Date().getDate())}T${pad(new Date().getHours())}:${pad(new Date().getMinutes())}`;
+    }
+
+    // 2. Fetch and populate brands
+    try {
+        const res = await authFetch('/api/brands');
+        if (res.ok) {
+            const brands = await res.json();
+            const brandSelect = document.getElementById('view-composer-brand');
+            if (brandSelect && brands.length > 0) {
+                brandSelect.innerHTML = brands.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load brands:', e);
+    }
+
+    // 3. Fetch and populate timezones
+    try {
+        const res = await authFetch('/api/timezones');
+        if (res.ok) {
+            const tzData = await res.json();
+            const tzSelect = document.getElementById('view-composer-timezone');
+            if (tzSelect && tzData.timezones) {
+                tzSelect.innerHTML = tzData.timezones.map(tz => 
+                    `<option value="${tz}" ${tz === tzData.default ? 'selected' : ''}>${tz}</option>`
+                ).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load timezones:', e);
+    }
+}
+
+async function handleComposerSubmit(status) {
+    const postType = document.getElementById('view-composer-type')?.value;
+    const message = document.getElementById('view-composer-caption')?.value.trim() || '';
+    const fileInput = document.getElementById('view-composer-file');
+    const brandId = document.getElementById('view-composer-brand')?.value || null;
+    const dtVal = document.getElementById('view-composer-datetime')?.value;
+    const tzVal = document.getElementById('view-composer-timezone')?.value || 'UTC';
+
+    if (!message && (!fileInput || fileInput.files.length === 0)) {
+        showToast('Please provide a post caption or attach media', 'error');
+        return;
+    }
+
+    if (status === 'scheduled' && !dtVal) {
+        showToast('Please select a scheduled date and time', 'error');
+        return;
+    }
+
+    let imageFilename = null;
+    if (fileInput && fileInput.files.length > 0) {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        try {
+            const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData });
+            const uploadData = await uploadRes.json();
+            if (uploadData.filename) {
+                imageFilename = uploadData.filename;
+            } else {
+                showToast(uploadData.error || 'Failed to upload media', 'error');
+                return;
+            }
+        } catch (e) {
+            showToast('Media upload failed: ' + e.message, 'error');
+            return;
+        }
+    }
+
+    let scheduledFor = dtVal;
+    if (!scheduledFor) {
+        const d = new Date(Date.now() + 3600 * 1000);
+        scheduledFor = d.toISOString();
+    }
+
+    const payload = {
+        post_type: postType,
+        scheduled_for: scheduledFor,
+        timezone: tzVal,
+        message: message,
+        image_filename: imageFilename,
+        brand_id: brandId ? parseInt(brandId, 10) : null,
+        status: status
+    };
+
+    try {
+        const res = await authFetch('/api/schedule', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+            if (status === 'draft') {
+                showToast('Draft post saved successfully!', 'success');
+                loadTab('queue');
+            } else if (status === 'pending_approval') {
+                showToast('Post submitted for approval!', 'success');
+                loadTab('approvals');
+            } else {
+                showToast('Post scheduled successfully on calendar!', 'success');
+                loadTab('calendar');
+            }
+            resetViewComposer();
+        } else {
+            showToast(data.error || 'Failed to save post', 'error');
+        }
+    } catch (e) {
+        showToast('Error scheduling post: ' + e.message, 'error');
+    }
+}
+
+async function updatePendingApprovalsBadge() {
+    try {
+        const res = await authFetch('/api/approvals/pending');
+        if (res.ok) {
+            const data = await res.json();
+            const badge = document.getElementById('nav-approvals-count');
+            if (badge) {
+                if (data.count > 0) {
+                    badge.textContent = data.count;
+                    badge.style.display = 'inline-block';
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        }
+    } catch (e) {
+        // silent
+    }
+}
+
+// ==========================================================================
+// Phase 2: Interactive Content Calendar Engine
+// ==========================================================================
+
+let calendarCurrentDate = new Date();
+let calendarActiveView = 'month'; // 'month', 'week', 'day', 'list'
+let calendarFilterChannel = 'all';
+let calendarFilterBrand = 'all';
+let calendarFilterStatus = 'all';
+let cachedScheduledPosts = [];
+let cachedBrandsList = [];
+
+async function renderCalendarView(container) {
+    container.innerHTML = `
+        <div class="calendar-toolbar">
+            <div class="calendar-nav-group">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="prevCalendar()" title="Previous">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="todayCalendar()">Today</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="nextCalendar()" title="Next">
+                    <i class="fa-solid fa-chevron-right"></i>
+                </button>
+                <span id="calendar-title-label" class="calendar-title-display"></span>
+            </div>
+
+            <div class="view-btn-group">
+                <button type="button" id="cview-btn-month" class="view-btn active" onclick="setCalendarView('month')">Month</button>
+                <button type="button" id="cview-btn-week" class="view-btn" onclick="setCalendarView('week')">Week</button>
+                <button type="button" id="cview-btn-day" class="view-btn" onclick="setCalendarView('day')">Day</button>
+                <button type="button" id="cview-btn-list" class="view-btn" onclick="setCalendarView('list')">Agenda / List</button>
+            </div>
+
+            <div class="calendar-filters-group">
+                <select id="cal-filter-channel" onchange="handleCalendarFilterChange()">
+                    <option value="all">All Channels</option>
+                    <option value="tour">Nexora Suite</option>
+                    <option value="nz">Phoenix Intl</option>
+                    <option value="gaatha">Gaatha AI</option>
+                    <option value="insta">Instagram Sync</option>
+                </select>
+                <select id="cal-filter-brand" onchange="handleCalendarFilterChange()">
+                    <option value="all">All Brands</option>
+                </select>
+                <select id="cal-filter-status" onchange="handleCalendarFilterChange()">
+                    <option value="all">All Statuses</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="pending_approval">Pending Approval</option>
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <button type="button" class="btn btn-primary btn-sm" onclick="loadTab('composer')">
+                    <i class="fa-solid fa-plus"></i> New Post
+                </button>
+            </div>
+        </div>
+
+        <div id="calendar-content-root">
+            <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 0.5rem; display: block;"></i>
+                Loading scheduled content...
+            </div>
+        </div>
+    `;
+
+    await loadCalendarData();
+}
+
+async function loadCalendarData() {
+    try {
+        // Fetch brands if not cached
+        if (cachedBrandsList.length === 0) {
+            const bRes = await authFetch('/api/brands');
+            if (bRes.ok) cachedBrandsList = await bRes.json();
+            const brandSel = document.getElementById('cal-filter-brand');
+            if (brandSel && cachedBrandsList.length > 0) {
+                brandSel.innerHTML = '<option value="all">All Brands</option>' + 
+                    cachedBrandsList.map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`).join('');
+            }
+        }
+
+        const res = await authFetch('/api/schedule?limit=500');
+        if (res.ok) {
+            cachedScheduledPosts = await res.json();
+        } else {
+            cachedScheduledPosts = [];
+        }
+    } catch (e) {
+        console.error('Error fetching calendar posts:', e);
+        cachedScheduledPosts = [];
+    }
+
+    renderCalendarContent();
+}
+
+function handleCalendarFilterChange() {
+    calendarFilterChannel = document.getElementById('cal-filter-channel')?.value || 'all';
+    calendarFilterBrand = document.getElementById('cal-filter-brand')?.value || 'all';
+    calendarFilterStatus = document.getElementById('cal-filter-status')?.value || 'all';
+    renderCalendarContent();
+}
+
+function prevCalendar() {
+    if (calendarActiveView === 'month') {
+        calendarCurrentDate.setMonth(calendarCurrentDate.getMonth() - 1);
+    } else if (calendarActiveView === 'week') {
+        calendarCurrentDate.setDate(calendarCurrentDate.getDate() - 7);
+    } else if (calendarActiveView === 'day') {
+        calendarCurrentDate.setDate(calendarCurrentDate.getDate() - 1);
+    }
+    renderCalendarContent();
+}
+
+function nextCalendar() {
+    if (calendarActiveView === 'month') {
+        calendarCurrentDate.setMonth(calendarCurrentDate.getMonth() + 1);
+    } else if (calendarActiveView === 'week') {
+        calendarCurrentDate.setDate(calendarCurrentDate.getDate() + 7);
+    } else if (calendarActiveView === 'day') {
+        calendarCurrentDate.setDate(calendarCurrentDate.getDate() + 1);
+    }
+    renderCalendarContent();
+}
+
+function todayCalendar() {
+    calendarCurrentDate = new Date();
+    renderCalendarContent();
+}
+
+function setCalendarView(view) {
+    calendarActiveView = view;
+    document.querySelectorAll('.view-btn').forEach(btn => {
+        if (btn.id === `cview-btn-${view}`) btn.classList.add('active');
+        else btn.classList.remove('active');
+    });
+    renderCalendarContent();
+}
+
+function getFilteredCalendarPosts() {
+    return cachedScheduledPosts.filter(p => {
+        if (calendarFilterChannel !== 'all' && p.post_type !== calendarFilterChannel) return false;
+        if (calendarFilterBrand !== 'all' && String(p.brand_id) !== String(calendarFilterBrand)) return false;
+        if (calendarFilterStatus !== 'all' && p.status !== calendarFilterStatus) return false;
+        return true;
+    });
+}
+
+function renderCalendarContent() {
+    const root = document.getElementById('calendar-content-root');
+    const titleLabel = document.getElementById('calendar-title-label');
+    if (!root) return;
+
+    const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ];
+
+    if (titleLabel) {
+        if (calendarActiveView === 'month') {
+            titleLabel.textContent = `${monthNames[calendarCurrentDate.getMonth()]} ${calendarCurrentDate.getFullYear()}`;
+        } else if (calendarActiveView === 'week') {
+            titleLabel.textContent = `Week of ${monthNames[calendarCurrentDate.getMonth()]} ${calendarCurrentDate.getDate()}, ${calendarCurrentDate.getFullYear()}`;
+        } else if (calendarActiveView === 'day') {
+            titleLabel.textContent = `${calendarCurrentDate.toDateString()}`;
+        } else {
+            titleLabel.textContent = `Scheduled Content (${calendarCurrentDate.getFullYear()})`;
+        }
+    }
+
+    if (calendarActiveView === 'month') {
+        renderCalendarMonthGrid(root);
+    } else if (calendarActiveView === 'week') {
+        renderCalendarWeekView(root);
+    } else if (calendarActiveView === 'day') {
+        renderCalendarDayView(root);
+    } else {
+        renderCalendarListView(root);
+    }
+}
+
+function renderCalendarMonthGrid(root) {
+    const year = calendarCurrentDate.getFullYear();
+    const month = calendarCurrentDate.getMonth();
+    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 is Sun
+    const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+    const prevMonthDays = new Date(year, month, 0).getDate();
+
+    // Monday-first indexing: (day + 6) % 7
+    const adjustedFirstDay = (firstDayIndex + 6) % 7;
+
+    const today = new Date();
+    const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+
+    const filtered = getFilteredCalendarPosts();
+
+    let html = `
+        <div class="calendar-grid-wrap">
+            <div class="calendar-day-headers-row">
+                <div class="calendar-day-header-cell">Mon</div>
+                <div class="calendar-day-header-cell">Tue</div>
+                <div class="calendar-day-header-cell">Wed</div>
+                <div class="calendar-day-header-cell">Thu</div>
+                <div class="calendar-day-header-cell">Fri</div>
+                <div class="calendar-day-header-cell">Sat</div>
+                <div class="calendar-day-header-cell">Sun</div>
+            </div>
+            <div class="calendar-month-grid">
+    `;
+
+    // Trailing days from previous month
+    for (let i = adjustedFirstDay - 1; i >= 0; i--) {
+        const d = prevMonthDays - i;
+        html += `
+            <div class="calendar-day-cell other-month">
+                <div class="calendar-day-num">${d}</div>
+            </div>
+        `;
+    }
+
+    // Days in current month
+    const pad = (n) => String(n).padStart(2, '0');
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+        const dateStr = `${year}-${pad(month + 1)}-${pad(day)}`;
+        const isToday = isCurrentMonth && today.getDate() === day;
+
+        // Find posts on this date
+        const dayPosts = filtered.filter(p => {
+            const postDate = (p.local_scheduled_for || p.scheduled_for || '').substring(0, 10);
+            return postDate === dateStr;
+        });
+
+        html += `
+            <div class="calendar-day-cell ${isToday ? 'today' : ''}" onclick="handleCalendarDayClick('${dateStr}', event)">
+                <div class="calendar-day-num">
+                    <span>${day}</span>
+                    ${dayPosts.length > 0 ? `<small style="color:var(--text-muted); font-size:0.7rem;">${dayPosts.length} post${dayPosts.length > 1 ? 's' : ''}</small>` : ''}
+                </div>
+                <div class="calendar-events-wrap">
+        `;
+
+        dayPosts.slice(0, 3).forEach(p => {
+            const timeStr = (p.local_scheduled_for || p.scheduled_for || '').substring(11, 16);
+            html += `
+                <div class="calendar-pill pill-${p.post_type}" onclick="openPostDetails(${p.id}, event)" title="${escapeHtml(p.message || '')}">
+                    <span style="font-weight: 700; font-size: 0.7rem;">${timeStr}</span>
+                    <span class="text-truncate" style="flex:1;">${escapeHtml(p.message || '(Media Attachment)')}</span>
+                    <span class="badge badge-${p.status}" style="padding: 1px 4px; font-size: 0.65rem;">${p.status}</span>
+                </div>
+            `;
+        });
+
+        if (dayPosts.length > 3) {
+            html += `
+                <div style="font-size: 0.72rem; color: var(--primary); font-weight: 700; text-align: center; cursor: pointer;" onclick="setCalendarView('day'); calendarCurrentDate = new Date('${dateStr}'); renderCalendarContent(); event.stopPropagation();">
+                    +${dayPosts.length - 3} more
+                </div>
+            `;
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+    }
+
+    // Days into next month to complete the grid (multiples of 7)
+    const totalRendered = adjustedFirstDay + totalDaysInMonth;
+    const remaining = (7 - (totalRendered % 7)) % 7;
+    for (let j = 1; j <= remaining; j++) {
+        html += `
+            <div class="calendar-day-cell other-month">
+                <div class="calendar-day-num">${j}</div>
+            </div>
+        `;
+    }
+
+    html += `
+            </div>
+        </div>
+    `;
+
+    root.innerHTML = html;
+}
+
+function renderCalendarWeekView(root) {
+    const startOfWeek = new Date(calendarCurrentDate);
+    const day = (startOfWeek.getDay() + 6) % 7;
+    startOfWeek.setDate(startOfWeek.getDate() - day); // Mon
+
+    const filtered = getFilteredCalendarPosts();
+    const pad = (n) => String(n).padStart(2, '0');
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    let html = `
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.75rem;">
+    `;
+
+    for (let i = 0; i < 7; i++) {
+        const d = new Date(startOfWeek);
+        d.setDate(startOfWeek.getDate() + i);
+        const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+        const dayPosts = filtered.filter(p => {
+            const postDate = (p.local_scheduled_for || p.scheduled_for || '').substring(0, 10);
+            return postDate === dateStr;
+        });
+
+        html += `
+            <div class="card" style="padding: 0.75rem; min-height: 380px; display: flex; flex-direction: column;">
+                <div style="border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; margin-bottom: 0.75rem; text-align: center;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">${dayNames[i]}</div>
+                    <div style="font-size: 1.15rem; font-weight: 800; color: var(--primary);">${d.getDate()}</div>
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto;">
+        `;
+
+        if (dayPosts.length === 0) {
+            html += `<div style="color: var(--text-muted); font-size: 0.75rem; text-align: center; margin-top: 2rem;">No posts</div>`;
+        } else {
+            dayPosts.forEach(p => {
+                const timeStr = (p.local_scheduled_for || p.scheduled_for || '').substring(11, 16);
+                html += `
+                    <div class="calendar-pill pill-${p.post_type}" onclick="openPostDetails(${p.id}, event)" style="padding: 0.5rem; flex-direction: column; align-items: flex-start; gap: 0.25rem;">
+                        <div style="display: flex; justify-content: space-between; width: 100%; font-size: 0.72rem;">
+                            <span style="font-weight: 700;">${timeStr}</span>
+                            <span class="badge badge-${p.status}">${p.status}</span>
+                        </div>
+                        <div style="font-size: 0.8rem; line-height: 1.35; max-height: 48px; overflow: hidden;">${escapeHtml(p.message || '(Media Attachment)')}</div>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+    }
+
+    html += `</div>`;
+    root.innerHTML = html;
+}
+
+function renderCalendarDayView(root) {
+    const pad = (n) => String(n).padStart(2, '0');
+    const dateStr = `${calendarCurrentDate.getFullYear()}-${pad(calendarCurrentDate.getMonth() + 1)}-${pad(calendarCurrentDate.getDate())}`;
+
+    const filtered = getFilteredCalendarPosts().filter(p => {
+        const postDate = (p.local_scheduled_for || p.scheduled_for || '').substring(0, 10);
+        return postDate === dateStr;
+    });
+
+    let html = `
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin-bottom: 1.25rem;">
+                <div>
+                    <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700;">${calendarCurrentDate.toDateString()}</h3>
+                    <small style="color: var(--text-muted);">${filtered.length} scheduled item${filtered.length === 1 ? '' : 's'}</small>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" onclick="loadTab('composer')">
+                    <i class="fa-solid fa-plus"></i> Schedule for Today
+                </button>
+            </div>
+    `;
+
+    if (filtered.length === 0) {
+        html += `
+            <div style="text-align: center; padding: 4rem 1rem; color: var(--text-muted);">
+                <i class="fa-regular fa-calendar-xmark" style="font-size: 2.5rem; margin-bottom: 0.75rem; display: block; opacity: 0.5;"></i>
+                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 0.25rem;">No posts scheduled for this date</div>
+                <p style="font-size: 0.85rem; max-width: 380px; margin: 0 auto 1.25rem;">Create a new social post or schedule automated campaign content for this slot.</p>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadTab('composer')">Open Composer</button>
+            </div>
+        `;
+    } else {
+        html += `<div style="display: flex; flex-direction: column; gap: 0.85rem;">`;
+        filtered.forEach(p => {
+            const timeStr = (p.local_scheduled_for || p.scheduled_for || '').substring(11, 16);
+            html += `
+                <div class="calendar-list-card" onclick="openPostDetails(${p.id}, event)" style="cursor: pointer;">
+                    <div class="calendar-list-date-badge">
+                        <div class="calendar-list-date-day">${timeStr}</div>
+                        <div class="calendar-list-date-month">${p.display_timezone || 'UTC'}</div>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+                            <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border);">${CHANNEL_INFO[p.post_type]?.name || p.post_type}</span>
+                            <span class="badge badge-${p.status}">${p.status}</span>
+                            ${p.idempotency_key ? `<small style="color: var(--text-muted); font-size: 0.72rem;">#${p.id}</small>` : ''}
+                        </div>
+                        <div style="font-size: 0.9rem; line-height: 1.45; color: var(--text-primary); margin-bottom: 0.25rem;" class="text-truncate">${escapeHtml(p.message || '(Media Attachment)')}</div>
+                        ${p.image_filename ? `<small style="color: var(--success); font-size: 0.75rem;"><i class="fa-solid fa-paperclip"></i> ${escapeHtml(p.image_filename)}</small>` : ''}
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id}, event)">Inspect</button>
+                    </div>
+                </div>
+            `;
+        });
+        html += `</div>`;
+    }
+
+    html += `</div>`;
+    root.innerHTML = html;
+}
+
+function renderCalendarListView(root) {
+    const filtered = getFilteredCalendarPosts().sort((a, b) => {
+        return (a.scheduled_for || '').localeCompare(b.scheduled_for || '');
+    });
+
+    let html = `
+        <div class="calendar-list-view">
+    `;
+
+    if (filtered.length === 0) {
+        html += `
+            <div class="card" style="text-align: center; padding: 4rem 1rem; color: var(--text-muted);">
+                <i class="fa-solid fa-calendar-check" style="font-size: 2.5rem; margin-bottom: 0.75rem; display: block; opacity: 0.5;"></i>
+                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 0.25rem;">No scheduled posts match current filters</div>
+                <p style="font-size: 0.85rem;">Adjust your channel, brand, or status filters, or compose a new post.</p>
+            </div>
+        `;
+    } else {
+        filtered.forEach(p => {
+            const rawDt = p.local_scheduled_for || p.scheduled_for || '';
+            const datePart = rawDt.substring(0, 10);
+            const timePart = rawDt.substring(11, 16);
+
+            html += `
+                <div class="calendar-list-card" onclick="openPostDetails(${p.id}, event)" style="cursor: pointer;">
+                    <div class="calendar-list-date-badge">
+                        <div class="calendar-list-date-day">${datePart.substring(8, 10)}</div>
+                        <div class="calendar-list-date-month">${datePart.substring(5, 7)}/${datePart.substring(0, 4)}</div>
+                        <small style="font-size: 0.72rem; color: var(--primary); font-weight: 700;">${timePart}</small>
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+                            <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border);">${CHANNEL_INFO[p.post_type]?.name || p.post_type}</span>
+                            <span class="badge badge-${p.status}">${p.status}</span>
+                            ${p.timezone ? `<small style="color: var(--text-muted); font-size: 0.72rem;">Zone: ${p.timezone}</small>` : ''}
+                        </div>
+                        <div style="font-size: 0.9rem; line-height: 1.45; color: var(--text-primary); margin-bottom: 0.25rem;">${escapeHtml(p.message || '(Media Attachment)')}</div>
+                        ${p.image_filename ? `<small style="color: var(--success); font-size: 0.75rem;"><i class="fa-solid fa-paperclip"></i> ${escapeHtml(p.image_filename)}</small>` : ''}
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id}, event)">Details</button>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    html += `</div>`;
+    root.innerHTML = html;
+}
+
+function handleCalendarDayClick(dateStr, event) {
+    if (event.target.closest('.calendar-pill') || event.target.closest('button')) {
+        return; // Handled by pill or button
+    }
+    // Set composer date and open composer
+    loadTab('composer');
+    setTimeout(() => {
+        const dtInput = document.getElementById('view-composer-datetime');
+        if (dtInput) {
+            dtInput.value = `${dateStr}T10:00`;
+        }
+    }, 150);
+}
+
+// ==========================================================================
+// Phase 2: Post Details & Audit Modal Controller
+// ==========================================================================
+
+let activeDetailsPost = null;
+
+async function openPostDetails(postId, event) {
+    if (event) event.stopPropagation();
+
+    const modal = document.getElementById('post-details-modal');
+    if (!modal) return;
+
+    modal.classList.add('show');
+    document.getElementById('details-title-display') || null;
+
+    // Reset fields
+    document.getElementById('details-caption').textContent = 'Loading...';
+    document.getElementById('details-scheduled-time').textContent = '...';
+    document.getElementById('details-error-alert').style.display = 'none';
+    document.getElementById('details-rejection-alert').style.display = 'none';
+    document.getElementById('details-media-container').style.display = 'none';
+    document.getElementById('details-action-left').innerHTML = '';
+    document.getElementById('details-audit-timeline').innerHTML = '<div style="color: var(--text-muted); font-size:0.82rem;">Fetching history...</div>';
+
+    // Find post in cache or fetch
+    let post = cachedScheduledPosts.find(p => p.id === postId);
+    if (!post) {
+        try {
+            const res = await authFetch('/api/schedule');
+            if (res.ok) {
+                const all = await res.json();
+                post = all.find(p => p.id === postId);
+            }
+        } catch (e) {}
+    }
+
+    activeDetailsPost = post;
+
+    if (post) {
+        document.getElementById('details-status-badge').className = `badge badge-${post.status}`;
+        document.getElementById('details-status-badge').textContent = post.status.toUpperCase();
+        document.getElementById('details-channel-name').textContent = CHANNEL_INFO[post.post_type]?.name || post.post_type;
+        
+        const brandObj = cachedBrandsList.find(b => b.id === post.brand_id);
+        document.getElementById('details-brand-name').textContent = brandObj ? brandObj.name : 'Default Workspace';
+        
+        document.getElementById('details-scheduled-time').textContent = post.local_display || post.scheduled_for;
+        document.getElementById('details-caption').textContent = post.message || '(No text caption provided)';
+
+        if (post.image_filename) {
+            document.getElementById('details-media-container').style.display = 'block';
+            document.getElementById('details-media-img').src = `/static/images/${encodeURIComponent(post.image_filename)}`;
+        }
+
+        if (post.status === 'failed' && post.error_message) {
+            document.getElementById('details-error-alert').style.display = 'block';
+            document.getElementById('details-error-msg').textContent = post.error_message;
+        }
+
+        if (post.status === 'rejected' && post.rejection_reason) {
+            document.getElementById('details-rejection-alert').style.display = 'block';
+            document.getElementById('details-rejection-msg').textContent = post.rejection_reason;
+        }
+
+        // Action Buttons based on status
+        renderDetailsActionButtons(post);
+    }
+
+    // Load audit trail
+    try {
+        const histRes = await authFetch(`/api/schedule/${postId}/history`);
+        if (histRes.ok) {
+            const histData = await histRes.json();
+            renderAuditTimeline(histData.history || []);
+        } else {
+            document.getElementById('details-audit-timeline').innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem;">No audit logs recorded for this item.</div>';
+        }
+    } catch (e) {
+        document.getElementById('details-audit-timeline').innerHTML = '<div style="color: var(--danger); font-size: 0.8rem;">Failed to load audit history.</div>';
+    }
+}
+
+function renderDetailsActionButtons(post) {
+    const actionWrap = document.getElementById('details-action-left');
+    if (!actionWrap) return;
+
+    let btns = '';
+    if (post.status === 'pending_approval') {
+        btns += `
+            <button type="button" class="btn btn-success btn-sm" onclick="approvePostFromDetails(${post.id})">
+                <i class="fa-solid fa-check"></i> Approve Post
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="openRejectModal(${post.id})">
+                <i class="fa-solid fa-xmark"></i> Reject Post
+            </button>
+        `;
+    } else if (post.status === 'failed') {
+        btns += `
+            <button type="button" class="btn btn-primary btn-sm" onclick="retryPostFromDetails(${post.id})">
+                <i class="fa-solid fa-rotate-right"></i> Retry Publishing
+            </button>
+        `;
+    }
+
+    if (['scheduled', 'draft', 'pending_approval', 'rejected', 'failed'].includes(post.status)) {
+        btns += `
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openRescheduleModal(${post.id})">
+                <i class="fa-solid fa-clock"></i> Reschedule
+            </button>
+            <button type="button" class="btn btn-danger btn-sm" onclick="cancelPostFromDetails(${post.id})">
+                <i class="fa-solid fa-ban"></i> Cancel Post
+            </button>
+        `;
+    }
+
+    actionWrap.innerHTML = btns;
+}
+
+function renderAuditTimeline(events) {
+    const timeline = document.getElementById('details-audit-timeline');
+    if (!timeline) return;
+
+    if (events.length === 0) {
+        timeline.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem;">Initial creation event only.</div>';
+        return;
+    }
+
+    timeline.innerHTML = events.map(e => `
+        <div class="audit-timeline-item">
+            <div class="audit-timeline-dot"></div>
+            <div class="audit-timeline-header">
+                <span class="audit-timeline-action">
+                    ${e.from_status ? `<span class="badge badge-${e.from_status}" style="font-size:0.65rem;">${e.from_status}</span> &rarr; ` : ''}
+                    <span class="badge badge-${e.to_status}" style="font-size:0.65rem;">${e.to_status}</span>
+                </span>
+                <span class="audit-timeline-time">${e.created_at}</span>
+                ${e.changed_by_username ? `<span class="badge" style="font-size:0.68rem; background:var(--bg-app);">${escapeHtml(e.changed_by_username)}</span>` : ''}
+            </div>
+            ${e.reason ? `<div class="audit-timeline-reason">${escapeHtml(e.reason)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function closeDetailsModal() {
+    const modal = document.getElementById('post-details-modal');
+    if (modal) modal.classList.remove('show');
+    activeDetailsPost = null;
+}
+
+async function approvePostFromDetails(id) {
+    try {
+        const res = await authFetch(`/api/approvals/${id}/approve`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Post approved for scheduling!', 'success');
+            closeDetailsModal();
+            refreshActiveWorkflowView();
+        } else {
+            showToast(data.error || 'Failed to approve post', 'error');
+        }
+    } catch (e) {
+        showToast('Approval error: ' + e.message, 'error');
+    }
+}
+
+async function cancelPostFromDetails(id) {
+    showConfirm('Are you sure you want to cancel this scheduled post? It will not be published.', async () => {
+        try {
+            const res = await authFetch(`/api/schedule/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Post cancelled successfully', 'success');
+                closeDetailsModal();
+                refreshActiveWorkflowView();
+            } else {
+                const data = await res.json();
+                showToast(data.error || 'Failed to cancel post', 'error');
+            }
+        } catch (e) {
+            showToast('Cancellation error: ' + e.message, 'error');
+        }
+    });
+}
+
+async function retryPostFromDetails(id) {
+    try {
+        const res = await authFetch(`/api/schedule/${id}/retry`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Post returned to publishing queue!', 'success');
+            closeDetailsModal();
+            refreshActiveWorkflowView();
+        } else {
+            showToast(data.error || 'Failed to retry post', 'error');
+        }
+    } catch (e) {
+        showToast('Retry error: ' + e.message, 'error');
+    }
+}
+
+// Rejection Modal Handlers
+function openRejectModal(postId) {
+    const modal = document.getElementById('reject-reason-modal');
+    const idInput = document.getElementById('reject-post-id');
+    const reasonInput = document.getElementById('reject-reason-input');
+    if (modal && idInput) {
+        idInput.value = postId;
+        if (reasonInput) reasonInput.value = '';
+        modal.classList.add('show');
+    }
+}
+
+function closeRejectModal() {
+    const modal = document.getElementById('reject-reason-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+async function confirmRejectPost() {
+    const id = document.getElementById('reject-post-id')?.value;
+    const reason = document.getElementById('reject-reason-input')?.value.trim();
+
+    if (!reason) {
+        showToast('A specific rejection reason is mandatory', 'error');
+        return;
+    }
+
+    try {
+        const res = await authFetch(`/api/approvals/${id}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Post rejected and returned for revision', 'success');
+            closeRejectModal();
+            closeDetailsModal();
+            refreshActiveWorkflowView();
+        } else {
+            showToast(data.error || 'Failed to reject post', 'error');
+        }
+    } catch (e) {
+        showToast('Error rejecting post: ' + e.message, 'error');
+    }
+}
+
+// Reschedule Modal Handlers
+async function openRescheduleModal(postId) {
+    const modal = document.getElementById('reschedule-modal');
+    const idInput = document.getElementById('reschedule-post-id');
+    const dtInput = document.getElementById('reschedule-datetime');
+    const tzSelect = document.getElementById('reschedule-timezone');
+
+    if (modal && idInput) {
+        idInput.value = postId;
+
+        // Set default to current post scheduled time or 2 hours ahead
+        const post = cachedScheduledPosts.find(p => p.id === postId);
+        if (dtInput) {
+            if (post && post.local_scheduled_for) {
+                dtInput.value = post.local_scheduled_for.substring(0, 16);
+            } else {
+                const d = new Date(Date.now() + 2 * 3600 * 1000);
+                const pad = (n) => String(n).padStart(2, '0');
+                dtInput.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            }
+        }
+
+        // Populate timezones
+        try {
+            const tzRes = await authFetch('/api/timezones');
+            if (tzRes.ok) {
+                const tzData = await tzRes.json();
+                if (tzSelect && tzData.timezones) {
+                    const defaultZone = post?.timezone || tzData.default;
+                    tzSelect.innerHTML = tzData.timezones.map(tz => 
+                        `<option value="${tz}" ${tz === defaultZone ? 'selected' : ''}>${tz}</option>`
+                    ).join('');
+                }
+            }
+        } catch (e) {}
+
+        modal.classList.add('show');
+    }
+}
+
+function closeRescheduleModal() {
+    const modal = document.getElementById('reschedule-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+async function confirmReschedulePost() {
+    const id = document.getElementById('reschedule-post-id')?.value;
+    const dtVal = document.getElementById('reschedule-datetime')?.value;
+    const tzVal = document.getElementById('reschedule-timezone')?.value;
+
+    if (!dtVal) {
+        showToast('Please select a valid date and time', 'error');
+        return;
+    }
+
+    try {
+        const res = await authFetch(`/api/schedule/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scheduled_for: dtVal, timezone: tzVal })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Post rescheduled successfully!', 'success');
+            closeRescheduleModal();
+            closeDetailsModal();
+            refreshActiveWorkflowView();
+        } else {
+            showToast(data.error || 'Failed to reschedule post', 'error');
+        }
+    } catch (e) {
+        showToast('Rescheduling error: ' + e.message, 'error');
+    }
+}
+
+function refreshActiveWorkflowView() {
+    updatePendingApprovalsBadge();
+    if (currentTab === 'calendar') loadCalendarData();
+    else if (currentTab === 'approvals') renderApprovalsView(document.getElementById('content-area'));
+    else if (currentTab === 'queue') renderQueueView(document.getElementById('content-area'));
+}
+
+// ==========================================================================
+// Phase 2: Content Approvals Centre View
+// ==========================================================================
+
+async function renderApprovalsView(container) {
+    container.innerHTML = `
+        <div class="card" style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <div>
+                    <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fa-solid fa-clipboard-check" style="color: #fbbf24;"></i> Approvals Centre
+                    </h3>
+                    <p style="margin: 0.25rem 0 0; color: var(--text-secondary); font-size: 0.85rem;">
+                        Review, approve, or request revisions on pending content before it enters the automated publishing queue.
+                    </p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="renderApprovalsView(document.getElementById('content-area'))">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+            </div>
+        </div>
+
+        <div id="approvals-content-root">
+            <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 0.5rem; display: block;"></i>
+                Fetching pending approvals...
+            </div>
+        </div>
+    `;
+
+    try {
+        const res = await authFetch('/api/approvals/pending');
+        if (!res.ok) throw new Error('Failed to retrieve approvals');
+        const data = await res.json();
+        const posts = data.posts || [];
+
+        const root = document.getElementById('approvals-content-root');
+        if (!root) return;
+
+        if (posts.length === 0) {
+            root.innerHTML = `
+                <div class="card" style="text-align: center; padding: 4.5rem 1rem;">
+                    <i class="fa-solid fa-circle-check" style="font-size: 3rem; color: var(--success); margin-bottom: 1rem; display: block;"></i>
+                    <h4 style="font-weight: 700; font-size: 1.15rem; margin-bottom: 0.35rem;">All Caught Up!</h4>
+                    <p style="color: var(--text-secondary); font-size: 0.88rem; max-width: 420px; margin: 0 auto 1.5rem;">
+                        There are currently no marketing posts awaiting approval in your active organization.
+                    </p>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="loadTab('composer')">
+                        <i class="fa-solid fa-plus"></i> Compose New Post
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `<div class="approvals-grid">`;
+        posts.forEach(p => {
+            html += `
+                <div class="approval-card">
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                            <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border); font-size: 0.75rem;">
+                                ${CHANNEL_INFO[p.post_type]?.name || p.post_type}
+                            </span>
+                            <span class="badge badge-pending_approval">Pending Approval</span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                            <i class="fa-regular fa-clock"></i> Scheduled: <strong>${p.local_display || p.scheduled_for}</strong>
+                        </div>
+                        <div style="font-size: 0.9rem; line-height: 1.45; color: var(--text-primary); margin-bottom: 0.75rem; max-height: 120px; overflow-y: auto;">
+                            ${escapeHtml(p.message || '(Media Attachment)')}
+                        </div>
+                        ${p.image_filename ? `
+                            <div style="margin-bottom: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; max-height: 140px; display: flex; justify-content: center; background: #000;">
+                                <img src="/static/images/${encodeURIComponent(p.image_filename)}" alt="Attachment" style="max-height: 140px; object-fit: contain;">
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div style="border-top: 1px solid var(--border); padding-top: 0.75rem; margin-top: 0.75rem; display: flex; gap: 0.5rem; justify-content: space-between;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id})">
+                            <i class="fa-solid fa-eye"></i> Details
+                        </button>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <button type="button" class="btn btn-danger btn-sm" onclick="openRejectModal(${p.id})">
+                                <i class="fa-solid fa-xmark"></i> Reject
+                            </button>
+                            <button type="button" class="btn btn-success btn-sm" onclick="approvePost(${p.id})">
+                                <i class="fa-solid fa-check"></i> Approve
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        html += `</div>`;
+        root.innerHTML = html;
+    } catch (e) {
+        const root = document.getElementById('approvals-content-root');
+        if (root) {
+            root.innerHTML = `<div class="card" style="color: var(--danger); text-align: center; padding: 2rem;">Error: ${escapeHtml(e.message)}</div>`;
+        }
+    }
+}
+
+async function approvePost(id) {
+    try {
+        const res = await authFetch(`/api/approvals/${id}/approve`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+            showToast('Post approved successfully!', 'success');
+            refreshActiveWorkflowView();
+        } else {
+            showToast(data.error || 'Failed to approve post', 'error');
+        }
+    } catch (e) {
+        showToast('Approval error: ' + e.message, 'error');
+    }
+}
+
+// ==========================================================================
+// Phase 2: Publishing Queue & History View
+// ==========================================================================
+
+let queueFilterStatus = 'all';
+let queueFilterChannel = 'all';
+let cachedQueuePosts = [];
+
+async function renderQueueView(container) {
+    container.innerHTML = `
+        <div class="calendar-toolbar">
+            <div>
+                <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-list-check" style="color: #34d399;"></i> Publishing Queue &amp; History
+                </h3>
+                <small style="color: var(--text-secondary);">Filter and audit all queued, published, draft, and failed campaign posts.</small>
+            </div>
+
+            <div class="calendar-filters-group">
+                <select id="q-filter-status" onchange="handleQueueFilterChange()">
+                    <option value="all">All Statuses</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="publishing">Publishing (In Transit)</option>
+                    <option value="published">Published</option>
+                    <option value="pending_approval">Pending Approval</option>
+                    <option value="draft">Draft</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+                <select id="q-filter-channel" onchange="handleQueueFilterChange()">
+                    <option value="all">All Channels</option>
+                    <option value="tour">Nexora Suite</option>
+                    <option value="nz">Phoenix Intl</option>
+                    <option value="gaatha">Gaatha AI</option>
+                    <option value="insta">Instagram Sync</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadQueueData()">
+                    <i class="fa-solid fa-rotate"></i>
+                </button>
+            </div>
+        </div>
+
+        <div id="queue-content-root">
+            <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 0.5rem; display: block;"></i>
+                Loading queue entries...
+            </div>
+        </div>
+    `;
+
+    await loadQueueData();
+}
+
+async function loadQueueData() {
+    try {
+        const res = await authFetch('/api/schedule?limit=250');
+        if (res.ok) {
+            cachedQueuePosts = await res.json();
+        } else {
+            cachedQueuePosts = [];
+        }
+    } catch (e) {
+        cachedQueuePosts = [];
+    }
+    renderQueueTable();
+}
+
+function handleQueueFilterChange() {
+    queueFilterStatus = document.getElementById('q-filter-status')?.value || 'all';
+    queueFilterChannel = document.getElementById('q-filter-channel')?.value || 'all';
+    renderQueueTable();
+}
+
+function renderQueueTable() {
+    const root = document.getElementById('queue-content-root');
+    if (!root) return;
+
+    let filtered = cachedQueuePosts.filter(p => {
+        if (queueFilterStatus !== 'all' && p.status !== queueFilterStatus) return false;
+        if (queueFilterChannel !== 'all' && p.post_type !== queueFilterChannel) return false;
+        return true;
+    });
+
+    if (filtered.length === 0) {
+        root.innerHTML = `
+            <div class="card" style="text-align: center; padding: 3.5rem 1rem; color: var(--text-muted);">
+                <i class="fa-solid fa-inbox" style="font-size: 2.5rem; opacity: 0.5; margin-bottom: 0.75rem; display: block;"></i>
+                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 0.25rem;">No posts match current queue filters</div>
+                <p style="font-size: 0.85rem;">Try selecting a different status or channel filter above.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div class="queue-table-wrap">
+            <table class="queue-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Scheduled (Local)</th>
+                        <th>Channel</th>
+                        <th>Caption / Content</th>
+                        <th>Media</th>
+                        <th>Retries</th>
+                        <th style="text-align: right;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    filtered.forEach(p => {
+        html += `
+            <tr>
+                <td><span class="badge badge-${p.status}">${p.status}</span></td>
+                <td>
+                    <div style="font-weight: 600; font-size: 0.85rem;">${p.local_display || p.scheduled_for}</div>
+                    <small style="color: var(--text-muted); font-size: 0.72rem;">UTC: ${p.scheduled_for}</small>
+                </td>
+                <td>
+                    <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border);">
+                        ${CHANNEL_INFO[p.post_type]?.name || p.post_type}
+                    </span>
+                </td>
+                <td style="max-width: 280px;">
+                    <div class="text-truncate" style="font-size: 0.85rem;" title="${escapeHtml(p.message || '')}">
+                        ${escapeHtml(p.message || '(No text caption)')}
+                    </div>
+                    ${p.status === 'failed' && p.error_message ? `
+                        <div style="font-size: 0.75rem; color: #b91c1c; margin-top: 0.2rem; background: #fee2e2; padding: 2px 6px; border-radius: 4px;" class="text-truncate" title="${escapeHtml(p.error_message)}">
+                            <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.error_message)}
+                        </div>
+                    ` : ''}
+                </td>
+                <td>
+                    ${p.image_filename ? `
+                        <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border); font-size: 0.75rem;" title="${escapeHtml(p.image_filename)}">
+                            <i class="fa-solid fa-paperclip"></i> Media
+                        </span>
+                    ` : '<span style="color: var(--text-muted); font-size: 0.75rem;">None</span>'}
+                </td>
+                <td>
+                    ${p.retry_count > 0 ? `
+                        <span class="badge ${p.status === 'failed' ? 'badge-failed' : 'badge-draft'}">${p.retry_count}/${p.max_retries || 3}</span>
+                    ` : '<span style="color: var(--text-muted); font-size: 0.78rem;">0</span>'}
+                </td>
+                <td style="text-align: right; white-space: nowrap;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id})">
+                        <i class="fa-solid fa-eye"></i> Details
+                    </button>
+                    ${p.status === 'failed' ? `
+                        <button type="button" class="btn btn-primary btn-sm" onclick="retryPostFromDetails(${p.id})" title="Retry publishing">
+                            <i class="fa-solid fa-rotate-right"></i>
+                        </button>
+                    ` : ''}
+                    ${['scheduled', 'draft'].includes(p.status) ? `
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openRescheduleModal(${p.id})" title="Reschedule">
+                            <i class="fa-solid fa-clock"></i>
+                        </button>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="cancelPostFromDetails(${p.id})" title="Cancel">
+                            <i class="fa-solid fa-ban"></i>
+                        </button>
+                    ` : ''}
+                </td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    root.innerHTML = html;
 }
