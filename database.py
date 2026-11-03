@@ -2432,4 +2432,33 @@ def restore_draft_revision(draft_id, revision_number, organization_id=1, restore
         updated = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (d_id,)).fetchone()
         return dict(updated) if updated else None
 
+def get_organization_ai_generation_count(organization_id, window_seconds=3600):
+    """
+    Returns count of AI generation operations executed by the organization within the time window.
+    Used for cost-control and rate-limiting.
+    """
+    try:
+        org_id = int(organization_id)
+        secs = int(window_seconds)
+    except (ValueError, TypeError):
+        return 0
+
+    with get_db_connection() as conn:
+        if is_postgres():
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM content_draft_revisions "
+                "WHERE organization_id = ? AND change_source IN ('ai_generated', 'regenerated') "
+                "AND created_at >= NOW() - make_interval(secs => ?)",
+                (org_id, secs)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(*) as cnt FROM content_draft_revisions "
+                "WHERE organization_id = ? AND change_source IN ('ai_generated', 'regenerated') "
+                "AND created_at >= datetime('now', '-' || ? || ' seconds')",
+                (org_id, secs)
+            ).fetchone()
+        return row['cnt'] if row else 0
+
+
 

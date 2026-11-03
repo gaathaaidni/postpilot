@@ -8,6 +8,7 @@ Universal single-codebase application supporting:
 import os
 import time
 import secrets
+import hashlib
 import threading
 import logging
 from pathlib import Path
@@ -1121,17 +1122,46 @@ def delete_campaign_route(campaign_id):
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 404
 
+_RECENT_GENERATION_CACHE = {}  # {key: (timestamp, status_code, response_data)}
+
+def _get_deduplicated_generation(key, window_seconds=15):
+    """Retrieves cached generation result if within the deduplication window."""
+    now = time.time()
+    stale_keys = [k for k, (t, _, _) in _RECENT_GENERATION_CACHE.items() if now - t > window_seconds * 2]
+    for k in stale_keys:
+        _RECENT_GENERATION_CACHE.pop(k, None)
+
+    if key in _RECENT_GENERATION_CACHE:
+        timestamp, status_code, cached_res = _RECENT_GENERATION_CACHE[key]
+        if now - timestamp < window_seconds:
+            return status_code, cached_res
+    return None, None
+
+def _store_deduplicated_generation(key, status_code, response_data):
+    """Stores generation result in the deduplication cache."""
+    _RECENT_GENERATION_CACHE[key] = (time.time(), status_code, response_data)
+
 @app.route('/api/campaigns/<int:campaign_id>/generate', methods=['POST'])
 @login_required
 @csrf_protect
 def generate_campaign_content_route(campaign_id):
     """
     Generates AI marketing copy for the campaign across specified target platforms.
-    Creates new versioned content_drafts records.
+    Enforces input validation, rate limiting, token limits, idempotency deduplication,
+    and partial failure preservation.
     """
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
+
+    # Check organizational hourly rate limit
+    hourly_limit = getattr(config, 'AI_ORG_HOURLY_GENERATION_LIMIT', 60)
+    hourly_count = database.get_organization_ai_generation_count(org_id, window_seconds=3600)
+    if hourly_count >= hourly_limit:
+        return jsonify({
+            'error': f'Organization hourly AI generation limit of {hourly_limit} requests reached. Please try again later.',
+            'code': 'RATE_LIMIT_EXCEEDED'
+        }), 429
 
     camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
     if not camp:
@@ -1141,9 +1171,77 @@ def generate_campaign_content_route(campaign_id):
     if not brand:
         return jsonify({'error': 'Associated brand not found'}), 404
 
+    # Validate target platforms: mandatory non-empty list if provided, or default to all supported
+    req_platforms = data.get('platforms')
+    if req_platforms is None:
+        raw_list = ['facebook', 'instagram', 'linkedin', 'x', 'whatsapp']
+    elif not isinstance(req_platforms, list) or len(req_platforms) == 0:
+        return jsonify({
+            'error': 'A non-empty list of target platforms is required.',
+            'code': 'VALIDATION_ERROR'
+        }), 400
+    else:
+        raw_list = req_platforms
+
+    max_plats = getattr(config, 'AI_MAX_PLATFORMS_PER_REQUEST', 5)
+    if len(raw_list) > max_plats:
+        return jsonify({
+            'error': f'Cannot request more than {max_plats} platforms in a single generation call.',
+            'code': 'LIMIT_EXCEEDED'
+        }), 400
+
+    seen_plats = set()
+    cleaned_platforms = []
+    for p in raw_list:
+        if not isinstance(p, str) or not p.strip():
+            return jsonify({
+                'error': 'Each platform entry must be a non-empty string.',
+                'code': 'VALIDATION_ERROR'
+            }), 400
+        clean_p = p.strip().lower()
+        if clean_p in seen_plats:
+            return jsonify({
+                'error': f"Duplicate platform '{clean_p}' specified in request.",
+                'code': 'VALIDATION_ERROR'
+            }), 400
+        if clean_p not in database.VALID_DRAFT_PLATFORMS:
+            return jsonify({
+                'error': f"Unsupported platform '{p}'. Allowed: {', '.join(sorted(database.VALID_DRAFT_PLATFORMS))}.",
+                'code': 'VALIDATION_ERROR'
+            }), 400
+        seen_plats.add(clean_p)
+        cleaned_platforms.append(clean_p)
+
+    # Validate language
+    raw_lang = data.get('language') or camp.get('languages') or 'en'
+    if not isinstance(raw_lang, str) or not raw_lang.strip() or len(raw_lang.strip()) > 15:
+        return jsonify({'error': 'Invalid language format.', 'code': 'VALIDATION_ERROR'}), 400
+    language = raw_lang.strip()
+
+    # Validate content format
+    VALID_FORMATS = {'post', 'reel', 'story', 'article', 'newsletter', 'message'}
+    raw_format = str(data.get('content_format') or 'post').strip().lower()
+    if raw_format not in VALID_FORMATS:
+        return jsonify({
+            'error': f"Invalid content format '{raw_format}'. Allowed: {', '.join(sorted(VALID_FORMATS))}.",
+            'code': 'VALIDATION_ERROR'
+        }), 400
+    content_format = raw_format
+
+    # Idempotency deduplication check
+    dedup_window = getattr(config, 'AI_DEDUPLICATION_WINDOW_SECONDS', 15)
+    idem_key = request.headers.get('X-Idempotency-Key') or data.get('idempotency_key')
+    if not idem_key:
+        idem_key = hashlib.sha256(
+            f"{org_id}:{campaign_id}:{','.join(sorted(cleaned_platforms))}:{language}:{content_format}".encode()
+        ).hexdigest()
+
+    cached_status, cached_res = _get_deduplicated_generation(idem_key, window_seconds=dedup_window)
+    if cached_res is not None:
+        logger.info(f"Returning deduplicated generation response for campaign #{campaign_id} (key: {idem_key[:12]}...)")
+        return jsonify(cached_res), cached_status
+
     profile = database.get_brand_marketing_profile(camp['brand_id'], organization_id=org_id) or {}
-    
-    # Merge brand metadata with profile
     brand_info = {
         'name': brand.get('name', 'Brand'),
         'description': brand.get('description', ''),
@@ -1155,18 +1253,6 @@ def generate_campaign_content_route(campaign_id):
         'preferred_ctas': profile.get('preferred_ctas', '')
     }
 
-    # Platforms to generate
-    req_platforms = data.get('platforms')
-    if not req_platforms or not isinstance(req_platforms, list):
-        platforms = ['facebook', 'instagram', 'linkedin', 'x', 'whatsapp']
-    else:
-        valid_platforms = {'facebook', 'instagram', 'linkedin', 'x', 'whatsapp'}
-        platforms = [str(p).strip().lower() for p in req_platforms if str(p).strip().lower() in valid_platforms]
-        if not platforms:
-            return jsonify({'error': 'No valid platforms specified. Allowed: facebook, instagram, linkedin, x, whatsapp'}), 400
-
-    language = data.get('language') or camp.get('languages') or 'en'
-    content_format = data.get('content_format', 'post')
     provider_name = data.get('provider')
     model_name = data.get('model')
 
@@ -1178,7 +1264,7 @@ def generate_campaign_content_route(campaign_id):
     generated_drafts = []
     errors = []
 
-    for plat in platforms:
+    for plat in cleaned_platforms:
         try:
             gen_res = ai_service.generate_campaign_content(
                 provider=ai_provider,
@@ -1222,12 +1308,16 @@ def generate_campaign_content_route(campaign_id):
         primary_err = errors[0]
         return jsonify({'error': primary_err['error'], 'details': errors}), primary_err['code']
 
-    return jsonify({
-        'status': 'success',
+    status_str = 'partial_success' if errors else 'success'
+    status_code = 207 if errors else 201
+    resp_body = {
+        'status': status_str,
         'campaign_id': campaign_id,
         'drafts': generated_drafts,
         'errors': errors
-    }), 201
+    }
+    _store_deduplicated_generation(idem_key, status_code, resp_body)
+    return jsonify(resp_body), status_code
 
 @app.route('/api/campaigns/<int:campaign_id>/drafts', methods=['GET'])
 @login_required
@@ -1351,6 +1441,16 @@ def regenerate_draft_route(draft_id):
     """Regenerates copy for a draft using AI and appends as a new revision."""
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
+
+    # Check organizational hourly rate limit
+    hourly_limit = getattr(config, 'AI_ORG_HOURLY_GENERATION_LIMIT', 60)
+    hourly_count = database.get_organization_ai_generation_count(org_id, window_seconds=3600)
+    if hourly_count >= hourly_limit:
+        return jsonify({
+            'error': f'Organization hourly AI generation limit of {hourly_limit} requests reached. Please try again later.',
+            'code': 'RATE_LIMIT_EXCEEDED'
+        }), 429
+
     draft = database.get_content_draft_by_id(draft_id, organization_id=org_id)
     if not draft:
         return jsonify({'error': 'Draft not found'}), 404

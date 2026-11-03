@@ -7,6 +7,7 @@ import os
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 import json
 import shutil
 
@@ -24,6 +25,7 @@ config.DATABASE_URL = f"sqlite:///{_db_file}"
 config.LOCAL_MODE = False
 
 import database
+import ai_service
 import app as postpilot_app
 
 class TestCampaignAPI(unittest.TestCase):
@@ -529,6 +531,110 @@ class TestCampaignAPI(unittest.TestCase):
 
         res = self.client.post(f'/api/drafts/{draft_id}/revisions/1/restore', headers=headers_org2)
         self.assertEqual(res.status_code, 404)
+
+    def test_ai_generation_cost_and_input_controls(self):
+        headers = self._login(user_id=1, role='admin', org_id=1)
+
+        # Create campaign
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Limits Test Camp', 'objective': 'Test cost controls', 'brief': 'Brief text'
+        }, headers=headers)
+        camp_id = res.get_json()['id']
+
+        # 1. Empty platform list rejected with 400
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={'platforms': []}, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('non-empty list', res.get_json()['error'])
+
+        # 2. Exceeding max platforms (>5) rejected with 400
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook', 'instagram', 'linkedin', 'x', 'whatsapp', 'facebook']
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+
+        # 3. Duplicate platform in list rejected with 400
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook', 'facebook']
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Duplicate platform', res.get_json()['error'])
+
+        # 4. Malformed / unsupported platform rejected with 400
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['myspace_unsupported']
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Unsupported platform', res.get_json()['error'])
+
+        # 5. Invalid language format rejected with 400
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook'],
+            'language': 'very_long_invalid_language_name_exceeding_limits'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Invalid language format', res.get_json()['error'])
+
+        # 6. Invalid content format rejected with 400
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook'],
+            'content_format': 'invalid_format_xyz'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Invalid content format', res.get_json()['error'])
+
+        # 7. Idempotency deduplication check:
+        # First call succeeds
+        res1 = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook'],
+            'provider': 'mock',
+            'idempotency_key': 'test-idem-key-12345'
+        }, headers=headers)
+        self.assertEqual(res1.status_code, 201)
+        draft1_id = res1.get_json()['drafts'][0]['id']
+
+        # Rapid second call with same idempotency key returns cached response
+        res2 = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook'],
+            'provider': 'mock',
+            'idempotency_key': 'test-idem-key-12345'
+        }, headers=headers)
+        self.assertIn(res2.status_code, (200, 201))
+        self.assertEqual(res2.get_json()['drafts'][0]['id'], draft1_id)
+
+        # 8. Partial success preservation
+        # Mock one platform to fail while another succeeds
+        with patch('ai_service.generate_campaign_content') as mock_gen:
+            def side_effect(provider, brand_info, campaign_info, target_platform, **kwargs):
+                if target_platform == 'instagram':
+                    raise ai_service.AIRateLimitError("Instagram rate limit", provider="mock", status_code=429)
+                return ai_service.GenerationResult(
+                    headline="FB Headline", caption="FB Caption", target_platform="facebook",
+                    ai_provider="mock", ai_model="mock-v1"
+                )
+            mock_gen.side_effect = side_effect
+
+            res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+                'platforms': ['facebook', 'instagram'],
+                'provider': 'mock',
+                'idempotency_key': 'partial-success-test'
+            }, headers=headers)
+            self.assertIn(res.status_code, (201, 207))
+            data = res.get_json()
+            self.assertEqual(data['status'], 'partial_success')
+            self.assertEqual(len(data['drafts']), 1)
+            self.assertEqual(data['drafts'][0]['target_platform'], 'facebook')
+            self.assertEqual(len(data['errors']), 1)
+            self.assertEqual(data['errors'][0]['platform'], 'instagram')
+
+        # 9. Organization hourly limit enforcement
+        with patch('config.AI_ORG_HOURLY_GENERATION_LIMIT', 2):
+            with patch('database.get_organization_ai_generation_count', return_value=5):
+                res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+                    'platforms': ['linkedin'],
+                    'provider': 'mock'
+                }, headers=headers)
+                self.assertEqual(res.status_code, 429)
+                self.assertIn('hourly AI generation limit', res.get_json()['error'])
 
 if __name__ == '__main__':
     unittest.main()

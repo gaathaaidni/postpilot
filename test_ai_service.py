@@ -228,5 +228,38 @@ class TestAIService(unittest.TestCase):
         with self.assertRaises(AIConfigurationError):
             get_ai_provider("non_existent_provider_foo_bar")
 
+    def test_prompt_length_budget_truncation(self):
+        # Create oversized campaign brief and positioning
+        huge_brief = "Huge marketing brief detail sentence. " * 300  # ~11,000 chars
+        huge_camp = dict(self.campaign_info)
+        huge_camp['brief'] = huge_brief
+
+        huge_brand = dict(self.brand_info)
+        huge_brand['positioning'] = "Brand position statement. " * 100 # ~2,600 chars
+
+        sys_prompt, usr_prompt = build_marketing_prompts(
+            brand_info=huge_brand,
+            campaign_info=huge_camp,
+            target_platform="facebook"
+        )
+        total_len = len(sys_prompt) + len(usr_prompt)
+        import config
+        self.assertLessEqual(total_len, getattr(config, 'AI_MAX_PROMPT_CHARS', 8000))
+        self.assertIn("[truncated]", usr_prompt)
+
+    def test_generate_content_token_capping(self):
+        provider = MockAIProvider()
+        with patch.object(provider, 'generate', wraps=provider.generate) as mock_gen:
+            generate_campaign_content(
+                provider=provider,
+                brand_info=self.brand_info,
+                campaign_info=self.campaign_info,
+                target_platform="facebook",
+                max_tokens=99999
+            )
+            import config
+            _, kwargs = mock_gen.call_args
+            self.assertEqual(kwargs['max_tokens'], getattr(config, 'AI_MAX_OUTPUT_TOKENS', 1500))
+
 if __name__ == "__main__":
     unittest.main()

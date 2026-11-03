@@ -95,6 +95,13 @@ AI_BASE_URL = os.getenv('AI_BASE_URL')
 AI_MODEL = os.getenv('AI_MODEL')
 AI_TIMEOUT_SECONDS = int(os.getenv('AI_TIMEOUT_SECONDS', 30))
 
+# AI Cost Controls & Generation Guardrails
+AI_MAX_PLATFORMS_PER_REQUEST = int(os.getenv('AI_MAX_PLATFORMS_PER_REQUEST', 5))
+AI_MAX_PROMPT_CHARS = int(os.getenv('AI_MAX_PROMPT_CHARS', 8000))
+AI_MAX_OUTPUT_TOKENS = int(os.getenv('AI_MAX_OUTPUT_TOKENS', 1500))
+AI_ORG_HOURLY_GENERATION_LIMIT = int(os.getenv('AI_ORG_HOURLY_GENERATION_LIMIT', 60))
+AI_DEDUPLICATION_WINDOW_SECONDS = int(os.getenv('AI_DEDUPLICATION_WINDOW_SECONDS', 15))
+
 # Groq OpenAI-compatible provider settings
 GROQ_API_KEY = os.getenv('GROQ_API_KEY') or AI_API_KEY
 GROQ_BASE_URL = os.getenv('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')

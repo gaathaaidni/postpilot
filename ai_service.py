@@ -100,6 +100,19 @@ def build_marketing_prompts(brand_info, campaign_info, target_platform, language
     camp_audience = campaign_info.get('target_audience') or 'Target audience'
     camp_markets = campaign_info.get('target_markets') or 'Global'
 
+    # Guard against prompt inflation and oversized inputs
+    max_budget = getattr(config, 'AI_MAX_PROMPT_CHARS', 8000)
+    if len(camp_brief) > 3000:
+        logger.warning(f"Campaign brief exceeds 3000 chars ({len(camp_brief)}). Truncating.")
+        camp_brief = camp_brief[:3000] + "... [truncated]"
+    if len(positioning) > 1500:
+        logger.warning(f"Brand positioning exceeds 1500 chars ({len(positioning)}). Truncating.")
+        positioning = positioning[:1500] + "... [truncated]"
+    if len(approved_facts) > 1500:
+        approved_facts = approved_facts[:1500] + "... [truncated]"
+    if len(prohibited_claims) > 1500:
+        prohibited_claims = prohibited_claims[:1500] + "... [truncated]"
+
     platform_rules = {
         'facebook': (
             "Platform: Facebook Page Post.\n"
@@ -174,6 +187,23 @@ def build_marketing_prompts(brand_info, campaign_info, target_platform, language
         f"{f'Preferred Calls to Action: {preferred_ctas}' if preferred_ctas else ''}\n\n"
         "Produce the JSON object now:"
     )
+
+    total_len = len(system_prompt) + len(user_prompt)
+    if total_len > max_budget:
+        overflow = total_len - max_budget
+        camp_brief = camp_brief[:max(100, len(camp_brief) - overflow - 20)] + "... [truncated]"
+        logger.warning(f"Combined prompt length exceeded budget ({total_len} > {max_budget}). Truncated brief to fit.")
+        user_prompt = (
+            f"Generate a {content_format} for {target_platform.capitalize()} in language: '{language}'.\n\n"
+            f"Campaign: {camp_name}\n"
+            f"Objective: {camp_obj}\n"
+            f"Target Audience: {camp_audience}\n"
+            f"Target Markets / Geography: {camp_markets}\n"
+            f"Campaign Brief:\n{camp_brief}\n\n"
+            f"{selected_rule}\n"
+            f"{f'Preferred Calls to Action: {preferred_ctas}' if preferred_ctas else ''}\n\n"
+            "Produce the JSON object now:"
+        )
 
     return system_prompt, user_prompt
 
@@ -538,10 +568,14 @@ def generate_campaign_content(provider: BaseAIProvider, brand_info: dict, campai
                               model: str = None, temperature: float = 0.7, max_tokens: int = 1000) -> GenerationResult:
     """
     High-level marketing studio orchestrator:
-    1. Builds brand-aware prompts with guardrails and tone guidelines.
-    2. Executes generation via the specified AI provider.
-    3. Returns validated GenerationResult container.
+    1. Builds brand-aware prompts with guardrails, tone guidelines, and prompt budget controls.
+    2. Capping output tokens to configured ceiling.
+    3. Executes generation via the specified AI provider.
+    4. Returns validated GenerationResult container.
     """
+    token_cap = getattr(config, 'AI_MAX_OUTPUT_TOKENS', 1500)
+    effective_max_tokens = min(int(max_tokens or 1000), token_cap)
+
     system_prompt, user_prompt = build_marketing_prompts(
         brand_info=brand_info,
         campaign_info=campaign_info,
@@ -554,7 +588,7 @@ def generate_campaign_content(provider: BaseAIProvider, brand_info: dict, campai
         user_prompt=user_prompt,
         model=model,
         temperature=temperature,
-        max_tokens=max_tokens,
+        max_tokens=effective_max_tokens,
         target_platform=target_platform,
         language=language
     )
