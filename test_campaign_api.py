@@ -1247,5 +1247,95 @@ class TestCampaignAPI(unittest.TestCase):
         }, headers=headers_org2)
         self.assertEqual(res_cross.status_code, 404)
 
+
+    def test_unified_publishing_workflow_and_export_package(self):
+        headers_admin = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Create a campaign and draft
+        camp_res = self.client.post('/api/campaigns', json={
+            'name': 'Publishing Pipeline Camp',
+            'brand_id': 10,
+            'objective': 'Test Unified Publishing',
+            'brief': 'Full cycle test from draft to scheduled post'
+        }, headers=headers_admin)
+        camp_id = camp_res.get_json()['id']
+
+        draft = database.create_content_draft(
+            organization_id=1,
+            brand_id=10,
+            campaign_id=camp_id,
+            target_platform='linkedin',
+            caption='Major announcement from GAATHA on enterprise workflows.',
+            headline='Enterprise Automation Redefined',
+            created_by=1
+        )
+        draft_id = draft['id']
+
+        # 2. Export creative package
+        export_res = self.client.get(f'/api/drafts/{draft_id}/export-package', headers=headers_admin)
+        self.assertEqual(export_res.status_code, 200)
+        pkg = export_res.get_json()['package']
+        self.assertEqual(pkg['draft_id'], draft_id)
+        self.assertIn('Major announcement', pkg['ready_to_publish_copy'])
+        self.assertIn('Enterprise Automation Redefined', pkg['ready_to_publish_copy'])
+
+        # 3. Disallow scheduling in the past
+        past_time = "2024-01-01T12:00:00"
+        res_past = self.client.post(f'/api/drafts/{draft_id}/schedule', json={
+            'scheduled_for': past_time
+        }, headers=headers_admin)
+        self.assertEqual(res_past.status_code, 400)
+        self.assertIn("past", res_past.get_json()['error'].lower())
+
+        # 4. Schedule draft to a future time
+        future_time = "2027-11-20T15:00:00"
+        sched_res = self.client.post(f'/api/drafts/{draft_id}/schedule', json={
+            'scheduled_for': future_time
+        }, headers=headers_admin)
+        self.assertEqual(sched_res.status_code, 201)
+        sched_data = sched_res.get_json()['scheduled']
+        self.assertEqual(sched_data['draft_id'], draft_id)
+        self.assertEqual(sched_data['status'], 'scheduled')
+
+        # Check draft status updated to scheduled
+        d_check = database.get_content_draft_by_id(draft_id, organization_id=1)
+        self.assertEqual(d_check['status'], 'scheduled')
+
+        # Check scheduled_posts contains row with draft_id
+        with database.get_db_connection() as conn:
+            sp = conn.execute(
+                "SELECT * FROM scheduled_posts WHERE draft_id = ? AND organization_id = 1",
+                (draft_id,)
+            ).fetchone()
+            self.assertIsNotNone(sp)
+            self.assertEqual(sp['campaign_id'], camp_id)
+            self.assertEqual(sp['post_type'], 'linkedin')
+
+        # 5. Role restrictions: Contributor cannot schedule an unapproved draft
+        headers_contrib = self._login(user_id=10, role='contributor', org_id=1)
+        draft_unapproved = database.create_content_draft(
+            organization_id=1,
+            brand_id=10,
+            campaign_id=camp_id,
+            target_platform='x',
+            caption='Draft needing approval before contributor scheduling',
+            created_by=10
+        )
+        res_contrib_sched = self.client.post(f'/api/drafts/{draft_unapproved["id"]}/schedule', json={
+            'scheduled_for': future_time
+        }, headers=headers_contrib)
+        self.assertEqual(res_contrib_sched.status_code, 400)
+        self.assertIn("must be approved", res_contrib_sched.get_json()['error'].lower())
+
+        # 6. Tenant isolation: Org 2 cannot schedule or export Org 1's draft
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res_org2_sched = self.client.post(f'/api/drafts/{draft_id}/schedule', json={
+            'scheduled_for': future_time
+        }, headers=headers_org2)
+        self.assertEqual(res_org2_sched.status_code, 404)
+
+        res_org2_export = self.client.get(f'/api/drafts/{draft_id}/export-package', headers=headers_org2)
+        self.assertEqual(res_org2_export.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

@@ -1220,8 +1220,15 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
             f"Invalid initial post status: '{initial_status}'. Must be one of: {', '.join(sorted(ALLOWED_INITIAL_STATUSES))}."
         )
 
-    if post_type not in ('tour', 'nz', 'gaatha', 'insta'):
-        raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of tour, nz, gaatha, insta.")
+    valid_post_types = {'tour', 'nz', 'gaatha', 'insta', 'facebook', 'instagram', 'linkedin', 'x', 'twitter', 'whatsapp'}
+    clean_post_type = str(post_type).strip().lower()
+    if clean_post_type == 'twitter':
+        clean_post_type = 'x'
+    if clean_post_type not in valid_post_types:
+        raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of: {', '.join(sorted(valid_post_types))}.")
+    post_type = clean_post_type
+    camp_id_val = kwargs.get('campaign_id')
+    draft_id_val = kwargs.get('draft_id')
 
     # Validate organization exists and is active
     with get_db_connection() as conn:
@@ -1272,10 +1279,10 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
         if is_postgres():
             cur = conn.execute(
                 "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
-                "scheduled_for, timezone, status, idempotency_key, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                "scheduled_for, timezone, status, idempotency_key, created_by, campaign_id, draft_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                 (organization_id, brand_id, post_type, post_id, msg_val, safe_image,
-                 scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by)
+                 scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by, camp_id_val, draft_id_val)
             )
             row = cur.fetchone()
             conn.commit()
@@ -1283,10 +1290,10 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
         else:
             cur = conn.execute(
                 "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
-                "scheduled_for, timezone, status, idempotency_key, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "scheduled_for, timezone, status, idempotency_key, created_by, campaign_id, draft_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (organization_id, brand_id, post_type, post_id, msg_val, safe_image,
-                 scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by)
+                 scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by, camp_id_val, draft_id_val)
             )
             conn.commit()
             new_id = cur.lastrowid
@@ -3251,3 +3258,69 @@ def delete_media_asset(asset_id, organization_id=1):
         conn.execute("DELETE FROM media_assets WHERE id = ? AND organization_id = ?", (a_id, org_id))
         conn.commit()
         return asset
+
+
+def schedule_content_draft(draft_id, scheduled_for, timezone_name=None, organization_id=1, user_id=None, user_role='admin'):
+    """
+    Schedules an approved content draft for publication.
+    If the draft is in 'draft' or 'pending_approval' and the caller has approval authority (admin, manager, owner),
+    it transitions the draft directly to 'scheduled'.
+    Creates a corresponding scheduled_post linked via draft_id and campaign_id.
+    """
+    org_id = int(organization_id)
+    d_id = int(draft_id)
+
+    draft = get_content_draft_by_id(d_id, organization_id=org_id)
+    if not draft:
+        raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+
+    curr_status = (draft['status'] or 'draft').lower()
+    is_approver = (user_role in ('admin', 'manager', 'owner'))
+    if curr_status not in ('approved', 'scheduled'):
+        if not is_approver:
+            raise ValueError(f"Cannot schedule draft in '{curr_status}' status. Draft must be approved first.")
+
+    # Time validation: disallow past scheduled times
+    org_tz = get_organization_timezone(org_id)
+    target_tz = timezone_name or org_tz
+    utc_dt, resolved_tz, scheduled_utc_str = timezone_utils.parse_and_convert_to_utc(
+        str(scheduled_for),
+        tz_name=target_tz,
+        org_default_tz=org_tz,
+        allow_past=False
+    )
+
+    image_filename = draft.get('media_filename')
+    clean_platform = str(draft['target_platform']).strip().lower()
+
+    # Create scheduled post linked to draft
+    scheduled_post = create_scheduled_post(
+        post_type=clean_platform,
+        scheduled_for=scheduled_utc_str,
+        message=draft['caption'],
+        image_filename=image_filename,
+        organization_id=org_id,
+        brand_id=draft['brand_id'],
+        timezone_name=resolved_tz,
+        initial_status='scheduled',
+        allow_past=False,
+        created_by=user_id,
+        campaign_id=draft['campaign_id'],
+        draft_id=d_id
+    )
+
+    # Update draft status to scheduled
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE content_drafts SET status = 'scheduled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?",
+            (d_id, org_id)
+        )
+        conn.commit()
+
+    return {
+        'draft_id': d_id,
+        'scheduled_post': scheduled_post,
+        'scheduled_for': scheduled_utc_str,
+        'timezone': resolved_tz,
+        'status': 'scheduled'
+    }

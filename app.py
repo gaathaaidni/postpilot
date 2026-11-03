@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from functools import wraps
 from PIL import Image
+from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request, session, send_from_directory, redirect, url_for
 
 import config
@@ -2102,6 +2103,94 @@ def delete_draft(draft_id):
         return jsonify({'status': 'deleted', 'draft_id': draft_id})
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 404
+
+
+@app.route('/api/drafts/<int:draft_id>/schedule', methods=['POST'])
+@login_required
+@csrf_protect
+def schedule_draft_route(draft_id):
+    """Schedules an approved content draft for publication into the scheduled_posts queue."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    user_role = session.get('role', 'contributor')
+    data = request.get_json(silent=True) or {}
+    scheduled_for = data.get('scheduled_for')
+    timezone_name = data.get('timezone')
+
+    if not scheduled_for:
+        return jsonify({'error': 'scheduled_for timestamp is required', 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        res = database.schedule_content_draft(
+            draft_id=draft_id,
+            scheduled_for=scheduled_for,
+            timezone_name=timezone_name,
+            organization_id=org_id,
+            user_id=user_id,
+            user_role=user_role
+        )
+        return jsonify({'status': 'success', 'scheduled': res}), 201
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error scheduling draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to schedule draft'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/export-package', methods=['GET'])
+@login_required
+def export_draft_package_route(draft_id):
+    """Prepares and returns a ready-to-publish creative package for manual posting."""
+    org_id = session.get('organization_id', 1)
+    try:
+        draft = database.get_content_draft_by_id(draft_id, organization_id=org_id)
+        if not draft:
+            return jsonify({'error': 'Draft not found'}), 404
+
+        media_info = None
+        if draft.get('media_asset_id'):
+            asset = database.get_media_asset_by_id(draft['media_asset_id'], organization_id=org_id)
+            if asset:
+                media_info = {
+                    'filename': asset['filename'],
+                    'original_name': asset.get('original_name'),
+                    'file_type': asset.get('file_type'),
+                    'download_url': f"/images/{asset['filename']}"
+                }
+
+        copy_blocks = []
+        if draft.get('headline'):
+            copy_blocks.append(f"Headline: {draft['headline']}")
+        copy_blocks.append(draft.get('caption', ''))
+        if draft.get('hashtags'):
+            copy_blocks.append(draft['hashtags'])
+        if draft.get('call_to_action'):
+            copy_blocks.append(f"CTA: {draft['call_to_action']}")
+        full_copy = "\n\n".join(b for b in copy_blocks if b)
+
+        package = {
+            'draft_id': draft['id'],
+            'campaign_id': draft['campaign_id'],
+            'campaign_name': draft.get('campaign_name'),
+            'brand_id': draft['brand_id'],
+            'brand_name': draft.get('brand_name'),
+            'target_platform': draft['target_platform'],
+            'content_format': draft.get('content_format', 'post'),
+            'headline': draft.get('headline'),
+            'caption': draft.get('caption'),
+            'hashtags': draft.get('hashtags'),
+            'call_to_action': draft.get('call_to_action'),
+            'media': media_info,
+            'ready_to_publish_copy': full_copy,
+            'exported_at': datetime.now(timezone.utc).isoformat()
+        }
+        return jsonify({'status': 'success', 'package': package}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error exporting package for draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to export draft package'}), 500
 
 @app.route('/api/analytics/ai-usage', methods=['GET'])
 @login_required
