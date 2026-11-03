@@ -2417,3 +2417,50 @@ body {
         flex: 1;
     }
 }
+
+/* ==========================================================================
+   Brand Workspaces, Media Library, Analytics & Settings Styles (Unit L)
+   ========================================================================== */
+.brand-card,
+.campaign-card,
+.media-asset-card {
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.brand-card:hover,
+.campaign-card:hover,
+.media-asset-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.brand-avatar-pill {
+    flex-shrink: 0;
+}
+
+.media-asset-card img {
+    transition: transform var(--transition-normal);
+}
+
+.media-asset-card:hover img {
+    transform: scale(1.05);
+}
+
+.analytics-view-container .stat-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    padding: 1.25rem;
+}
+
+@media (max-width: 640px) {
+    .brands-grid,
+    .campaigns-grid,
+    .media-grid {
+        grid-template-columns: 1fr !important;
+    }
+    .mobile-header {
+        display: flex;
+    }
+}
+

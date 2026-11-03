@@ -169,12 +169,18 @@ function loadTab(tab) {
 
     const titles = {
         'dashboard': 'System Overview',
-        'accounts': 'Connected Social Accounts',
-        'composer': 'Post Composer',
+        'brands': 'Brand Workspaces',
         'studio': 'AI Marketing Studio',
+        'campaigns': 'Campaigns Management',
         'calendar': 'Content Calendar',
+        'media': 'Media Library',
+        'composer': 'Post Composer',
         'approvals': 'Approvals Centre',
         'queue': 'Publishing Queue',
+        'history': 'Publishing History',
+        'analytics': 'Marketing & AI Analytics',
+        'accounts': 'Connected Social Accounts',
+        'settings': 'Organization & SaaS Settings',
         'tour': 'Nexora Suite Management',
         'nz': 'Phoenix International Management',
         'gaatha': 'Gaatha AI Automation',
@@ -191,18 +197,30 @@ function loadTab(tab) {
 
     if (tab === 'dashboard') {
         renderDashboard(content);
-    } else if (tab === 'accounts') {
-        renderAccounts(content);
-    } else if (tab === 'composer') {
-        renderComposerView(content);
+    } else if (tab === 'brands') {
+        renderBrands(content);
     } else if (tab === 'studio') {
         renderAIStudioView(content);
+    } else if (tab === 'campaigns') {
+        renderCampaigns(content);
     } else if (tab === 'calendar') {
         renderCalendarView(content);
+    } else if (tab === 'media') {
+        renderMedia(content);
+    } else if (tab === 'composer') {
+        renderComposerView(content);
     } else if (tab === 'approvals') {
         renderApprovalsView(content);
     } else if (tab === 'queue') {
         renderQueueView(content);
+    } else if (tab === 'history') {
+        renderHistory(content);
+    } else if (tab === 'analytics') {
+        renderAnalytics(content);
+    } else if (tab === 'accounts') {
+        renderAccounts(content);
+    } else if (tab === 'settings') {
+        renderSettings(content);
     } else if (['tour', 'nz', 'gaatha', 'insta'].includes(tab)) {
         renderModule(content, tab);
     }
@@ -3375,6 +3393,9 @@ function renderAIStudioDOM(container) {
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openCampaignStrategyModal(${activeCampaign.id})" style="margin-left: auto;" title="View &amp; Generate AI Strategic Blueprint">
                         <i class="fa-solid fa-chess-knight" style="color: #6366f1;"></i> Strategy Blueprint
                     </button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openContentPlannerModal(${activeCampaign.id})" style="margin-left: 0.5rem;" title="Generate weekly/monthly content plan roadmap">
+                        <i class="fa-solid fa-calendar-check"></i> Content Planner
+                    </button>
                 </div>
             </div>
 
@@ -3561,17 +3582,23 @@ function renderStudioDraftCard(draft) {
                 </div>
             </div>
 
+            <!-- Validation Feedback Box -->
+            <div id="draft-validation-box-${draft.id}" style="display: none; padding: 0.5rem 0.75rem; border-radius: var(--radius-md); font-size: 0.78rem;"></div>
+
             <!-- Action Controls -->
             <div class="studio-draft-actions">
                 <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
                     <button type="button" class="btn btn-secondary btn-sm" onclick="saveStudioDraft(${draft.id})" title="Save manual edits to this draft">
                         <i class="fa-solid fa-floppy-disk"></i> Save
                     </button>
+                    <button type="button" class="btn btn-outline-info btn-sm" onclick="validateStudioDraftCreative(${draft.id})" id="btn-val-${draft.id}" title="Run platform creative guidelines check">
+                        <i class="fa-solid fa-check-double"></i> Validate
+                    </button>
                     <button type="button" class="btn btn-outline-primary btn-sm" onclick="regenerateStudioDraft(${draft.id})" id="btn-regen-${draft.id}" title="Regenerate copy with AI (creates new revision)">
                         <i class="fa-solid fa-arrows-rotate"></i> Regenerate
                     </button>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="scheduleStudioDraft(${draft.id})" title="Send this draft into Post Composer / Scheduler">
-                        <i class="fa-solid fa-paper-plane"></i> Schedule
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openScheduleDraftModal(${draft.id})" title="Schedule this verified draft directly">
+                        <i class="fa-solid fa-calendar-check"></i> Schedule
                     </button>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteStudioDraft(${draft.id})" title="Delete draft">
@@ -4157,4 +4184,1315 @@ function scheduleStudioDraft(draftId) {
     }
 
     showToast("Draft loaded into Composer. Choose media and schedule time!", "info");
+}
+
+// ==========================================================================
+// VIEW: Brand Workspaces (Unit L)
+// ==========================================================================
+async function renderBrands(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Brand Workspaces...</p>
+        </div>
+    `;
+
+    try {
+        const res = await authFetch('/api/brands');
+        const brands = res.ok ? await res.json() : [];
+
+        let html = `
+            <div class="brands-view-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800;">
+                            <i class="fa-solid fa-building-flag" style="color: #6366f1;"></i> Brand Workspaces
+                        </h2>
+                        <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                            Isolated marketing workspaces with distinct positioning, guardrails, campaigns, and audiences.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="brands-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.25rem;">
+        `;
+
+        if (brands.length === 0) {
+            html += `
+                <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 3rem 1rem;">
+                    <i class="fa-solid fa-building-circle-exclamation fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Brands Found</h3>
+                    <p style="color: var(--text-muted);">No brand workspaces configured for your organization.</p>
+                </div>
+            `;
+        } else {
+            brands.forEach(b => {
+                html += `
+                    <div class="card brand-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 1rem; padding: 1.25rem;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                                <div style="font-weight: 700; font-size: 1.1rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                                    <div class="brand-avatar-pill" style="width: 32px; height: 32px; border-radius: 8px; background: #6366f1; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 0.9rem;">
+                                        ${escapeHtml((b.name || 'B')[0].toUpperCase())}
+                                    </div>
+                                    <span>${escapeHtml(b.name)}</span>
+                                </div>
+                                <span class="badge badge-secondary" style="font-size: 0.72rem;">${escapeHtml(b.slug || 'brand')}</span>
+                            </div>
+
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45; margin-bottom: 0.75rem;">
+                                ${escapeHtml(b.description || 'Global brand marketing workspace under GAATHA / PostPilot.')}
+                            </p>
+
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.78rem; color: var(--text-muted); background: var(--bg-surface); padding: 0.6rem 0.8rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                                <div><i class="fa-solid fa-globe" style="width: 16px;"></i> ${escapeHtml(b.website || 'No website set')}</div>
+                                <div><i class="fa-solid fa-users" style="width: 16px;"></i> ${escapeHtml(b.target_audience || 'Universal audiences')}</div>
+                                <div><i class="fa-solid fa-earth-americas" style="width: 16px;"></i> ${escapeHtml(b.target_markets || 'Global')}</div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; pt: 0.5rem; border-top: 1px solid var(--border);">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="openBrandProfileModal(${b.id})" title="Edit brand positioning and factual guardrails">
+                                <i class="fa-solid fa-id-card" style="color: var(--primary);"></i> Profile
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="switchToStudioWithBrand(${b.id})" title="Open brand in AI Marketing Studio">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> AI Studio
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="switchToCampaignsWithBrand(${b.id})" title="View brand campaigns">
+                                <i class="fa-solid fa-bullhorn"></i> Campaigns
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; color: var(--danger);">Failed to load brand workspaces: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function switchToStudioWithBrand(brandId) {
+    studioSelectedBrandId = Number(brandId);
+    studioSelectedCampaignId = null;
+    loadTab('studio');
+}
+
+function switchToCampaignsWithBrand(brandId) {
+    campaignsFilterBrandId = Number(brandId);
+    loadTab('campaigns');
+}
+
+function switchToStudioWithCampaign(brandId, campaignId) {
+    studioSelectedBrandId = Number(brandId);
+    studioSelectedCampaignId = Number(campaignId);
+    loadTab('studio');
+}
+
+// ==========================================================================
+// VIEW: Campaigns Management (Unit L)
+// ==========================================================================
+let campaignsFilterBrandId = null;
+let campaignsFilterStatus = 'all';
+
+async function renderCampaigns(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Marketing Campaigns...</p>
+        </div>
+    `;
+
+    try {
+        const [brandsRes, campsRes] = await Promise.all([
+            authFetch('/api/brands'),
+            authFetch(campaignsFilterBrandId ? `/api/campaigns?brand_id=${campaignsFilterBrandId}` : '/api/campaigns')
+        ]);
+
+        const brands = brandsRes.ok ? await brandsRes.json() : [];
+        let campaigns = campsRes.ok ? await campsRes.json() : [];
+
+        if (campaignsFilterStatus !== 'all') {
+            campaigns = campaigns.filter(c => (c.status || 'draft') === campaignsFilterStatus);
+        }
+
+        let html = `
+            <div class="campaigns-view-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800;">
+                            <i class="fa-solid fa-bullhorn" style="color: #f59e0b;"></i> Marketing Campaigns
+                        </h2>
+                        <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                            Orchestrate multi-brand initiatives, AI strategic blueprints, and publishing cadences.
+                        </p>
+                    </div>
+                    <button type="button" class="btn btn-primary" onclick="openNewCampaignModal()">
+                        <i class="fa-solid fa-plus"></i> New Campaign
+                    </button>
+                </div>
+
+                <!-- Filters Bar -->
+                <div class="card" style="padding: 0.85rem 1rem; margin-bottom: 1.25rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 0.4rem;">
+                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">Brand:</label>
+                            <select class="form-control" style="width: auto; font-size: 0.85rem;" onchange="campaignsFilterBrandId = this.value ? Number(this.value) : null; renderCampaigns(document.getElementById('content-area'))">
+                                <option value="">All Brands</option>
+                                ${brands.map(b => `<option value="${b.id}" ${b.id === campaignsFilterBrandId ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.4rem;">
+                            <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">Status:</label>
+                            <select class="form-control" style="width: auto; font-size: 0.85rem;" onchange="campaignsFilterStatus = this.value; renderCampaigns(document.getElementById('content-area'))">
+                                <option value="all" ${campaignsFilterStatus === 'all' ? 'selected' : ''}>All Statuses</option>
+                                <option value="draft" ${campaignsFilterStatus === 'draft' ? 'selected' : ''}>Draft</option>
+                                <option value="active" ${campaignsFilterStatus === 'active' ? 'selected' : ''}>Active</option>
+                                <option value="paused" ${campaignsFilterStatus === 'paused' ? 'selected' : ''}>Paused</option>
+                                <option value="completed" ${campaignsFilterStatus === 'completed' ? 'selected' : ''}>Completed</option>
+                                <option value="archived" ${campaignsFilterStatus === 'archived' ? 'selected' : ''}>Archived</option>
+                            </select>
+                        </div>
+                    </div>
+                    <span style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">${campaigns.length} Campaigns</span>
+                </div>
+
+                <div class="campaigns-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1.25rem;">
+        `;
+
+        if (campaigns.length === 0) {
+            html += `
+                <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 3rem 1rem;">
+                    <i class="fa-solid fa-bullhorn fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Campaigns Match Criteria</h3>
+                    <p style="color: var(--text-muted);">Create your first campaign or adjust brand/status filters above.</p>
+                </div>
+            `;
+        } else {
+            campaigns.forEach(c => {
+                const brand = brands.find(b => b.id === c.brand_id);
+                const brandName = brand ? brand.name : `Brand #${c.brand_id}`;
+                const statusBadge = c.status === 'active' ? 'badge-success' : (c.status === 'completed' ? 'badge-info' : 'badge-secondary');
+
+                html += `
+                    <div class="card campaign-card" style="display: flex; flex-direction: column; justify-content: space-between; gap: 0.85rem; padding: 1.25rem;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                                <div>
+                                    <span class="badge" style="background: rgba(99, 102, 241, 0.1); color: #6366f1; font-size: 0.7rem; font-weight: 700; margin-bottom: 0.25rem; display: inline-block;">
+                                        ${escapeHtml(brandName)}
+                                    </span>
+                                    <h3 style="margin: 0; font-size: 1.05rem; font-weight: 700;">${escapeHtml(c.name)}</h3>
+                                </div>
+                                <span class="badge ${statusBadge}" style="text-transform: capitalize; font-size: 0.72rem;">${escapeHtml(c.status || 'draft')}</span>
+                            </div>
+
+                            <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45; margin-bottom: 0.6rem;">
+                                ${escapeHtml(c.brief || 'No campaign brief supplied.')}
+                            </p>
+
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.76rem; color: var(--text-muted); background: var(--bg-surface); padding: 0.5rem 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                                <div><strong>Objective:</strong> ${escapeHtml(c.objective || 'Brand Awareness')}</div>
+                                <div><strong>Audience:</strong> ${escapeHtml(c.target_audience || 'Universal')}</div>
+                                <div><strong>Markets:</strong> ${escapeHtml(c.target_markets || 'Global')}</div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; pt: 0.5rem; border-top: 1px solid var(--border);">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="openCampaignStrategyModal(${c.id})" title="View/generate AI strategy roadmap">
+                                <i class="fa-solid fa-chess-knight" style="color: #6366f1;"></i> Strategy
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="openContentPlannerModal(${c.id})" title="Intelligent weekly/monthly content planner">
+                                <i class="fa-solid fa-calendar-check" style="color: #10b981;"></i> Planner
+                            </button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="switchToStudioWithCampaign(${c.brand_id}, ${c.id})" title="Open campaign in AI Marketing Studio">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> AI Studio
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; color: var(--danger);">Failed to load campaigns: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// ==========================================================================
+// VIEW: Media Library (Unit L)
+// ==========================================================================
+let mediaFilterBrandId = null;
+
+async function renderMedia(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Media Library Assets...</p>
+        </div>
+    `;
+
+    try {
+        const [brandsRes, mediaRes] = await Promise.all([
+            authFetch('/api/brands'),
+            authFetch(mediaFilterBrandId ? `/api/media?brand_id=${mediaFilterBrandId}` : '/api/media')
+        ]);
+
+        const brands = brandsRes.ok ? await brandsRes.json() : [];
+        const mediaAssets = mediaRes.ok ? await mediaRes.json() : [];
+
+        let html = `
+            <div class="media-view-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800;">
+                            <i class="fa-solid fa-photo-film" style="color: #ec4899;"></i> Brand Media Library
+                        </h2>
+                        <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                            Secure multi-tenant asset storage for brand creative graphics, photography, and video.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Media Upload Dropzone Card -->
+                <div class="card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: var(--bg-surface); border: 2px dashed var(--border);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <i class="fa-solid fa-cloud-arrow-up fa-2x" style="color: var(--primary);"></i>
+                            <div>
+                                <h4 style="margin: 0; font-size: 0.95rem;">Upload Creative Media Asset</h4>
+                                <small style="color: var(--text-muted);">PNG, JPG, WEBP, GIF, MP4 (Max 16 MB)</small>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                            <select id="media-upload-brand-select" class="form-control" style="font-size: 0.85rem; width: auto;">
+                                <option value="">Global / Org-wide Asset</option>
+                                ${brands.map(b => `<option value="${b.id}" ${b.id === mediaFilterBrandId ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                            </select>
+                            <input type="file" id="media-upload-file-input" style="display: none;" accept="image/*,video/*" onchange="handleMediaUpload(this)">
+                            <button type="button" class="btn btn-primary" onclick="document.getElementById('media-upload-file-input').click()">
+                                <i class="fa-solid fa-upload"></i> Choose File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Media Filter Bar -->
+                <div class="card" style="padding: 0.75rem 1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">Filter by Brand:</label>
+                        <select class="form-control" style="font-size: 0.85rem; width: auto;" onchange="mediaFilterBrandId = this.value ? Number(this.value) : null; renderMedia(document.getElementById('content-area'))">
+                            <option value="">All Brand Assets</option>
+                            ${brands.map(b => `<option value="${b.id}" ${b.id === mediaFilterBrandId ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <span style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">${mediaAssets.length} Assets Stored</span>
+                </div>
+
+                <!-- Assets Grid -->
+                <div class="media-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.25rem;">
+        `;
+
+        if (mediaAssets.length === 0) {
+            html += `
+                <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 3rem 1rem;">
+                    <i class="fa-solid fa-photo-film fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Media Assets</h3>
+                    <p style="color: var(--text-muted);">Upload graphics, banners, or video to build your brand media library.</p>
+                </div>
+            `;
+        } else {
+            mediaAssets.forEach(m => {
+                const brand = brands.find(b => b.id === m.brand_id);
+                const brandName = brand ? brand.name : 'Global';
+                const sizeKb = m.file_size ? (m.file_size / 1024).toFixed(0) + ' KB' : '';
+
+                html += `
+                    <div class="card media-asset-card" style="overflow: hidden; padding: 0; display: flex; flex-direction: column;">
+                        <div style="height: 150px; background: #0f172a; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
+                            ${m.file_url ? `<img src="${escapeHtml(m.file_url)}" alt="${escapeHtml(m.original_filename)}" style="width: 100%; height: 100%; object-fit: cover;">` : `<i class="fa-regular fa-image fa-2x" style="color: #64748b;"></i>`}
+                            <span class="badge" style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #fff; font-size: 0.65rem;">
+                                ${escapeHtml(brandName)}
+                            </span>
+                        </div>
+                        <div style="padding: 0.85rem; flex: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 600; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(m.original_filename)}">
+                                    ${escapeHtml(m.original_filename)}
+                                </div>
+                                <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">
+                                    ${sizeKb} · ${escapeHtml(m.content_type || 'image')}
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; pt: 0.4rem; border-top: 1px solid var(--border);">
+                                <small style="font-size: 0.7rem; color: var(--text-muted);">${formatReadableDateTime(m.created_at)}</small>
+                                <button type="button" class="btn btn-outline-danger btn-sm" style="padding: 0.15rem 0.4rem; font-size: 0.72rem;" onclick="deleteMediaAsset(${m.id})" title="Delete asset">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; color: var(--danger);">Failed to load media assets: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function handleMediaUpload(input) {
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+    const brandSelect = document.getElementById('media-upload-brand-select');
+    const brandId = brandSelect ? brandSelect.value : null;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (brandId) {
+        formData.append('brand_id', brandId);
+    }
+
+    showToast("Uploading media asset...", "info");
+    try {
+        const res = await authFetch('/api/media/upload', {
+            method: 'POST',
+            body: formData
+        });
+        if (res.ok) {
+            showToast("Media asset uploaded successfully!", "success");
+            input.value = '';
+            renderMedia(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Upload failed", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Upload network error", "danger");
+    }
+}
+
+async function deleteMediaAsset(assetId) {
+    if (!confirm("Are you sure you want to permanently delete this media asset?")) return;
+    try {
+        const res = await authFetch(`/api/media/${assetId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast("Media asset deleted.", "success");
+            renderMedia(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to delete asset", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// ==========================================================================
+// VIEW: Publishing History (Unit L)
+// ==========================================================================
+let historyFilterChannel = 'all';
+
+async function renderHistory(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Publishing History...</p>
+        </div>
+    `;
+
+    try {
+        const res = await authFetch('/api/posts');
+        const allPosts = res.ok ? await res.json() : [];
+
+        // Completed / Published / Failed posts
+        let historyPosts = allPosts.filter(p => ['published', 'failed', 'rejected'].includes(p.status) || p.completed_at);
+        if (historyFilterChannel !== 'all') {
+            historyPosts = historyPosts.filter(p => p.type === historyFilterChannel);
+        }
+
+        let html = `
+            <div class="history-view-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800;">
+                            <i class="fa-solid fa-clock-rotate-left" style="color: #94a3b8;"></i> Publishing History &amp; Audit Trail
+                        </h2>
+                        <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                            Full record of executed dispatches, social live post IDs, and lifecycle diagnostics.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="card" style="padding: 0.75rem 1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">Channel:</label>
+                        <select class="form-control" style="font-size: 0.85rem; width: auto;" onchange="historyFilterChannel = this.value; renderHistory(document.getElementById('content-area'))">
+                            <option value="all" ${historyFilterChannel === 'all' ? 'selected' : ''}>All Channels</option>
+                            <option value="tour" ${historyFilterChannel === 'tour' ? 'selected' : ''}>Nexora Suite</option>
+                            <option value="nz" ${historyFilterChannel === 'nz' ? 'selected' : ''}>Phoenix Intl</option>
+                            <option value="gaatha" ${historyFilterChannel === 'gaatha' ? 'selected' : ''}>Gaatha AI</option>
+                            <option value="insta" ${historyFilterChannel === 'insta' ? 'selected' : ''}>Instagram Sync</option>
+                        </select>
+                    </div>
+                    <span style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">${historyPosts.length} Records</span>
+                </div>
+
+                <div class="card" style="overflow-x: auto; padding: 0;">
+                    <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: var(--bg-surface); border-bottom: 1px solid var(--border);">
+                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">ID</th>
+                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Channel</th>
+                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Caption Excerpt</th>
+                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Media</th>
+                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Status</th>
+                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Execution Time</th>
+                                <th style="padding: 0.75rem 1rem; text-align: right; font-size: 0.75rem; text-transform: uppercase;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+
+        if (historyPosts.length === 0) {
+            html += `
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                        No publishing history recorded yet.
+                    </td>
+                </tr>
+            `;
+        } else {
+            historyPosts.forEach(p => {
+                const info = CHANNEL_INFO[p.type] || { name: p.type || 'Channel', icon: 'fa-share-nodes' };
+                const isPublished = p.status === 'published';
+                const statusBadge = isPublished ? 'badge-success' : 'badge-danger';
+
+                html += `
+                    <tr style="border-bottom: 1px solid var(--border);">
+                        <td style="padding: 0.75rem 1rem; font-weight: 700; font-size: 0.82rem;">#${p.id}</td>
+                        <td style="padding: 0.75rem 1rem;">
+                            <span style="font-weight: 600; font-size: 0.85rem;"><i class="fa-solid ${info.icon}"></i> ${escapeHtml(info.name)}</span>
+                        </td>
+                        <td style="padding: 0.75rem 1rem; max-width: 300px;">
+                            <div style="font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                ${escapeHtml(p.message || 'No caption')}
+                            </div>
+                        </td>
+                        <td style="padding: 0.75rem 1rem; font-size: 0.82rem;">
+                            ${p.image_filename ? `<i class="fa-regular fa-image" style="color: var(--primary);"></i> Attached` : `<span style="color: var(--text-muted);">Text only</span>`}
+                        </td>
+                        <td style="padding: 0.75rem 1rem;">
+                            <span class="badge ${statusBadge}" style="text-transform: capitalize; font-size: 0.72rem;">${escapeHtml(p.status)}</span>
+                        </td>
+                        <td style="padding: 0.75rem 1rem; font-size: 0.8rem; color: var(--text-muted);">
+                            ${formatReadableDateTime(p.completed_at || p.scheduled_time)}
+                        </td>
+                        <td style="padding: 0.75rem 1rem; text-align: right;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="openDetailsModal(${p.id})">
+                                <i class="fa-solid fa-eye"></i> Details
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; color: var(--danger);">Failed to load history: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// ==========================================================================
+// VIEW: Analytics Dashboard (Unit L)
+// ==========================================================================
+async function renderAnalytics(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Aggregating Marketing &amp; AI Intelligence Dashboard...</p>
+        </div>
+    `;
+
+    try {
+        const [dashRes, usageRes] = await Promise.all([
+            authFetch('/api/analytics/dashboard'),
+            authFetch('/api/analytics/ai-usage')
+        ]);
+
+        const dash = dashRes.ok ? await dashRes.json() : {};
+        const usage = usageRes.ok ? await usageRes.json() : {};
+
+        const totalCampaigns = dash.total_campaigns || 0;
+        const totalDrafts = dash.total_drafts || 0;
+        const scheduledCount = dash.scheduled_posts || 0;
+        const successRate = dash.publishing_success_rate !== undefined ? `${dash.publishing_success_rate}%` : '100%';
+        const totalTokens = usage.total_tokens ? usage.total_tokens.toLocaleString() : (dash.tokens_consumed ? dash.tokens_consumed.toLocaleString() : '0');
+        const totalCost = usage.total_estimated_cost_usd !== undefined ? `$${Number(usage.total_estimated_cost_usd).toFixed(4)}` : '$0.0000';
+
+        const funnel = dash.draft_lifecycle_breakdown || {};
+        const platforms = dash.platform_distribution || {};
+
+        let html = `
+            <div class="analytics-view-container">
+                <div style="margin-bottom: 1.5rem;">
+                    <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800;">
+                        <i class="fa-solid fa-chart-line" style="color: #10b981;"></i> Marketing &amp; AI Intelligence Dashboard
+                    </h2>
+                    <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                        Real-time analytics for multi-brand initiatives, AI token consumption, publishing velocity, and platform distribution.
+                    </p>
+                </div>
+
+                <!-- 6 KPI Metric Cards -->
+                <div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
+                            <i class="fa-solid fa-bullhorn"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>Active Campaigns</h4>
+                            <p>${totalCampaigns}</p>
+                            <small>Orchestrated brands</small>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(192, 132, 252, 0.1); color: #c084fc;">
+                            <i class="fa-solid fa-file-lines"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>Content Drafts</h4>
+                            <p>${totalDrafts}</p>
+                            <small>Across all channels</small>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                            <i class="fa-solid fa-calendar-check"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>Publishing Queue</h4>
+                            <p>${scheduledCount}</p>
+                            <small>Scheduled dispatches</small>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(56, 189, 248, 0.1); color: #0284c7;">
+                            <i class="fa-solid fa-circle-check"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>Success Rate</h4>
+                            <p>${successRate}</p>
+                            <small>Publishing reliability</small>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+                            <i class="fa-solid fa-microchip"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>AI Tokens</h4>
+                            <p>${totalTokens}</p>
+                            <small>Consumed this cycle</small>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background: rgba(236, 72, 153, 0.1); color: #ec4899;">
+                            <i class="fa-solid fa-receipt"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h4>Compute Cost</h4>
+                            <p>${totalCost}</p>
+                            <small>Estimated USD</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Intelligence Grids -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1.25rem;">
+                    <!-- Draft Funnel Card -->
+                    <div class="card" style="padding: 1.25rem;">
+                        <h4 style="margin: 0 0 1rem 0; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fa-solid fa-filter" style="color: var(--primary);"></i> Content Lifecycle Funnel
+                        </h4>
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.25rem;">
+                                    <span>Drafting &amp; Generation</span>
+                                    <span style="font-weight: 700;">${funnel.draft || 0}</span>
+                                </div>
+                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.draft || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #94a3b8; height: 100%;"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.25rem;">
+                                    <span>Pending Approval</span>
+                                    <span style="font-weight: 700;">${funnel.pending_approval || 0}</span>
+                                </div>
+                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.pending_approval || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #fbbf24; height: 100%;"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.25rem;">
+                                    <span>Approved</span>
+                                    <span style="font-weight: 700;">${funnel.approved || 0}</span>
+                                </div>
+                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.approved || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #34d399; height: 100%;"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.25rem;">
+                                    <span>Scheduled &amp; Queued</span>
+                                    <span style="font-weight: 700;">${funnel.scheduled || 0}</span>
+                                </div>
+                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.scheduled || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #60a5fa; height: 100%;"></div>
+                                </div>
+                            </div>
+                            <div>
+                                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; margin-bottom: 0.25rem;">
+                                    <span>Published Dispatches</span>
+                                    <span style="font-weight: 700;">${funnel.published || 0}</span>
+                                </div>
+                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.published || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #10b981; height: 100%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Platform Share Card -->
+                    <div class="card" style="padding: 1.25rem;">
+                        <h4 style="margin: 0 0 1rem 0; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fa-solid fa-share-nodes" style="color: #ec4899;"></i> Platform Distribution
+                        </h4>
+                        <div style="display: flex; flex-direction: column; gap: 0.65rem;">
+                            ${Object.keys(platforms).length === 0 ? `<p style="color: var(--text-muted); font-size: 0.85rem;">No platform copies generated yet.</p>` : ''}
+                            ${Object.entries(platforms).map(([plat, count]) => `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.45rem 0.6rem; background: var(--bg-surface); border-radius: var(--radius-md); border: 1px solid var(--border);">
+                                    <span style="font-weight: 600; font-size: 0.85rem; text-transform: capitalize;">${escapeHtml(plat)}</span>
+                                    <span class="badge badge-secondary">${count} Drafts</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; color: var(--danger);">Failed to load analytics: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+// ==========================================================================
+// VIEW: Organization Settings & SaaS Subscriptions (Unit L)
+// ==========================================================================
+async function renderSettings(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Organization &amp; Subscription Settings...</p>
+        </div>
+    `;
+
+    try {
+        const [orgRes, membersRes, subRes] = await Promise.all([
+            authFetch('/api/org/settings'),
+            authFetch('/api/org/members'),
+            authFetch('/api/saas/subscription')
+        ]);
+
+        const org = orgRes.ok ? await orgRes.json() : {};
+        const members = membersRes.ok ? (await membersRes.json()).members || [] : [];
+        const sub = subRes.ok ? (await subRes.json()).subscription || {} : {};
+
+        const planName = (sub.plan_name || sub.plan_id || 'Enterprise').toUpperCase();
+        const tokensLimit = sub.max_ai_tokens_per_month || 2000000;
+        const tokensUsed = sub.tokens_used_this_month || 0;
+        const tokensPct = Math.min(100, Math.round((tokensUsed / Math.max(1, tokensLimit)) * 100));
+
+        const campsLimit = sub.max_campaigns || 500;
+        const campsUsed = sub.campaigns_count || 1;
+        const campsPct = Math.min(100, Math.round((campsUsed / Math.max(1, campsLimit)) * 100));
+
+        let html = `
+            <div class="settings-view-container">
+                <div style="margin-bottom: 1.5rem;">
+                    <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800;">
+                        <i class="fa-solid fa-gear" style="color: #64748b;"></i> Organization &amp; SaaS Settings
+                    </h2>
+                    <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                        Workspace identity, team permission roles, and commercial subscription limits.
+                    </p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
+                    <!-- Org Profile Card -->
+                    <div class="card" style="padding: 1.25rem;">
+                        <h4 style="margin: 0 0 1rem 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fa-solid fa-building" style="color: var(--primary);"></i> Organization Identity
+                        </h4>
+                        <form onsubmit="event.preventDefault(); saveOrgSettings();">
+                            <div class="form-group">
+                                <label for="org-name-input" class="form-label">Organization Name</label>
+                                <input type="text" id="org-name-input" class="form-control" value="${escapeHtml(org.name || 'GAATHA')}" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="org-timezone-select" class="form-label">Default Workspace Timezone</label>
+                                <select id="org-timezone-select" class="form-control">
+                                    <option value="Asia/Kolkata" ${org.default_timezone === 'Asia/Kolkata' ? 'selected' : ''}>Asia/Kolkata (IST · UTC+5:30)</option>
+                                    <option value="UTC" ${org.default_timezone === 'UTC' ? 'selected' : ''}>UTC</option>
+                                    <option value="America/New_York" ${org.default_timezone === 'America/New_York' ? 'selected' : ''}>America/New_York (EST/EDT)</option>
+                                    <option value="Europe/London" ${org.default_timezone === 'Europe/London' ? 'selected' : ''}>Europe/London (GMT/BST)</option>
+                                    <option value="Asia/Dubai" ${org.default_timezone === 'Asia/Dubai' ? 'selected' : ''}>Asia/Dubai (GST · UTC+4:00)</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 0.5rem;">
+                                <i class="fa-solid fa-floppy-disk"></i> Save Settings
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- SaaS Entitlements Card -->
+                    <div class="card" style="padding: 1.25rem; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                <h4 style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+                                    <i class="fa-solid fa-crown" style="color: #f59e0b;"></i> Subscription Plan
+                                </h4>
+                                <span class="badge badge-success" style="font-weight: 800; font-size: 0.78rem;">${escapeHtml(planName)}</span>
+                            </div>
+
+                            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+                                Commercial SaaS tier with automated quota tracking and provider failover.
+                            </p>
+
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem;">
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.25rem;">
+                                        <span>AI Monthly Tokens: <strong>${tokensUsed.toLocaleString()} / ${tokensLimit.toLocaleString()}</strong></span>
+                                        <span>${tokensPct}%</span>
+                                    </div>
+                                    <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                        <div style="width: ${tokensPct}%; background: #f59e0b; height: 100%;"></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.25rem;">
+                                        <span>Campaigns: <strong>${campsUsed} / ${campsLimit}</strong></span>
+                                        <span>${campsPct}%</span>
+                                    </div>
+                                    <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
+                                        <div style="width: ${campsPct}%; background: #6366f1; height: 100%;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openSubscriptionUpgradeModal()">
+                            <i class="fa-solid fa-arrow-up-right-dots"></i> Upgrade Plan
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Team Members Card -->
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+                        <div>
+                            <h4 style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+                                <i class="fa-solid fa-users" style="color: var(--primary);"></i> Workspace Team Members
+                            </h4>
+                            <small style="color: var(--text-muted);">Role-based permissions (Owner, Admin, Contributor, Viewer)</small>
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="openOrgMemberModal()">
+                            <i class="fa-solid fa-user-plus"></i> Add Member
+                        </button>
+                    </div>
+
+                    <div style="overflow-x: auto;">
+                        <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: var(--bg-surface); border-bottom: 1px solid var(--border);">
+                                    <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">User</th>
+                                    <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Email</th>
+                                    <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Role</th>
+                                    <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${members.map(m => `
+                                    <tr style="border-bottom: 1px solid var(--border);">
+                                        <td style="padding: 0.65rem 0.85rem; font-weight: 600; font-size: 0.85rem;">${escapeHtml(m.username || 'User')}</td>
+                                        <td style="padding: 0.65rem 0.85rem; font-size: 0.82rem; color: var(--text-secondary);">${escapeHtml(m.email || '—')}</td>
+                                        <td style="padding: 0.65rem 0.85rem;">
+                                            <span class="badge ${m.role === 'owner' ? 'badge-primary' : (m.role === 'admin' ? 'badge-info' : 'badge-secondary')}" style="font-size: 0.72rem; text-transform: capitalize;">
+                                                ${escapeHtml(m.role || 'contributor')}
+                                            </span>
+                                        </td>
+                                        <td style="padding: 0.65rem 0.85rem; font-size: 0.78rem; color: var(--success);"><i class="fa-solid fa-check"></i> Active</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; color: var(--danger);">Failed to load settings: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function saveOrgSettings() {
+    const name = document.getElementById('org-name-input')?.value.trim();
+    const tz = document.getElementById('org-timezone-select')?.value;
+    if (!name) return;
+
+    try {
+        const res = await authFetch('/api/org/settings', {
+            method: 'POST',
+            body: JSON.stringify({ name, default_timezone: tz })
+        });
+        if (res.ok) {
+            showToast("Organization settings saved successfully!", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to update settings", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// ==========================================================================
+// MODAL CONTROLLERS & ACTIONS: Creative Validation, Planner, Scheduling, SaaS
+// ==========================================================================
+
+// Creative Platform Validation
+async function validateStudioDraftCreative(draftId) {
+    const box = document.getElementById(`draft-validation-box-${draftId}`);
+    const btn = document.getElementById(`btn-val-${draftId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+    }
+
+    try {
+        const res = await authFetch(`/api/drafts/${draftId}/validate-creative`, {
+            method: 'POST'
+        });
+
+        if (box) box.style.display = 'block';
+
+        if (res.ok) {
+            const data = await res.json();
+            const valid = data.valid;
+            const issues = data.issues || [];
+
+            if (valid) {
+                if (box) {
+                    box.style.background = '#ecfdf5';
+                    box.style.border = '1px solid #a7f3d0';
+                    box.style.color = '#065f46';
+                    box.innerHTML = `<i class="fa-solid fa-circle-check"></i> <strong>Platform Guidelines Passed!</strong> Character counts, tags, and formatting satisfy channel limits.`;
+                }
+                showToast("Creative satisfies platform rules!", "success");
+            } else {
+                if (box) {
+                    box.style.background = '#fffbeb';
+                    box.style.border = '1px solid #fde68a';
+                    box.style.color = '#92400e';
+                    box.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> <strong>Creative Notice:</strong><ul style="margin: 0.3rem 0 0 1rem; padding: 0;">${issues.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+                }
+                showToast("Review creative notices before scheduling.", "warning");
+            }
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Validation failed", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-check-double"></i> Validate`;
+        }
+    }
+}
+
+// Schedule Draft Modal
+function openScheduleDraftModal(draftId) {
+    const draft = studioDrafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    document.getElementById('sched-draft-id').value = draftId;
+
+    // Default datetime to tomorrow at 10:00 AM
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(10, 0, 0, 0);
+    const localIso = tomorrow.toISOString().slice(0, 16);
+    const dtEl = document.getElementById('sched-draft-datetime');
+    if (dtEl) dtEl.value = localIso;
+
+    // Pre-select mapped channel
+    const chanEl = document.getElementById('sched-draft-channel');
+    if (chanEl) {
+        if (draft.target_platform === 'instagram') chanEl.value = 'insta';
+        else if (draft.target_platform === 'facebook') chanEl.value = 'tour';
+        else chanEl.value = 'tour';
+    }
+
+    // Populate media assets dropdown
+    const mediaEl = document.getElementById('sched-draft-media');
+    if (mediaEl) {
+        authFetch('/api/media').then(r => r.ok ? r.json() : []).then(assets => {
+            let opts = `<option value="">No media attached (Text only)</option>`;
+            assets.forEach(a => {
+                opts += `<option value="${a.id}">${escapeHtml(a.original_filename)}</option>`;
+            });
+            mediaEl.innerHTML = opts;
+        }).catch(() => {});
+    }
+
+    const modal = document.getElementById('schedule-draft-modal');
+    if (modal) modal.classList.add('show');
+}
+
+function closeScheduleDraftModal() {
+    const modal = document.getElementById('schedule-draft-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+async function confirmScheduleDraft() {
+    const draftId = document.getElementById('sched-draft-id')?.value;
+    const channel = document.getElementById('sched-draft-channel')?.value;
+    const datetime = document.getElementById('sched-draft-datetime')?.value;
+    const mediaId = document.getElementById('sched-draft-media')?.value;
+
+    if (!draftId || !channel || !datetime) {
+        showToast("Please specify channel and scheduled time.", "warning");
+        return;
+    }
+
+    const btn = document.getElementById('confirm-schedule-draft-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Scheduling...`;
+    }
+
+    try {
+        const payload = {
+            channel,
+            scheduled_time: datetime,
+            media_asset_id: mediaId ? Number(mediaId) : null
+        };
+
+        const res = await authFetch(`/api/drafts/${draftId}/schedule`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            closeScheduleDraftModal();
+            showToast("Draft successfully converted into scheduled publishing queue!", "success");
+            // Reload Studio drafts or Queue
+            renderAIStudioView(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to schedule draft", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-calendar-check"></i> Schedule Post`;
+        }
+    }
+}
+
+// Content Planner Modal
+let activeContentPlan = null;
+
+function openContentPlannerModal(campaignId) {
+    document.getElementById('planner-campaign-id').value = campaignId;
+    document.getElementById('planner-plan-container').style.display = 'none';
+    document.getElementById('planner-loading-state').style.display = 'none';
+
+    // Set default start date to today
+    const startEl = document.getElementById('planner-start-date');
+    if (startEl && !startEl.value) {
+        startEl.value = new Date().toISOString().slice(0, 10);
+    }
+
+    const modal = document.getElementById('content-planner-modal');
+    if (modal) modal.classList.add('show');
+}
+
+function closeContentPlannerModal() {
+    const modal = document.getElementById('content-planner-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+async function generateContentPlanFromModal() {
+    const cid = document.getElementById('planner-campaign-id')?.value;
+    const horizon = document.getElementById('planner-horizon-select')?.value || 'weekly';
+    const provider = document.getElementById('planner-provider-select')?.value || 'mock';
+    const startDate = document.getElementById('planner-start-date')?.value;
+    const focusTheme = document.getElementById('planner-focus-theme')?.value.trim();
+
+    if (!cid) return;
+
+    document.getElementById('planner-loading-state').style.display = 'block';
+    document.getElementById('planner-plan-container').style.display = 'none';
+
+    const btn = document.getElementById('btn-generate-plan');
+    if (btn) btn.disabled = true;
+
+    try {
+        const payload = {
+            schedule_horizon: horizon,
+            provider,
+            start_date: startDate,
+            themes: focusTheme ? [focusTheme] : []
+        };
+
+        const res = await authFetch(`/api/campaigns/${cid}/planner`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        document.getElementById('planner-loading-state').style.display = 'none';
+
+        if (res.ok) {
+            const data = await res.json();
+            activeContentPlan = data.content_plan;
+            renderPlannerEntriesInModal(data.content_plan, data.entries || []);
+            showToast("Content roadmap generated successfully!", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Planner generation failed", "danger");
+        }
+    } catch (e) {
+        document.getElementById('planner-loading-state').style.display = 'none';
+        showToast(e.message || "Network error", "danger");
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+function renderPlannerEntriesInModal(plan, entries) {
+    const titleEl = document.getElementById('planner-plan-title');
+    if (titleEl) titleEl.textContent = plan.title || 'Marketing Content Plan';
+
+    const listEl = document.getElementById('planner-entries-list');
+    if (!listEl) return;
+
+    if (!entries || entries.length === 0) {
+        listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No planned posts in this roadmap.</div>`;
+    } else {
+        listEl.innerHTML = entries.map(e => `
+            <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem;">
+                <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
+                        <span class="badge badge-primary" style="font-size: 0.7rem;">${escapeHtml((e.target_platform || 'all').toUpperCase())}</span>
+                        <span style="font-weight: 700; font-size: 0.88rem;">${escapeHtml(e.headline || e.theme || 'Planned Post')}</span>
+                    </div>
+                    <p style="font-size: 0.82rem; color: var(--text-secondary); margin: 0 0 0.4rem 0; line-height: 1.4;">${escapeHtml(e.copy_angle || e.caption_concept || '')}</p>
+                    <div style="font-size: 0.74rem; color: var(--text-muted);">
+                        <strong>Suggested Date:</strong> ${escapeHtml(e.scheduled_date || 'Day ' + (e.day_number || 1))} · <strong>CTA:</strong> ${escapeHtml(e.call_to_action || 'Learn More')}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    document.getElementById('planner-plan-container').style.display = 'block';
+}
+
+async function convertActivePlanToDrafts() {
+    if (!activeContentPlan || !activeContentPlan.id) {
+        showToast("No active plan to convert.", "warning");
+        return;
+    }
+
+    const btn = document.getElementById('btn-convert-plan-drafts');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Converting...`;
+    }
+
+    try {
+        const res = await authFetch(`/api/content-plans/${activeContentPlan.id}/convert-drafts`, {
+            method: 'POST'
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            showToast(`Converted plan into ${data.drafts_count || data.drafts?.length || 'multiple'} content drafts!`, "success");
+            closeContentPlannerModal();
+            renderAIStudioView(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Conversion failed", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-file-import"></i> Convert All to Content Drafts`;
+        }
+    }
+}
+
+// Org Member Invite Modal
+function openOrgMemberModal() {
+    const modal = document.getElementById('org-member-modal');
+    if (modal) modal.classList.add('show');
+}
+
+function closeOrgMemberModal() {
+    const modal = document.getElementById('org-member-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+async function confirmAddOrgMember() {
+    const username = document.getElementById('member-username-input')?.value.trim();
+    const email = document.getElementById('member-email-input')?.value.trim();
+    const password = document.getElementById('member-password-input')?.value.trim();
+    const role = document.getElementById('member-role-select')?.value || 'contributor';
+
+    if (!username || !email || !password) {
+        showToast("Please fill in username, email, and password.", "warning");
+        return;
+    }
+
+    try {
+        const res = await authFetch('/api/org/members', {
+            method: 'POST',
+            body: JSON.stringify({ username, email, password, role })
+        });
+
+        if (res.ok) {
+            closeOrgMemberModal();
+            showToast(`Team member ${username} added successfully!`, "success");
+            renderSettings(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to add member", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// Subscription Upgrade Modal
+function openSubscriptionUpgradeModal() {
+    const modal = document.getElementById('subscription-upgrade-modal');
+    if (modal) modal.classList.add('show');
+}
+
+function closeSubscriptionUpgradeModal() {
+    const modal = document.getElementById('subscription-upgrade-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+function handleUpgradeTierChange(tier) {
+    const titleEl = document.getElementById('tier-summary-title');
+    const featEl = document.getElementById('tier-summary-features');
+    if (!titleEl || !featEl) return;
+
+    if (tier === 'starter') {
+        titleEl.textContent = "Starter Tier Benefits";
+        featEl.innerHTML = `
+            <li>1 Brand Workspace</li>
+            <li>10 Concurrent Marketing Campaigns</li>
+            <li>50,000 AI Content &amp; Strategy Tokens / Month</li>
+            <li>Basic Publishing Automation</li>
+        `;
+    } else if (tier === 'growth') {
+        titleEl.textContent = "Growth Tier Benefits";
+        featEl.innerHTML = `
+            <li>5 Brand Workspaces</li>
+            <li>50 Concurrent Marketing Campaigns</li>
+            <li>250,000 AI Content &amp; Strategy Tokens / Month</li>
+            <li>Unlimited Scheduled Posts</li>
+            <li>Full Media Asset Library</li>
+        `;
+    } else if (tier === 'enterprise') {
+        titleEl.textContent = "Enterprise Tier Benefits";
+        featEl.innerHTML = `
+            <li>Unlimited Brand Workspaces</li>
+            <li>500 Concurrent Marketing Campaigns</li>
+            <li>2,000,000 AI Content &amp; Strategy Tokens / Month</li>
+            <li>Unlimited Scheduled Posts &amp; Fast Worker Queue</li>
+            <li>Role-Based Access Control &amp; Team Management</li>
+        `;
+    }
+}
+
+async function confirmSubscriptionUpgrade() {
+    const plan = document.getElementById('upgrade-tier-select')?.value;
+    const cycle = document.getElementById('upgrade-billing-cycle')?.value || 'monthly';
+    if (!plan) return;
+
+    try {
+        const res = await authFetch('/api/saas/subscription/upgrade', {
+            method: 'POST',
+            body: JSON.stringify({ plan_id: plan, billing_cycle: cycle })
+        });
+
+        if (res.ok) {
+            closeSubscriptionUpgradeModal();
+            showToast(`Subscription upgraded to ${plan.toUpperCase()}!`, "success");
+            renderSettings(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Upgrade failed", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
 }

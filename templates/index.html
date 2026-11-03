@@ -56,29 +56,19 @@
             </div>
 
             <nav class="nav-menu">
-                <div class="nav-section-title">Overview</div>
+                <div class="nav-section-title">Core Platform</div>
                 <button class="nav-item active" data-tab="dashboard">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-chart-pie"></i>
                         <span>Dashboard</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="accounts">
+                <button class="nav-item" data-tab="brands">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-share-nodes"></i>
-                        <span>Social Accounts</span>
+                        <i class="fa-solid fa-building-flag" style="color: #6366f1;"></i>
+                        <span>Brand Workspaces</span>
                     </div>
-                    <span class="nav-badge" id="nav-accounts-count">4 Assets</span>
                 </button>
-                <button class="nav-item" data-tab="composer">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-pen-to-square"></i>
-                        <span>Create Post</span>
-                    </div>
-                    <span class="nav-badge" style="background: var(--primary-glow); color: #a5b4fc;">Live</span>
-                </button>
-
-                <div class="nav-section-title">Publishing & Workflow</div>
                 <button class="nav-item" data-tab="studio">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-wand-magic-sparkles" style="color: #c084fc;"></i>
@@ -86,11 +76,32 @@
                     </div>
                     <span class="nav-badge" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">AI</span>
                 </button>
+                <button class="nav-item" data-tab="campaigns">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-bullhorn" style="color: #f59e0b;"></i>
+                        <span>Campaigns</span>
+                    </div>
+                </button>
                 <button class="nav-item" data-tab="calendar">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-calendar-days" style="color: #60a5fa;"></i>
-                        <span>Calendar</span>
+                        <span>Content Calendar</span>
                     </div>
+                </button>
+                <button class="nav-item" data-tab="media">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-photo-film" style="color: #ec4899;"></i>
+                        <span>Media Library</span>
+                    </div>
+                </button>
+
+                <div class="nav-section-title">Publishing & Workflow</div>
+                <button class="nav-item" data-tab="composer">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-pen-to-square"></i>
+                        <span>Create Post</span>
+                    </div>
+                    <span class="nav-badge" style="background: var(--primary-glow); color: #a5b4fc;">Live</span>
                 </button>
                 <button class="nav-item" data-tab="approvals">
                     <div class="nav-item-content">
@@ -103,6 +114,33 @@
                     <div class="nav-item-content">
                         <i class="fa-solid fa-list-check" style="color: #34d399;"></i>
                         <span>Publishing Queue</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="history">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-clock-rotate-left" style="color: #94a3b8;"></i>
+                        <span>Publishing History</span>
+                    </div>
+                </button>
+
+                <div class="nav-section-title">Intelligence & SaaS</div>
+                <button class="nav-item" data-tab="analytics">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-chart-line" style="color: #10b981;"></i>
+                        <span>Analytics</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="accounts">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-share-nodes"></i>
+                        <span>Social Accounts</span>
+                    </div>
+                    <span class="nav-badge" id="nav-accounts-count">4 Assets</span>
+                </button>
+                <button class="nav-item" data-tab="settings">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-gear" style="color: #64748b;"></i>
+                        <span>Organization Settings</span>
                     </div>
                 </button>
 
@@ -798,6 +836,223 @@
                 <button type="button" class="btn btn-secondary" onclick="closeCampaignStrategyModal()">Close</button>
                 <button type="button" id="save-strategy-btn" class="btn btn-primary" onclick="saveStrategyFromModal()" style="display: none;">
                     <i class="fa-solid fa-check"></i> Save Customized Strategy
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         Content Planner Modal (Unit E / L)
+         ========================================================================== -->
+    <div id="content-planner-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="content-planner-modal-title">
+        <div class="modal-content" style="max-width: 840px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="content-planner-modal-title"><i class="fa-solid fa-calendar-check" style="color: #6366f1;"></i> Intelligent Content Planner</h3>
+                    <p class="card-subtitle">Generate brand-aligned weekly or monthly content calendars and convert to drafts</p>
+                </div>
+                <button class="close-btn" onclick="closeContentPlannerModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <input type="hidden" id="planner-campaign-id">
+
+                <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                    <div class="form-group">
+                        <label for="planner-horizon-select" class="form-label">Planning Horizon</label>
+                        <select id="planner-horizon-select" class="form-control">
+                            <option value="weekly">7-Day Sprint (Weekly)</option>
+                            <option value="monthly">30-Day Content Roadmap (Monthly)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="planner-provider-select" class="form-label">AI Engine</label>
+                        <select id="planner-provider-select" class="form-control">
+                            <option value="mock">Offline Mock (Fast / Zero-Cost)</option>
+                            <option value="openai">OpenAI (GPT-4o Mini)</option>
+                            <option value="groq">Groq (Llama 3.3)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="planner-start-date" class="form-label">Start Date</label>
+                        <input type="date" id="planner-start-date" class="form-control">
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 1rem;">
+                    <label for="planner-focus-theme" class="form-label">Key Themes &amp; Campaign Angles (Optional)</label>
+                    <input type="text" id="planner-focus-theme" class="form-control" placeholder="e.g. Focus on product launch, customer proof points, seasonal discounts...">
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-bottom: 1.25rem;">
+                    <button type="button" id="btn-generate-plan" class="btn btn-primary" onclick="generateContentPlanFromModal()">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate AI Content Plan
+                    </button>
+                </div>
+
+                <div id="planner-loading-state" style="display: none; padding: 2rem; text-align: center;">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+                    <p style="margin-top: 1rem; color: var(--text-muted);">Generating multi-platform content roadmap...</p>
+                </div>
+
+                <!-- Generated Plan Display -->
+                <div id="planner-plan-container" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border);">
+                        <div>
+                            <span id="planner-plan-title" style="font-weight: 700; font-size: 1rem;"></span>
+                            <span id="planner-plan-status" class="badge badge-info" style="margin-left: 0.5rem;">Draft Plan</span>
+                        </div>
+                        <button type="button" id="btn-convert-plan-drafts" class="btn btn-success btn-sm" onclick="convertActivePlanToDrafts()">
+                            <i class="fa-solid fa-file-import"></i> Convert All to Content Drafts
+                        </button>
+                    </div>
+                    <div id="planner-entries-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                        <!-- Entries populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeContentPlannerModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         Schedule Content Draft Modal (Unit H / L)
+         ========================================================================== -->
+    <div id="schedule-draft-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="schedule-draft-modal-title">
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="schedule-draft-modal-title"><i class="fa-solid fa-calendar-plus" style="color: var(--primary);"></i> Schedule Content Draft</h3>
+                    <p class="card-subtitle">Bridge verified draft into publishing queue</p>
+                </div>
+                <button class="close-btn" onclick="closeScheduleDraftModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="sched-draft-id">
+
+                <div class="form-group">
+                    <label for="sched-draft-channel" class="form-label">Destination Channel *</label>
+                    <select id="sched-draft-channel" class="form-control">
+                        <option value="tour">Nexora Suite (Tour &amp; Travel)</option>
+                        <option value="nz">Phoenix International (Visa &amp; Immigration)</option>
+                        <option value="gaatha">Gaatha AI (Cultural Narratives)</option>
+                        <option value="insta">Instagram Sync (Dual Engine)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="sched-draft-datetime" class="form-label">Publish Date &amp; Time (Local) *</label>
+                    <input type="datetime-local" id="sched-draft-datetime" class="form-control" required>
+                    <div class="form-hint" style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.25rem;">Must be scheduled in the future.</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="sched-draft-media" class="form-label">Attached Media Asset (Optional)</label>
+                    <select id="sched-draft-media" class="form-control">
+                        <option value="">No media attached (Text only)</option>
+                        <!-- Populated dynamically from organization media -->
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeScheduleDraftModal()">Cancel</button>
+                <button type="button" id="confirm-schedule-draft-btn" class="btn btn-primary" onclick="confirmScheduleDraft()">
+                    <i class="fa-solid fa-calendar-check"></i> Schedule Post
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         Team Member Invite Modal (Unit J / L)
+         ========================================================================== -->
+    <div id="org-member-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="org-member-modal-title">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="org-member-modal-title"><i class="fa-solid fa-user-plus" style="color: var(--primary);"></i> Add Organization Member</h3>
+                    <p class="card-subtitle">Grant role-based access to your workspace</p>
+                </div>
+                <button class="close-btn" onclick="closeOrgMemberModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="member-username-input" class="form-label">Username *</label>
+                    <input type="text" id="member-username-input" class="form-control" placeholder="e.g. janesmith" required>
+                </div>
+                <div class="form-group">
+                    <label for="member-email-input" class="form-label">Email Address *</label>
+                    <input type="email" id="member-email-input" class="form-control" placeholder="e.g. jane@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="member-password-input" class="form-label">Initial Password *</label>
+                    <input type="password" id="member-password-input" class="form-control" placeholder="Temporary password" required>
+                </div>
+                <div class="form-group">
+                    <label for="member-role-select" class="form-label">Role</label>
+                    <select id="member-role-select" class="form-control">
+                        <option value="contributor">Contributor (Create &amp; edit drafts)</option>
+                        <option value="viewer">Viewer (Read-only access)</option>
+                        <option value="admin">Admin (Manage campaigns, approvals, team)</option>
+                        <option value="owner">Owner (Full administrative authority)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeOrgMemberModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmAddOrgMember()">
+                    <i class="fa-solid fa-plus"></i> Add Member
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         Subscription Upgrade Modal (Unit K / L)
+         ========================================================================== -->
+    <div id="subscription-upgrade-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="subscription-upgrade-modal-title">
+        <div class="modal-content" style="max-width: 580px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="subscription-upgrade-modal-title"><i class="fa-solid fa-crown" style="color: #f59e0b;"></i> Upgrade SaaS Subscription</h3>
+                    <p class="card-subtitle">Scale your brand capacity, campaigns, and monthly AI generation quotas</p>
+                </div>
+                <button class="close-btn" onclick="closeSubscriptionUpgradeModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="upgrade-tier-select" class="form-label">Select Target Plan</label>
+                    <select id="upgrade-tier-select" class="form-control" onchange="handleUpgradeTierChange(this.value)">
+                        <option value="starter">Starter — 1 Brand · 10 Campaigns · 50k Tokens/mo</option>
+                        <option value="growth" selected>Growth — 5 Brands · 50 Campaigns · 250k Tokens/mo</option>
+                        <option value="enterprise">Enterprise — Unlimited Brands · 500 Campaigns · 2M Tokens/mo</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="upgrade-billing-cycle" class="form-label">Billing Cadence</label>
+                    <select id="upgrade-billing-cycle" class="form-control">
+                        <option value="monthly">Monthly Billing</option>
+                        <option value="annual">Annual Billing (20% Discount)</option>
+                    </select>
+                </div>
+
+                <div id="tier-summary-card" style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; margin-top: 1rem;">
+                    <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.5rem;" id="tier-summary-title">Growth Tier Benefits</div>
+                    <ul style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; padding-left: 1.25rem; margin-bottom: 0;" id="tier-summary-features">
+                        <li>5 Brand Workspaces</li>
+                        <li>50 Concurrent Marketing Campaigns</li>
+                        <li>250,000 AI Content &amp; Strategy Tokens / Month</li>
+                        <li>Unlimited Scheduled Posts</li>
+                        <li>Full Media Asset Library</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeSubscriptionUpgradeModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="confirmSubscriptionUpgrade()">
+                    <i class="fa-solid fa-arrow-up-right-dots"></i> Confirm Upgrade
                 </button>
             </div>
         </div>
