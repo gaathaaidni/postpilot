@@ -258,6 +258,7 @@ def _ensure_indexes(conn):
         ("idx_drafts_org_brand", "CREATE INDEX IF NOT EXISTS idx_drafts_org_brand ON content_drafts(organization_id, brand_id, status)"),
         ("idx_cdr_draft_rev", "CREATE INDEX IF NOT EXISTS idx_cdr_draft_rev ON content_draft_revisions(organization_id, draft_id, revision_number)"),
         ("idx_cdr_campaign", "CREATE INDEX IF NOT EXISTS idx_cdr_campaign ON content_draft_revisions(organization_id, campaign_id)"),
+        ("idx_campaign_strategies_camp", "CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_strategies_camp ON campaign_strategies(organization_id, campaign_id)"),
     ]
     for name, sql in indexes:
         try:
@@ -498,6 +499,33 @@ def init_db():
                 change_summary TEXT,
                 edited_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 13. Campaign strategies table (brand-aware comprehensive strategy)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS campaign_strategies (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL,
+                positioning TEXT,
+                primary_objective TEXT,
+                target_segments TEXT,
+                pain_points TEXT,
+                value_proposition TEXT,
+                core_message TEXT,
+                supporting_messages TEXT,
+                content_themes TEXT,
+                recommended_channels TEXT,
+                calls_to_action TEXT,
+                suggested_phases TEXT,
+                posting_frequency TEXT,
+                success_metrics TEXT,
+                risks_and_verification TEXT,
+                raw_response TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -2079,11 +2107,76 @@ def delete_campaign(campaign_id, organization_id=1):
     validate_campaign_ownership(campaign_id, organization_id)
     c_id = int(campaign_id)
     with get_db_connection() as conn:
+        conn.execute("DELETE FROM campaign_strategies WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         conn.execute("DELETE FROM content_draft_revisions WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         conn.execute("DELETE FROM content_drafts WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         res = conn.execute("DELETE FROM campaigns WHERE id = ? AND organization_id = ?", (c_id, organization_id))
         conn.commit()
         return res.rowcount > 0
+
+STRATEGY_FIELDS = [
+    'positioning', 'primary_objective', 'target_segments', 'pain_points',
+    'value_proposition', 'core_message', 'supporting_messages', 'content_themes',
+    'recommended_channels', 'calls_to_action', 'suggested_phases',
+    'posting_frequency', 'success_metrics', 'risks_and_verification', 'raw_response'
+]
+
+def save_campaign_strategy(organization_id, brand_id, campaign_id, strategy_data):
+    """
+    Saves or updates a campaign strategy within the active organization.
+    strategy_data is a dict containing the strategy sections.
+    """
+    validate_campaign_ownership(campaign_id, organization_id)
+    c_id = int(campaign_id)
+    b_id = int(brand_id)
+    org_id = int(organization_id)
+
+    vals = {}
+    for f in STRATEGY_FIELDS:
+        v = strategy_data.get(f)
+        if isinstance(v, (dict, list)):
+            vals[f] = json.dumps(v)
+        elif v is not None:
+            vals[f] = str(v).strip()
+        else:
+            vals[f] = None
+
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM campaign_strategies WHERE campaign_id = ? AND organization_id = ?",
+            (c_id, org_id)
+        ).fetchone()
+
+        if existing:
+            set_clauses = [f"{f} = ?" for f in STRATEGY_FIELDS]
+            set_clauses.append("brand_id = ?")
+            set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+            sql = f"UPDATE campaign_strategies SET {', '.join(set_clauses)} WHERE id = ? AND organization_id = ?"
+            params = [vals[f] for f in STRATEGY_FIELDS] + [b_id, existing['id'], org_id]
+            conn.execute(sql, tuple(params))
+            strat_id = existing['id']
+        else:
+            col_names = ['organization_id', 'brand_id', 'campaign_id'] + STRATEGY_FIELDS
+            placeholders = ', '.join(['?'] * len(col_names))
+            sql = f"INSERT INTO campaign_strategies ({', '.join(col_names)}) VALUES ({placeholders})"
+            params = [org_id, b_id, c_id] + [vals[f] for f in STRATEGY_FIELDS]
+            cur = conn.execute(sql, tuple(params))
+            strat_id = cur.lastrowid
+        conn.commit()
+
+        row = conn.execute("SELECT * FROM campaign_strategies WHERE id = ?", (strat_id,)).fetchone()
+        return dict(row) if row else None
+
+def get_campaign_strategy(campaign_id, organization_id=1):
+    """Retrieves a campaign strategy scoped to organization."""
+    validate_campaign_ownership(campaign_id, organization_id)
+    c_id = int(campaign_id)
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM campaign_strategies WHERE campaign_id = ? AND organization_id = ?",
+            (c_id, int(organization_id))
+        ).fetchone()
+        return dict(row) if row else None
 
 VALID_DRAFT_PLATFORMS = frozenset({'facebook', 'instagram', 'linkedin', 'x', 'whatsapp'})
 

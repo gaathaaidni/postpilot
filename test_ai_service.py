@@ -18,6 +18,7 @@ from ai_service import (
     build_marketing_prompts,
     parse_ai_json_response,
     generate_campaign_content,
+    generate_campaign_strategy,
     MockAIProvider,
     OpenAICompatibleProvider,
     GroqProvider,
@@ -260,6 +261,24 @@ class TestAIService(unittest.TestCase):
             import config
             _, kwargs = mock_gen.call_args
             self.assertEqual(kwargs['max_tokens'], getattr(config, 'AI_MAX_OUTPUT_TOKENS', 1500))
+
+    def test_campaign_strategy_generation(self):
+        provider = MockAIProvider()
+        strat = generate_campaign_strategy(
+            provider=provider,
+            brand_info=self.brand_info,
+            campaign_info=self.campaign_info
+        )
+        required_keys = [
+            'positioning', 'primary_objective', 'target_segments', 'pain_points',
+            'value_proposition', 'core_message', 'supporting_messages', 'content_themes',
+            'recommended_channels', 'calls_to_action', 'suggested_phases',
+            'posting_frequency', 'success_metrics', 'risks_and_verification'
+        ]
+        for k in required_keys:
+            self.assertIn(k, strat)
+            self.assertTrue(len(strat[k]) > 0)
+        self.assertIn(self.brand_info['name'], strat['positioning'])
 
 if __name__ == "__main__":
     unittest.main()

@@ -826,5 +826,78 @@ class TestCampaignAPI(unittest.TestCase):
         self.assertEqual(rev['caption'], 'Legacy draft with no revision record')
         self.assertEqual(rev['change_source'], 'manual_creation')
 
+    def test_campaign_strategy_lifecycle_and_tenant_isolation(self):
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Create a campaign in Org 1
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10,
+            'name': 'Strategy Test Campaign',
+            'objective': 'Expand market share by 30%',
+            'brief': 'Launch high-impact brand campaign for enterprise solutions.'
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 201)
+        camp_id = res.get_json()['id']
+
+        # 2. GET strategy before generation -> 404
+        res = self.client.get(f'/api/campaigns/{camp_id}/strategy', headers=headers_org1)
+        self.assertEqual(res.status_code, 404)
+
+        # 3. Generate strategy -> 200
+        res = self.client.post(f'/api/campaigns/{camp_id}/strategy', json={
+            'provider': 'mock'
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data['success'])
+        strat = data['strategy']
+        self.assertEqual(strat['campaign_id'], camp_id)
+        self.assertEqual(strat['organization_id'], 1)
+
+        # Verify all 14 core sections exist
+        required_sections = [
+            'positioning', 'primary_objective', 'target_segments', 'pain_points',
+            'value_proposition', 'core_message', 'supporting_messages', 'content_themes',
+            'recommended_channels', 'calls_to_action', 'suggested_phases',
+            'posting_frequency', 'success_metrics', 'risks_and_verification'
+        ]
+        for sec in required_sections:
+            self.assertIn(sec, strat)
+            self.assertTrue(len(strat[sec]) > 0)
+
+        # 4. GET strategy returns the generated strategy
+        res = self.client.get(f'/api/campaigns/{camp_id}/strategy', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['core_message'], strat['core_message'])
+
+        # 5. PUT strategy updates section manually
+        res = self.client.put(f'/api/campaigns/{camp_id}/strategy', json={
+            'core_message': 'Customized core narrative arc',
+            'primary_objective': 'Customized KPI target: 50% ARR growth'
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        updated_strat = res.get_json()['strategy']
+        self.assertEqual(updated_strat['core_message'], 'Customized core narrative arc')
+        self.assertEqual(updated_strat['primary_objective'], 'Customized KPI target: 50% ARR growth')
+
+        # 6. Tenant isolation: Org 2 cannot GET, POST, or PUT strategy for Org 1's campaign
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res = self.client.get(f'/api/campaigns/{camp_id}/strategy', headers=headers_org2)
+        self.assertEqual(res.status_code, 404)
+
+        res = self.client.post(f'/api/campaigns/{camp_id}/strategy', json={'provider': 'mock'}, headers=headers_org2)
+        self.assertEqual(res.status_code, 404)
+
+        res = self.client.put(f'/api/campaigns/{camp_id}/strategy', json={'core_message': 'Hacked'}, headers=headers_org2)
+        self.assertEqual(res.status_code, 404)
+
+        # 7. Delete campaign cascades and cleans up strategy
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+        res = self.client.delete(f'/api/campaigns/{camp_id}', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+
+        res = self.client.get(f'/api/campaigns/{camp_id}/strategy', headers=headers_org1)
+        self.assertEqual(res.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

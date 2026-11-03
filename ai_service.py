@@ -262,6 +262,130 @@ def parse_ai_json_response(raw_text, fallback_platform="facebook", strict=False)
         "call_to_action": "Learn More"
     }
 
+def build_strategy_prompts(brand_info, campaign_info):
+    """
+    Constructs high-fidelity system and user prompts for brand-aware campaign strategy generation.
+    Strictly enforces factual guardrails and structured 14-section JSON format.
+    """
+    brand_name = brand_info.get('name', 'Brand')
+    positioning = brand_info.get('positioning', '')
+    voice_and_tone = brand_info.get('voice_and_tone', 'Professional, authoritative, customer-focused')
+    approved_facts = brand_info.get('approved_product_facts', '')
+    prohibited_claims = brand_info.get('prohibited_claims', '')
+    messaging_guidelines = brand_info.get('messaging_guidelines', '')
+
+    camp_name = campaign_info.get('name', 'Campaign')
+    camp_obj = campaign_info.get('objective', '')
+    camp_brief = campaign_info.get('brief', '')
+    camp_audience = campaign_info.get('target_audience', 'General Target Market')
+    camp_markets = campaign_info.get('target_markets', 'Global')
+    camp_budget = campaign_info.get('budget', 'Not specified')
+
+    system_prompt = (
+        f"You are the Chief Brand Marketing Strategist for '{brand_name}'.\n"
+        f"Brand Positioning: {positioning}\n"
+        f"Voice & Tone: {voice_and_tone}\n"
+        f"{f'Messaging Guidelines: {messaging_guidelines}' if messaging_guidelines else ''}\n\n"
+        "FACTUAL GUARDRAILS & TRUTHFULNESS (MANDATORY):\n"
+        "- Never invent product capabilities, certifications, partners, client numbers, awards, or legal approvals.\n"
+        f"- Approved Product Facts: {approved_facts if approved_facts else 'Rely strictly on facts provided in the campaign brief.'}\n"
+        f"- Prohibited Claims: {prohibited_claims if prohibited_claims else 'Do not make unverified claims or false promises.'}\n"
+        "- Ground every strategic pillar strictly in the brand's verified facts.\n"
+        "- Highlight any assumptions that need verification in the 'risks_and_verification' section.\n\n"
+        "RESPONSE FORMAT:\n"
+        "You must return ONLY a valid JSON object with the following exact 14 keys:\n"
+        "{\n"
+        '  "positioning": "Executive positioning of the campaign within the brand portfolio",\n'
+        '  "primary_objective": "Primary marketing objective and quantifiable KPIs",\n'
+        '  "target_segments": "2-3 distinct audience segments with pain points and motivations",\n'
+        '  "pain_points": "Core customer pain points addressed by this campaign",\n'
+        '  "value_proposition": "Clear, compelling value proposition and key differentiators",\n'
+        '  "core_message": "Narrative arc and central campaign message",\n'
+        '  "supporting_messages": "3-4 supporting message pillars",\n'
+        '  "content_themes": "Content themes and angles (e.g. Educational, Proof/Case study, Behind-the-scenes)",\n'
+        '  "recommended_channels": "Channel distribution strategy and rationale across Facebook, Instagram, LinkedIn, X",\n'
+        '  "calls_to_action": "Primary, secondary, and soft calls to action",\n'
+        '  "suggested_phases": "Phased execution roadmap: Teaser, Launch, Sustain, Convert",\n'
+        '  "posting_frequency": "Recommended posting cadence and best formats per channel",\n'
+        '  "success_metrics": "Milestone targets and success metrics",\n'
+        '  "risks_and_verification": "Content guardrails, prohibited claims enforcement, and unverified assumptions to confirm"\n'
+        "}\n"
+        "Do not include markdown code fence formatting (```json) outside the JSON output."
+    )
+
+    user_prompt = (
+        f"Develop a complete, brand-aware marketing strategy for the following campaign:\n\n"
+        f"Campaign: {camp_name}\n"
+        f"Objective: {camp_obj}\n"
+        f"Target Audience: {camp_audience}\n"
+        f"Target Markets / Geography: {camp_markets}\n"
+        f"Budget Allocation: {camp_budget}\n\n"
+        f"Campaign Brief:\n{camp_brief}\n\n"
+        "Produce the 14-section strategy JSON object now:"
+    )
+
+    return system_prompt, user_prompt
+
+def parse_strategy_json_response(raw_text, strict=False):
+    """
+    Parses JSON containing the 14 campaign strategy sections from AI response.
+    Returns a dict with all 14 strategy keys.
+    """
+    if not raw_text or not raw_text.strip():
+        raise AIResponseValidationError("Empty strategy response received from AI provider.")
+
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```(?:json)?\s*", "", clean)
+        clean = re.sub(r"\s*```$", "", clean)
+        clean = clean.strip()
+
+    data = None
+    try:
+        data = json.loads(clean)
+    except Exception:
+        match = re.search(r"\{[\s\S]*\}", clean)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                pass
+
+    if not isinstance(data, dict):
+        if strict:
+            raise AIResponseValidationError("Could not parse valid JSON dictionary from strategy response.")
+        data = {
+            "positioning": clean[:500],
+            "primary_objective": "Drive brand awareness and engagement",
+            "target_segments": "Primary audience segment based on campaign brief",
+            "pain_points": "Key customer pain points identified in brief",
+            "value_proposition": "Unique brand value proposition",
+            "core_message": "Central campaign narrative",
+            "supporting_messages": "Supporting brand messaging pillars",
+            "content_themes": "Educational, Product Focus, Case Studies",
+            "recommended_channels": "Facebook, Instagram, LinkedIn, X",
+            "calls_to_action": "Learn More, Sign Up, Contact Us",
+            "suggested_phases": "Phase 1: Awareness, Phase 2: Engagement, Phase 3: Conversion",
+            "posting_frequency": "3-4 posts per week across primary platforms",
+            "success_metrics": "Impressions, CTR, Engagement rate, Conversions",
+            "risks_and_verification": "Ensure all product claims match approved facts."
+        }
+
+    keys = [
+        'positioning', 'primary_objective', 'target_segments', 'pain_points',
+        'value_proposition', 'core_message', 'supporting_messages', 'content_themes',
+        'recommended_channels', 'calls_to_action', 'suggested_phases',
+        'posting_frequency', 'success_metrics', 'risks_and_verification'
+    ]
+    res = {}
+    for k in keys:
+        val = data.get(k) or data.get(k.replace('_', ' ')) or ""
+        if isinstance(val, (dict, list)):
+            res[k] = json.dumps(val)
+        else:
+            res[k] = str(val).strip()
+    return res
+
 # --- Base AI Provider ---
 
 class BaseAIProvider(ABC):
@@ -397,6 +521,43 @@ class MockAIProvider(BaseAIProvider):
             raw_response=raw_json,
             metadata={"mock": True, "generated_chars": len(caption)}
         )
+
+    def generate_strategy(self, brand_info, campaign_info, model=None, temperature=0.7, max_tokens=2500) -> dict:
+        if self.simulate_rate_limit or self.simulated_error == "rate_limit":
+            raise AIRateLimitError("Simulated provider rate limit exceeded (HTTP 429).", provider="mock", status_code=429)
+        if self.simulate_timeout or self.simulated_error == "timeout":
+            raise AITimeoutError("Simulated request timed out after 30s.", provider="mock")
+        if self.simulate_invalid_json or self.simulated_error == "invalid_json":
+            raise AIResponseValidationError("Simulated invalid JSON from model.", provider="mock")
+        if self.simulated_error:
+            err = self.simulated_error
+            if err == "config":
+                raise AIConfigurationError("Simulated AI provider API key is missing or invalid.", provider="mock")
+            else:
+                raise AIProviderError(f"Simulated AI provider error: {err}", provider="mock")
+
+        brand_name = brand_info.get('name', 'GAATHA')
+        camp_name = campaign_info.get('name', 'Campaign')
+        camp_obj = campaign_info.get('objective', 'Market Expansion')
+        camp_brief = campaign_info.get('brief', 'Deliver high-impact digital value.')
+        camp_aud = campaign_info.get('target_audience', 'Enterprise & Professional Leaders')
+
+        return {
+            "positioning": f"Positions {brand_name} as the verified market leader in reliable, high-performance solutions via '{camp_name}'.",
+            "primary_objective": f"Achieve '{camp_obj}' with measurable 25% lift in qualified pipeline and multi-channel brand recall.",
+            "target_segments": f"1. Decision Makers ({camp_aud}): Seeking operational reliability and proven ROI.\n2. Operators & Teams: Focused on seamless workflows and practical efficiency.\n3. Industry Innovators: Looking for modern technological advantage.",
+            "pain_points": "Fragmented tools, unpredictable delivery, lack of verifiable data, and high friction in team execution.",
+            "value_proposition": f"{brand_name} delivers robust, end-to-end execution with verifiable performance and dependable customer outcomes.",
+            "core_message": f"Empower your organization with {brand_name}: where precision engineering meets reliable execution.",
+            "supporting_messages": "1. Verifiable reliability and transparent architecture.\n2. Built for scale from single operators to global teams.\n3. Frictionless adoption with immediate time-to-value.",
+            "content_themes": "1. Educational & Thought Leadership: Industry deep-dives.\n2. Proof & Validation: Demonstrable workflows and real use cases.\n3. Product Spotlight: Feature capabilities grounded strictly in approved facts.\n4. Behind the Scenes: Engineering excellence and team ethos.",
+            "recommended_channels": "LinkedIn (B2B executive perspective and case studies), Instagram (visual architecture and culture), X (real-time announcements and technical discussions), Facebook (community and long-form updates).",
+            "calls_to_action": "Primary: Request an executive briefing. Secondary: Explore the interactive demo. Soft: Join our technical community.",
+            "suggested_phases": "Phase 1 (Teaser, Week 1): Reveal industry challenges and teaser insights.\nPhase 2 (Launch, Weeks 2-3): Announce core campaign message with feature spotlights.\nPhase 3 (Sustain, Weeks 4-6): Release customer proof points and educational deep-dives.\nPhase 4 (Convert, Weeks 7-8): Targeted CTA drive for qualified consultations.",
+            "posting_frequency": "LinkedIn: 3x/week; Instagram: 4x/week (carousels & reels); X: 5x/week (threads & updates); Facebook: 2x/week.",
+            "success_metrics": "Impressions (50k+), Engagement rate (>3.5%), Demo requests (+40%), Marketing qualified leads (+25%).",
+            "risks_and_verification": "Strictly enforce prohibited claims: do not cite unverified client numbers or unapproved certifications. All technical statements must align with official documentation."
+        }
 
 # --- OpenAI-Compatible Provider (Groq, OpenAI, Together, DeepSeek, Local Ollama) ---
 
@@ -539,6 +700,52 @@ class OpenAICompatibleProvider(BaseAIProvider):
             }
         )
 
+    def generate_strategy(self, brand_info, campaign_info, model=None, temperature=0.7, max_tokens=2500) -> dict:
+        system_prompt, user_prompt = build_strategy_prompts(brand_info, campaign_info)
+        used_model = model or self.default_model
+
+        if not self.base_url:
+            raise AIConfigurationError(f"AI Provider '{self.provider_name}' is missing a configured base_url.", provider=self.provider_name)
+        if not self.api_key:
+            raise AIConfigurationError(f"AI Provider '{self.provider_name}' requires an API key.", provider=self.provider_name)
+
+        endpoint = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": used_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens)
+        }
+        try:
+            resp = requests.post(endpoint, json=payload, headers=headers, timeout=self.timeout)
+        except requests.exceptions.Timeout as e:
+            raise AITimeoutError(f"AI Provider '{self.provider_name}' timed out after {self.timeout}s: {self._sanitize_error(e)}", provider=self.provider_name, model=used_model)
+        except requests.exceptions.RequestException as e:
+            raise AIProviderError(f"AI Provider '{self.provider_name}' network error: {self._sanitize_error(e)}", provider=self.provider_name, model=used_model)
+
+        if resp.status_code == 429:
+            raise AIRateLimitError("AI Provider rate limit reached.", provider=self.provider_name, model=used_model, status_code=429)
+        elif resp.status_code in (401, 403):
+            raise AIConfigurationError("AI Provider authentication failed.", provider=self.provider_name, model=used_model, status_code=resp.status_code)
+        elif resp.status_code != 200:
+            raise AIProviderError(f"AI Provider returned HTTP {resp.status_code}: {self._sanitize_error(resp.text)}", provider=self.provider_name, model=used_model, status_code=resp.status_code)
+
+        try:
+            content = resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            raise AIResponseValidationError(f"Failed to parse choices from response: {self._sanitize_error(e)}", provider=self.provider_name, model=used_model)
+
+        parsed = parse_strategy_json_response(content)
+        parsed["raw_response"] = content
+        return parsed
+
 # --- Pre-Configured Provider Classes ---
 
 class GroqProvider(OpenAICompatibleProvider):
@@ -633,3 +840,19 @@ def get_ai_provider(provider_name=None, model=None, api_key=None, base_url=None)
             api_key=api_key or config.AI_API_KEY,
             default_model=model or config.AI_MODEL
         )
+
+def generate_campaign_strategy(provider, brand_info, campaign_info, model=None, temperature=0.7):
+    """
+    Orchestrates brand-aware campaign strategy generation.
+    Returns a dict containing the 14 strategy sections and raw response.
+    """
+    if hasattr(provider, 'generate_strategy'):
+        res = provider.generate_strategy(brand_info, campaign_info, model=model, temperature=temperature)
+    else:
+        system_prompt, user_prompt = build_strategy_prompts(brand_info, campaign_info)
+        gen_res = provider.generate(system_prompt, user_prompt, model=model, temperature=temperature, max_tokens=2500)
+        res = parse_strategy_json_response(gen_res.raw_response or gen_res.caption)
+
+    if 'raw_response' not in res:
+        res['raw_response'] = json.dumps(res)
+    return res

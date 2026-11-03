@@ -3365,11 +3365,14 @@ function renderAIStudioDOM(container) {
                     </div>
                 </div>
 
-                <div class="studio-meta-chips">
+                <div class="studio-meta-chips" style="display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
                     <span class="studio-chip"><i class="fa-solid fa-bullseye" style="color: #6366f1;"></i> Objective: <strong>${escapeHtml(activeCampaign.objective)}</strong></span>
                     ${activeCampaign.target_audience ? `<span class="studio-chip"><i class="fa-solid fa-users" style="color: #06b6d4;"></i> Audience: ${escapeHtml(activeCampaign.target_audience)}</span>` : ''}
                     ${activeCampaign.target_markets ? `<span class="studio-chip"><i class="fa-solid fa-earth-americas" style="color: #10b981;"></i> Markets: ${escapeHtml(activeCampaign.target_markets)}</span>` : ''}
                     <span class="studio-chip"><i class="fa-solid fa-language" style="color: #f59e0b;"></i> Lang: ${escapeHtml(activeCampaign.languages || 'en').toUpperCase()}</span>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openCampaignStrategyModal(${activeCampaign.id})" style="margin-left: auto;" title="View &amp; Generate AI Strategic Blueprint">
+                        <i class="fa-solid fa-chess-knight" style="color: #6366f1;"></i> Strategy Blueprint
+                    </button>
                 </div>
             </div>
 
@@ -3715,6 +3718,136 @@ async function saveCampaignFromModal() {
         } else {
             const err = await res.json();
             showToast(err.error || "Failed to create campaign", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// =============================================================================
+// Campaign Strategy Blueprint Handlers
+// =============================================================================
+const STRATEGY_SECTIONS = [
+    'positioning', 'primary_objective', 'target_segments', 'pain_points',
+    'value_proposition', 'core_message', 'supporting_messages', 'content_themes',
+    'recommended_channels', 'calls_to_action', 'suggested_phases',
+    'posting_frequency', 'success_metrics', 'risks_and_verification'
+];
+
+async function openCampaignStrategyModal(campaignId) {
+    const cid = campaignId || studioSelectedCampaignId;
+    if (!cid) {
+        showToast("Please select a campaign first.", "warning");
+        return;
+    }
+    document.getElementById('strategy-campaign-id').value = cid;
+    const modal = document.getElementById('campaign-strategy-modal');
+    if (modal) modal.classList.add('show');
+
+    document.getElementById('strategy-loading-state').style.display = 'block';
+    document.getElementById('strategy-empty-state').style.display = 'none';
+    document.getElementById('strategy-content-state').style.display = 'none';
+    document.getElementById('save-strategy-btn').style.display = 'none';
+
+    try {
+        const res = await authFetch(`/api/campaigns/${cid}/strategy`);
+        document.getElementById('strategy-loading-state').style.display = 'none';
+        if (res.ok) {
+            const strat = await res.json();
+            renderStrategyDataInModal(strat);
+        } else if (res.status === 404) {
+            document.getElementById('strategy-empty-state').style.display = 'block';
+        } else {
+            showToast("Failed to fetch strategy", "danger");
+            document.getElementById('strategy-empty-state').style.display = 'block';
+        }
+    } catch (e) {
+        document.getElementById('strategy-loading-state').style.display = 'none';
+        document.getElementById('strategy-empty-state').style.display = 'block';
+        showToast(e.message || "Failed to load strategy", "danger");
+    }
+}
+
+function closeCampaignStrategyModal() {
+    const modal = document.getElementById('campaign-strategy-modal');
+    if (modal) modal.classList.remove('show');
+}
+
+function renderStrategyDataInModal(strat) {
+    document.getElementById('strategy-empty-state').style.display = 'none';
+    document.getElementById('strategy-content-state').style.display = 'block';
+    document.getElementById('save-strategy-btn').style.display = 'inline-block';
+
+    const lastUpdated = strat.updated_at || strat.created_at;
+    if (lastUpdated) {
+        document.getElementById('strategy-last-updated').textContent = `Blueprint updated: ${new Date(lastUpdated).toLocaleString()}`;
+    }
+
+    STRATEGY_SECTIONS.forEach(field => {
+        const el = document.getElementById(`strat-${field}`);
+        if (el) {
+            el.value = strat[field] || '';
+        }
+    });
+}
+
+async function generateStrategyFromModal() {
+    const cid = document.getElementById('strategy-campaign-id').value;
+    if (!cid) return;
+
+    document.getElementById('strategy-loading-state').style.display = 'block';
+    document.getElementById('strategy-empty-state').style.display = 'none';
+    document.getElementById('strategy-content-state').style.display = 'none';
+    document.getElementById('save-strategy-btn').style.display = 'none';
+
+    const provider = (document.getElementById('studio-provider-select') || {}).value || 'mock';
+
+    try {
+        const res = await authFetch(`/api/campaigns/${cid}/strategy`, {
+            method: 'POST',
+            body: JSON.stringify({ provider })
+        });
+        document.getElementById('strategy-loading-state').style.display = 'none';
+        if (res.ok) {
+            const data = await res.json();
+            renderStrategyDataInModal(data.strategy);
+            showToast("Strategic blueprint generated successfully!", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Strategy generation failed", "danger");
+            document.getElementById('strategy-empty-state').style.display = 'block';
+        }
+    } catch (e) {
+        document.getElementById('strategy-loading-state').style.display = 'none';
+        document.getElementById('strategy-empty-state').style.display = 'block';
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+async function saveStrategyFromModal() {
+    const cid = document.getElementById('strategy-campaign-id').value;
+    if (!cid) return;
+
+    const payload = {};
+    STRATEGY_SECTIONS.forEach(field => {
+        const el = document.getElementById(`strat-${field}`);
+        if (el) {
+            payload[field] = el.value.trim();
+        }
+    });
+
+    try {
+        const res = await authFetch(`/api/campaigns/${cid}/strategy`, {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            renderStrategyDataInModal(data.strategy);
+            showToast("Strategy updated and saved successfully!", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to update strategy", "danger");
         }
     } catch (e) {
         showToast(e.message || "Network error", "danger");

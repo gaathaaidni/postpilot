@@ -697,6 +697,112 @@
         </div>
     </div>
 
+    <!-- ==========================================================================
+         Campaign Strategy Generator Modal
+         ========================================================================== -->
+    <div id="campaign-strategy-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="campaign-strategy-modal-title">
+        <div class="modal-content" style="max-width: 860px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="campaign-strategy-modal-title"><i class="fa-solid fa-chess-knight" style="color: #6366f1;"></i> Brand Campaign Strategy Roadmap</h3>
+                    <p class="card-subtitle">AI-powered 14-section strategic blueprint strictly grounded in brand facts</p>
+                </div>
+                <button class="close-btn" onclick="closeCampaignStrategyModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1;">
+                <input type="hidden" id="strategy-campaign-id">
+                <div id="strategy-loading-state" style="display: none; padding: 2rem; text-align: center;">
+                    <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+                    <p style="margin-top: 1rem; color: var(--text-muted);">Generating strategic blueprint from brand positioning and campaign brief...</p>
+                </div>
+                <div id="strategy-empty-state" style="text-align: center; padding: 3rem 1rem;">
+                    <i class="fa-solid fa-compass-drafting fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h4 style="margin-top: 1rem;">No Strategy Generated Yet</h4>
+                    <p style="color: var(--text-muted); max-width: 480px; margin: 0.5rem auto 1.5rem auto;">
+                        Generate an AI marketing blueprint with target segments, messaging pillars, channel frequency, and verified guardrails.
+                    </p>
+                    <button type="button" class="btn btn-primary" onclick="generateStrategyFromModal()">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Generate AI Strategy
+                    </button>
+                </div>
+                <div id="strategy-content-state" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color);">
+                        <span id="strategy-last-updated" style="font-size: 0.8rem; color: var(--text-muted);"></span>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="generateStrategyFromModal()">
+                            <i class="fa-solid fa-rotate"></i> Regenerate Blueprint
+                        </button>
+                    </div>
+                    <form id="campaign-strategy-form">
+                        <div class="strategy-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label class="form-label">1. Executive Positioning</label>
+                                <textarea id="strat-positioning" class="form-control" rows="2"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">2. Primary Marketing Objective &amp; KPIs</label>
+                                <textarea id="strat-primary_objective" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">3. Target Audience Segments</label>
+                                <textarea id="strat-target_segments" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">4. Core Pain Points Solved</label>
+                                <textarea id="strat-pain_points" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">5. Value Proposition &amp; Differentiators</label>
+                                <textarea id="strat-value_proposition" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label class="form-label">6. Core Narrative Arc / Campaign Message</label>
+                                <textarea id="strat-core_message" class="form-control" rows="2"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">7. Supporting Message Pillars</label>
+                                <textarea id="strat-supporting_messages" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">8. Content Themes &amp; Angles</label>
+                                <textarea id="strat-content_themes" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">9. Recommended Channel Distribution</label>
+                                <textarea id="strat-recommended_channels" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">10. Calls to Action (Primary, Secondary, Soft)</label>
+                                <textarea id="strat-calls_to_action" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label class="form-label">11. Phased Execution Roadmap</label>
+                                <textarea id="strat-suggested_phases" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">12. Posting Frequency &amp; Formats</label>
+                                <textarea id="strat-posting_frequency" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">13. Success Metrics &amp; Targets</label>
+                                <textarea id="strat-success_metrics" class="form-control" rows="3"></textarea>
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <label class="form-label" style="color: #ef4444;"><i class="fa-solid fa-shield-halved"></i> 14. Content Guardrails &amp; Factual Verification</label>
+                                <textarea id="strat-risks_and_verification" class="form-control" rows="2" style="border-color: rgba(239, 68, 68, 0.4);"></textarea>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeCampaignStrategyModal()">Close</button>
+                <button type="button" id="save-strategy-btn" class="btn btn-primary" onclick="saveStrategyFromModal()" style="display: none;">
+                    <i class="fa-solid fa-check"></i> Save Customized Strategy
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Notifications Root -->
     <div id="toast-container" role="region" aria-live="polite"></div>
 

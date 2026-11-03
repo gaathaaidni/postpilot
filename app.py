@@ -1132,6 +1132,106 @@ def delete_campaign_route(campaign_id):
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 404
 
+@app.route('/api/campaigns/<int:campaign_id>/strategy', methods=['GET'])
+@login_required
+def get_campaign_strategy_route(campaign_id):
+    """Retrieves existing strategy for a campaign."""
+    org_id = session.get('organization_id', 1)
+    try:
+        strat = database.get_campaign_strategy(campaign_id, organization_id=org_id)
+        if not strat:
+            return jsonify({'error': 'Campaign strategy not found'}), 404
+        return jsonify(strat), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+
+@app.route('/api/campaigns/<int:campaign_id>/strategy', methods=['POST'])
+@login_required
+@csrf_protect
+def generate_campaign_strategy_route(campaign_id):
+    """Generates or regenerates an AI marketing strategy for a campaign."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+
+    try:
+        camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+        if not camp:
+            return jsonify({'error': 'Campaign not found'}), 404
+
+        brand = database.get_brand_by_id(camp['brand_id'], organization_id=org_id)
+        if not brand:
+            return jsonify({'error': 'Associated brand not found'}), 404
+
+        profile = database.get_brand_marketing_profile(camp['brand_id'], organization_id=org_id) or {}
+        brand_info = {
+            'name': brand.get('name', 'Brand'),
+            'description': brand.get('description', ''),
+            'positioning': profile.get('positioning') or brand.get('description', ''),
+            'voice_and_tone': profile.get('voice_and_tone', 'Professional, authoritative, customer-focused'),
+            'messaging_guidelines': profile.get('messaging_guidelines', ''),
+            'approved_product_facts': profile.get('approved_product_facts', ''),
+            'prohibited_claims': profile.get('prohibited_claims', ''),
+            'preferred_ctas': profile.get('preferred_ctas', '')
+        }
+
+        provider_name = data.get('provider')
+        model_name = data.get('model')
+        ai_provider = ai_service.get_ai_provider(provider_name=provider_name, model=model_name)
+
+        strategy_dict = ai_service.generate_campaign_strategy(
+            provider=ai_provider,
+            brand_info=brand_info,
+            campaign_info=camp,
+            model=model_name
+        )
+
+        saved = database.save_campaign_strategy(
+            organization_id=org_id,
+            brand_id=camp['brand_id'],
+            campaign_id=campaign_id,
+            strategy_data=strategy_dict
+        )
+        return jsonify({'success': True, 'strategy': saved}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except ai_service.AIConfigurationError as e:
+        return jsonify({'error': str(e)}), 400
+    except ai_service.AIRateLimitError as e:
+        return jsonify({'error': str(e), 'code': 'RATE_LIMIT_EXCEEDED'}), 429
+    except ai_service.AITimeoutError as e:
+        return jsonify({'error': str(e), 'code': 'PROVIDER_TIMEOUT'}), 504
+    except ai_service.AIProviderError as e:
+        return jsonify({'error': str(e), 'code': 'PROVIDER_ERROR'}), 502
+    except Exception as e:
+        logger.error(f"Error generating campaign strategy: {e}")
+        return jsonify({'error': 'Failed to generate campaign strategy'}), 500
+
+@app.route('/api/campaigns/<int:campaign_id>/strategy', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_campaign_strategy_route(campaign_id):
+    """Manually updates or customizes sections of a campaign strategy."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+
+    try:
+        camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+        if not camp:
+            return jsonify({'error': 'Campaign not found'}), 404
+
+        saved = database.save_campaign_strategy(
+            organization_id=org_id,
+            brand_id=camp['brand_id'],
+            campaign_id=campaign_id,
+            strategy_data=data
+        )
+        return jsonify({'success': True, 'strategy': saved}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error updating campaign strategy: {e}")
+        return jsonify({'error': 'Failed to update campaign strategy'}), 500
+
 _RECENT_GENERATION_CACHE = {}  # {key: (timestamp, status_code, response_data)}
 
 def _get_deduplicated_generation(key, window_seconds=15):
