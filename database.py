@@ -47,6 +47,10 @@ def validate_media_reference(filename):
         raise ValueError(f"Unsupported media file extension '{ext}'. Allowed: {', '.join(sorted(SAFE_MEDIA_EXTENSIONS))}")
     return base
 
+class TenantIsolationError(ValueError):
+    """Raised when an operation attempts to access or mutate resources of another tenant/organization."""
+    pass
+
 def validate_brand_ownership(brand_id, organization_id):
     """
     Validates that brand_id exists and belongs to the given organization.
@@ -63,9 +67,9 @@ def validate_brand_ownership(brand_id, organization_id):
             (b_id,)
         ).fetchone()
         if not row:
-            raise ValueError(f"Brand ID {b_id} does not exist.")
+            raise TenantIsolationError(f"Brand ID {b_id} does not exist.")
         if row['organization_id'] != organization_id:
-            raise ValueError(f"Brand ID {b_id} belongs to a different organization and cannot be accessed.")
+            raise TenantIsolationError(f"Brand ID {b_id} belongs to a different organization and cannot be accessed.")
         return True
 
 def validate_post_ownership(post_id, post_type, organization_id):
@@ -1754,9 +1758,9 @@ def validate_campaign_ownership(campaign_id, organization_id=1):
             (c_id,)
         ).fetchone()
         if not row:
-            raise ValueError(f"Campaign #{c_id} does not exist.")
+            raise TenantIsolationError(f"Campaign #{c_id} does not exist.")
         if row['organization_id'] != organization_id:
-            raise ValueError(f"Campaign #{c_id} belongs to a different organization and cannot be accessed.")
+            raise TenantIsolationError(f"Campaign #{c_id} belongs to a different organization and cannot be accessed.")
         return dict(row)
 
 def create_campaign(organization_id, brand_id, name, objective, brief,
@@ -2035,7 +2039,7 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             (d_id, organization_id)
         ).fetchone()
         if not existing:
-            raise ValueError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+            raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
 
         updates = []
         params = []

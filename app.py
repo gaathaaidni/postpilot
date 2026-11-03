@@ -19,6 +19,7 @@ import config
 import database
 import timezone_utils
 import channel_runner
+import ai_service
 import nexora_suite as tour
 import nexora_by_phoenix_international as visa
 import gaatha_loop as gaatha
@@ -939,6 +940,357 @@ def get_brands():
     org_id = session.get('organization_id', 1)
     brands = database.get_brands_by_organization(org_id)
     return jsonify(brands)
+
+@app.route('/api/brands/<int:brand_id>', methods=['GET'])
+@login_required
+def get_brand(brand_id):
+    """Retrieves a single brand workspace scoped to the active organization."""
+    org_id = session.get('organization_id', 1)
+    brand = database.get_brand_by_id(brand_id, organization_id=org_id)
+    if not brand:
+        return jsonify({'error': 'Brand not found'}), 404
+    return jsonify(brand)
+
+@app.route('/api/brands/<int:brand_id>/profile', methods=['GET'])
+@login_required
+def get_brand_profile(brand_id):
+    """Retrieves the AI marketing profile for a brand."""
+    org_id = session.get('organization_id', 1)
+    try:
+        profile = database.get_brand_marketing_profile(brand_id, organization_id=org_id)
+        if not profile:
+            return jsonify({'brand_id': brand_id, 'organization_id': org_id, 'profile': None})
+        return jsonify({'brand_id': brand_id, 'organization_id': org_id, 'profile': profile})
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+
+@app.route('/api/brands/<int:brand_id>/profile', methods=['POST'])
+@login_required
+@csrf_protect
+def save_brand_profile(brand_id):
+    """Creates or updates the brand marketing profile."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = database.upsert_brand_marketing_profile(
+            brand_id=brand_id,
+            organization_id=org_id,
+            positioning=data.get('positioning'),
+            target_audiences=data.get('target_audiences'),
+            target_markets=data.get('target_markets'),
+            languages=data.get('languages'),
+            voice_and_tone=data.get('voice_and_tone'),
+            messaging_guidelines=data.get('messaging_guidelines'),
+            approved_product_facts=data.get('approved_product_facts'),
+            prohibited_claims=data.get('prohibited_claims'),
+            preferred_ctas=data.get('preferred_ctas'),
+            website_and_social_links=data.get('website_and_social_links')
+        )
+        return jsonify({'status': 'saved', 'profile': updated}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error saving brand profile: {e}")
+        return jsonify({'error': 'Failed to save brand marketing profile'}), 500
+
+# --- AI Marketing Studio: Campaigns & Content Generation Endpoints ---
+
+@app.route('/api/campaigns', methods=['GET'])
+@login_required
+def get_campaigns():
+    """Lists campaigns for the active organization with optional filters."""
+    org_id = session.get('organization_id', 1)
+    brand_id = request.args.get('brand_id', type=int)
+    status = request.args.get('status')
+    limit = min(request.args.get('limit', default=100, type=int), 200)
+    offset = max(request.args.get('offset', default=0, type=int), 0)
+    try:
+        campaigns = database.list_campaigns(
+            organization_id=org_id,
+            brand_id=brand_id,
+            status=status,
+            limit=limit,
+            offset=offset
+        )
+        return jsonify(campaigns)
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+
+@app.route('/api/campaigns', methods=['POST'])
+@login_required
+@csrf_protect
+def add_campaign():
+    """Creates a new campaign strictly scoped to organization and brand."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    data = request.get_json(silent=True) or {}
+    
+    brand_id = data.get('brand_id')
+    name = data.get('name')
+    objective = data.get('objective')
+    brief = data.get('brief')
+
+    if not brand_id:
+        return jsonify({'error': 'brand_id is required'}), 400
+    if not name or not str(name).strip():
+        return jsonify({'error': 'Campaign name is required'}), 400
+    if not objective or not str(objective).strip():
+        return jsonify({'error': 'Campaign objective is required'}), 400
+    if not brief or not str(brief).strip():
+        return jsonify({'error': 'Campaign brief is required'}), 400
+
+    try:
+        camp = database.create_campaign(
+            organization_id=org_id,
+            brand_id=brand_id,
+            name=name,
+            objective=objective,
+            brief=brief,
+            campaign_type=data.get('campaign_type', 'social'),
+            target_audience=data.get('target_audience'),
+            target_markets=data.get('target_markets'),
+            languages=data.get('languages'),
+            start_date=data.get('start_date'),
+            end_date=data.get('end_date'),
+            status=data.get('status', 'draft'),
+            budget=data.get('budget'),
+            created_by=user_id
+        )
+        return jsonify(camp), 201
+    except (database.TenantIsolationError, ValueError) as e:
+        status_code = 404 if 'Tenant' in type(e).__name__ or 'ownership' in str(e).lower() else 400
+        return jsonify({'error': str(e)}), status_code
+    except Exception as e:
+        logger.error(f"Error creating campaign: {e}")
+        return jsonify({'error': 'Failed to create campaign'}), 500
+
+@app.route('/api/campaigns/<int:campaign_id>', methods=['GET'])
+@login_required
+def get_campaign(campaign_id):
+    """Retrieves a single campaign by ID."""
+    org_id = session.get('organization_id', 1)
+    camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+    if not camp:
+        return jsonify({'error': 'Campaign not found'}), 404
+    return jsonify(camp)
+
+@app.route('/api/campaigns/<int:campaign_id>', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_campaign_route(campaign_id):
+    """Updates campaign fields."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = database.update_campaign(
+            campaign_id=campaign_id,
+            organization_id=org_id,
+            name=data.get('name'),
+            objective=data.get('objective'),
+            brief=data.get('brief'),
+            campaign_type=data.get('campaign_type'),
+            target_audience=data.get('target_audience'),
+            target_markets=data.get('target_markets'),
+            languages=data.get('languages'),
+            start_date=data.get('start_date'),
+            end_date=data.get('end_date'),
+            status=data.get('status'),
+            budget=data.get('budget')
+        )
+        if not updated:
+            return jsonify({'error': 'Campaign not found or update failed'}), 404
+        return jsonify(updated)
+    except (database.TenantIsolationError, ValueError) as e:
+        status_code = 404 if 'Tenant' in type(e).__name__ or 'ownership' in str(e).lower() else 400
+        return jsonify({'error': str(e)}), status_code
+    except Exception as e:
+        logger.error(f"Error updating campaign: {e}")
+        return jsonify({'error': 'Failed to update campaign'}), 500
+
+@app.route('/api/campaigns/<int:campaign_id>', methods=['DELETE'])
+@login_required
+@csrf_protect
+def delete_campaign_route(campaign_id):
+    """Deletes a campaign and its associated drafts."""
+    org_id = session.get('organization_id', 1)
+    try:
+        deleted = database.delete_campaign(campaign_id, organization_id=org_id)
+        if not deleted:
+            return jsonify({'error': 'Campaign not found'}), 404
+        return jsonify({'status': 'deleted', 'campaign_id': campaign_id})
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+
+@app.route('/api/campaigns/<int:campaign_id>/generate', methods=['POST'])
+@login_required
+@csrf_protect
+def generate_campaign_content_route(campaign_id):
+    """
+    Generates AI marketing copy for the campaign across specified target platforms.
+    Creates new versioned content_drafts records.
+    """
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    data = request.get_json(silent=True) or {}
+
+    camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+    if not camp:
+        return jsonify({'error': 'Campaign not found'}), 404
+
+    brand = database.get_brand_by_id(camp['brand_id'], organization_id=org_id)
+    if not brand:
+        return jsonify({'error': 'Associated brand not found'}), 404
+
+    profile = database.get_brand_marketing_profile(camp['brand_id'], organization_id=org_id) or {}
+    
+    # Merge brand metadata with profile
+    brand_info = {
+        'name': brand.get('name', 'Brand'),
+        'description': brand.get('description', ''),
+        'positioning': profile.get('positioning') or brand.get('description', ''),
+        'voice_and_tone': profile.get('voice_and_tone', 'Professional, authoritative, customer-focused'),
+        'messaging_guidelines': profile.get('messaging_guidelines', ''),
+        'approved_product_facts': profile.get('approved_product_facts', ''),
+        'prohibited_claims': profile.get('prohibited_claims', ''),
+        'preferred_ctas': profile.get('preferred_ctas', '')
+    }
+
+    # Platforms to generate
+    req_platforms = data.get('platforms')
+    if not req_platforms or not isinstance(req_platforms, list):
+        platforms = ['facebook', 'instagram', 'linkedin', 'x', 'whatsapp']
+    else:
+        valid_platforms = {'facebook', 'instagram', 'linkedin', 'x', 'whatsapp'}
+        platforms = [str(p).strip().lower() for p in req_platforms if str(p).strip().lower() in valid_platforms]
+        if not platforms:
+            return jsonify({'error': 'No valid platforms specified. Allowed: facebook, instagram, linkedin, x, whatsapp'}), 400
+
+    language = data.get('language') or camp.get('languages') or 'en'
+    content_format = data.get('content_format', 'post')
+    provider_name = data.get('provider')
+    model_name = data.get('model')
+
+    try:
+        ai_provider = ai_service.get_ai_provider(provider_name=provider_name, model=model_name)
+    except ai_service.AIConfigurationError as e:
+        return jsonify({'error': str(e)}), 400
+
+    generated_drafts = []
+    errors = []
+
+    for plat in platforms:
+        try:
+            gen_res = ai_service.generate_campaign_content(
+                provider=ai_provider,
+                brand_info=brand_info,
+                campaign_info=camp,
+                target_platform=plat,
+                language=language,
+                content_format=content_format,
+                model=model_name
+            )
+
+            created_draft = database.create_content_draft(
+                organization_id=org_id,
+                brand_id=camp['brand_id'],
+                campaign_id=campaign_id,
+                target_platform=plat,
+                caption=gen_res.caption,
+                headline=gen_res.headline,
+                hashtags=gen_res.hashtags,
+                call_to_action=gen_res.call_to_action,
+                language=language,
+                content_format=content_format,
+                ai_provider=gen_res.ai_provider,
+                ai_model=gen_res.ai_model,
+                metadata=gen_res.metadata,
+                status='draft',
+                created_by=user_id
+            )
+            generated_drafts.append(created_draft)
+        except ai_service.AIRateLimitError as e:
+            logger.warning(f"AI rate limit during generation for {plat}: {e}")
+            errors.append({'platform': plat, 'error': str(e), 'code': 429})
+        except ai_service.AITimeoutError as e:
+            logger.warning(f"AI timeout during generation for {plat}: {e}")
+            errors.append({'platform': plat, 'error': str(e), 'code': 504})
+        except (ai_service.AIResponseValidationError, ai_service.AIProviderError) as e:
+            logger.error(f"AI error during generation for {plat}: {e}")
+            errors.append({'platform': plat, 'error': str(e), 'code': 502})
+
+    if not generated_drafts and errors:
+        primary_err = errors[0]
+        return jsonify({'error': primary_err['error'], 'details': errors}), primary_err['code']
+
+    return jsonify({
+        'status': 'success',
+        'campaign_id': campaign_id,
+        'drafts': generated_drafts,
+        'errors': errors
+    }), 201
+
+@app.route('/api/campaigns/<int:campaign_id>/drafts', methods=['GET'])
+@login_required
+def get_campaign_drafts(campaign_id):
+    """Retrieves all drafts created under a campaign."""
+    org_id = session.get('organization_id', 1)
+    camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+    if not camp:
+        return jsonify({'error': 'Campaign not found'}), 404
+    drafts = database.list_content_drafts(organization_id=org_id, campaign_id=campaign_id)
+    return jsonify(drafts)
+
+@app.route('/api/drafts/<int:draft_id>', methods=['GET'])
+@login_required
+def get_draft(draft_id):
+    """Retrieves a single draft by ID."""
+    org_id = session.get('organization_id', 1)
+    draft = database.get_content_draft_by_id(draft_id, organization_id=org_id)
+    if not draft:
+        return jsonify({'error': 'Draft not found'}), 404
+    return jsonify(draft)
+
+@app.route('/api/drafts/<int:draft_id>', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_draft(draft_id):
+    """Updates editable draft copy, headline, hashtags, or CTA."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = database.update_content_draft(
+            draft_id=draft_id,
+            organization_id=org_id,
+            caption=data.get('caption'),
+            headline=data.get('headline'),
+            hashtags=data.get('hashtags'),
+            call_to_action=data.get('call_to_action'),
+            content_format=data.get('content_format'),
+            status=data.get('status')
+        )
+        if not updated:
+            return jsonify({'error': 'Draft not found'}), 404
+        return jsonify(updated)
+    except (database.TenantIsolationError, ValueError) as e:
+        status_code = 404 if 'Tenant' in type(e).__name__ or 'ownership' in str(e).lower() else 400
+        return jsonify({'error': str(e)}), status_code
+    except Exception as e:
+        logger.error(f"Error updating draft: {e}")
+        return jsonify({'error': 'Failed to update draft'}), 500
+
+@app.route('/api/drafts/<int:draft_id>', methods=['DELETE'])
+@login_required
+@csrf_protect
+def delete_draft(draft_id):
+    """Deletes a content draft."""
+    org_id = session.get('organization_id', 1)
+    try:
+        deleted = database.delete_content_draft(draft_id, organization_id=org_id)
+        if not deleted:
+            return jsonify({'error': 'Draft not found'}), 404
+        return jsonify({'status': 'deleted', 'draft_id': draft_id})
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
 
 # --- Main Entry Point ---
 
