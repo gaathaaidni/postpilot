@@ -242,6 +242,11 @@ def _ensure_indexes(conn):
         ("idx_users_org", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(organization_id, username)"),
         ("idx_audit_post", "CREATE INDEX IF NOT EXISTS idx_audit_post ON post_audit_logs(scheduled_post_id, created_at)"),
         ("idx_audit_org", "CREATE INDEX IF NOT EXISTS idx_audit_org ON post_audit_logs(organization_id, created_at)"),
+        ("idx_bmp_org_brand", "CREATE INDEX IF NOT EXISTS idx_bmp_org_brand ON brand_marketing_profiles(organization_id, brand_id)"),
+        ("idx_campaigns_org_brand", "CREATE INDEX IF NOT EXISTS idx_campaigns_org_brand ON campaigns(organization_id, brand_id, status)"),
+        ("idx_campaigns_status", "CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(organization_id, status)"),
+        ("idx_drafts_org_campaign", "CREATE INDEX IF NOT EXISTS idx_drafts_org_campaign ON content_drafts(organization_id, campaign_id, target_platform)"),
+        ("idx_drafts_org_brand", "CREATE INDEX IF NOT EXISTS idx_drafts_org_brand ON content_drafts(organization_id, brand_id, status)"),
     ]
     for name, sql in indexes:
         try:
@@ -388,6 +393,75 @@ def init_db():
                 post_id TEXT PRIMARY KEY,
                 target_platform TEXT DEFAULT 'instagram',
                 synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 9. Brand marketing profiles (positioning, voice & tone, approved facts)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS brand_marketing_profiles (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                positioning TEXT,
+                target_audiences TEXT,
+                target_markets TEXT,
+                languages TEXT,
+                voice_and_tone TEXT,
+                messaging_guidelines TEXT,
+                approved_product_facts TEXT,
+                prohibited_claims TEXT,
+                preferred_ctas TEXT,
+                website_and_social_links TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, brand_id)
+            )
+        ''')
+
+        # 10. Campaigns table (brand-aware marketing campaigns)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS campaigns (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                objective TEXT NOT NULL,
+                campaign_type TEXT DEFAULT 'social',
+                target_audience TEXT,
+                target_markets TEXT,
+                languages TEXT,
+                brief TEXT NOT NULL,
+                start_date TEXT,
+                end_date TEXT,
+                status TEXT DEFAULT 'draft',
+                budget TEXT,
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 11. Content drafts table (AI generated and editable content drafts)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS content_drafts (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL,
+                target_platform TEXT NOT NULL,
+                language TEXT DEFAULT 'en',
+                content_format TEXT DEFAULT 'post',
+                headline TEXT,
+                caption TEXT NOT NULL,
+                hashtags TEXT,
+                call_to_action TEXT,
+                ai_provider TEXT,
+                ai_model TEXT,
+                metadata TEXT,
+                status TEXT DEFAULT 'draft',
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -551,6 +625,22 @@ def create_brand(organization_id, name, slug, description=''):
             )
             conn.commit()
             return cur.lastrowid
+
+def get_brand_by_id(brand_id, organization_id=None):
+    """Retrieves a single brand by ID, optionally scoped to organization."""
+    try:
+        b_id = int(brand_id)
+    except (ValueError, TypeError):
+        return None
+    with get_db_connection() as conn:
+        if organization_id is not None:
+            row = conn.execute(
+                "SELECT * FROM brands WHERE id = ? AND organization_id = ? AND is_active = 1",
+                (b_id, organization_id)
+            ).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM brands WHERE id = ? AND is_active = 1", (b_id,)).fetchone()
+        return dict(row) if row else None
 
 # --- User Management ---
 def get_user_by_username(username):
@@ -1559,4 +1649,443 @@ def retry_failed_post(schedule_id, user_id=None, organization_id=1):
         conn.commit()
 
     return get_scheduled_post_by_id(schedule_id, organization_id=organization_id)
+
+# --- AI Marketing Studio: Brand Marketing Profiles, Campaigns & Content Drafts ---
+
+def get_brand_marketing_profile(brand_id, organization_id=1):
+    """Retrieves the marketing profile for a brand, ensuring tenant isolation."""
+    validate_brand_ownership(brand_id, organization_id)
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM brand_marketing_profiles WHERE organization_id = ? AND brand_id = ?",
+            (organization_id, int(brand_id))
+        ).fetchone()
+        return dict(row) if row else None
+
+def upsert_brand_marketing_profile(brand_id, organization_id=1, positioning=None,
+                                   target_audiences=None, target_markets=None, languages=None,
+                                   voice_and_tone=None, messaging_guidelines=None,
+                                   approved_product_facts=None, prohibited_claims=None,
+                                   preferred_ctas=None, website_and_social_links=None):
+    """Creates or updates a brand marketing profile within the organization."""
+    validate_brand_ownership(brand_id, organization_id)
+    b_id = int(brand_id)
+
+    def _to_str(val):
+        if val is None:
+            return None
+        if isinstance(val, (dict, list)):
+            return json.dumps(val)
+        return str(val).strip()
+
+    pos = _to_str(positioning)
+    aud = _to_str(target_audiences)
+    mkt = _to_str(target_markets)
+    lng = _to_str(languages)
+    vnt = _to_str(voice_and_tone)
+    msg = _to_str(messaging_guidelines)
+    facts = _to_str(approved_product_facts)
+    prohib = _to_str(prohibited_claims)
+    ctas = _to_str(preferred_ctas)
+    links = _to_str(website_and_social_links)
+
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM brand_marketing_profiles WHERE organization_id = ? AND brand_id = ?",
+            (organization_id, b_id)
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                "UPDATE brand_marketing_profiles SET "
+                "positioning = COALESCE(?, positioning), "
+                "target_audiences = COALESCE(?, target_audiences), "
+                "target_markets = COALESCE(?, target_markets), "
+                "languages = COALESCE(?, languages), "
+                "voice_and_tone = COALESCE(?, voice_and_tone), "
+                "messaging_guidelines = COALESCE(?, messaging_guidelines), "
+                "approved_product_facts = COALESCE(?, approved_product_facts), "
+                "prohibited_claims = COALESCE(?, prohibited_claims), "
+                "preferred_ctas = COALESCE(?, preferred_ctas), "
+                "website_and_social_links = COALESCE(?, website_and_social_links), "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE organization_id = ? AND brand_id = ?",
+                (pos, aud, mkt, lng, vnt, msg, facts, prohib, ctas, links, organization_id, b_id)
+            )
+            profile_id = existing['id']
+        else:
+            if is_postgres():
+                cur = conn.execute(
+                    "INSERT INTO brand_marketing_profiles (organization_id, brand_id, positioning, "
+                    "target_audiences, target_markets, languages, voice_and_tone, messaging_guidelines, "
+                    "approved_product_facts, prohibited_claims, preferred_ctas, website_and_social_links) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                    (organization_id, b_id, pos or '', aud or '', mkt or '', lng or 'en',
+                     vnt or '', msg or '', facts or '', prohib or '', ctas or '', links or '')
+                )
+                profile_id = cur.fetchone()['id']
+            else:
+                cur = conn.execute(
+                    "INSERT INTO brand_marketing_profiles (organization_id, brand_id, positioning, "
+                    "target_audiences, target_markets, languages, voice_and_tone, messaging_guidelines, "
+                    "approved_product_facts, prohibited_claims, preferred_ctas, website_and_social_links) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (organization_id, b_id, pos or '', aud or '', mkt or '', lng or 'en',
+                     vnt or '', msg or '', facts or '', prohib or '', ctas or '', links or '')
+                )
+                profile_id = cur.lastrowid
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT * FROM brand_marketing_profiles WHERE id = ? AND organization_id = ?",
+            (profile_id, organization_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+def validate_campaign_ownership(campaign_id, organization_id=1):
+    """Validates that campaign exists and belongs to the given organization."""
+    try:
+        c_id = int(campaign_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid campaign ID '{campaign_id}'. Must be an integer.")
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM campaigns WHERE id = ?",
+            (c_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Campaign #{c_id} does not exist.")
+        if row['organization_id'] != organization_id:
+            raise ValueError(f"Campaign #{c_id} belongs to a different organization and cannot be accessed.")
+        return dict(row)
+
+def create_campaign(organization_id, brand_id, name, objective, brief,
+                    campaign_type='social', target_audience=None, target_markets=None,
+                    languages=None, start_date=None, end_date=None, status='draft',
+                    budget=None, created_by=None):
+    """Creates a new marketing campaign strictly scoped to organization and brand."""
+    validate_brand_ownership(brand_id, organization_id)
+    if not name or not str(name).strip():
+        raise ValueError("Campaign name is required and cannot be empty.")
+    if not objective or not str(objective).strip():
+        raise ValueError("Campaign objective is required and cannot be empty.")
+    if not brief or not str(brief).strip():
+        raise ValueError("Campaign brief is required and cannot be empty.")
+
+    clean_name = str(name).strip()
+    clean_obj = str(objective).strip()
+    clean_brief = str(brief).strip()
+    b_id = int(brand_id)
+
+    with get_db_connection() as conn:
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO campaigns (organization_id, brand_id, name, objective, campaign_type, "
+                "target_audience, target_markets, languages, brief, start_date, end_date, "
+                "status, budget, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (organization_id, b_id, clean_name, clean_obj, campaign_type or 'social',
+                 target_audience or '', target_markets or '', languages or '', clean_brief,
+                 start_date, end_date, status or 'draft', budget, created_by)
+            )
+            cid = cur.fetchone()['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO campaigns (organization_id, brand_id, name, objective, campaign_type, "
+                "target_audience, target_markets, languages, brief, start_date, end_date, "
+                "status, budget, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (organization_id, b_id, clean_name, clean_obj, campaign_type or 'social',
+                 target_audience or '', target_markets or '', languages or '', clean_brief,
+                 start_date, end_date, status or 'draft', budget, created_by)
+            )
+            cid = cur.lastrowid
+        conn.commit()
+
+        row = conn.execute("SELECT * FROM campaigns WHERE id = ?", (cid,)).fetchone()
+        return dict(row) if row else None
+
+def get_campaign_by_id(campaign_id, organization_id=1):
+    """Retrieves a campaign by ID scoped to organization."""
+    try:
+        c_id = int(campaign_id)
+    except (ValueError, TypeError):
+        return None
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT c.*, b.name as brand_name, b.slug as brand_slug "
+            "FROM campaigns c "
+            "LEFT JOIN brands b ON c.brand_id = b.id "
+            "WHERE c.id = ? AND c.organization_id = ?",
+            (c_id, organization_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+def list_campaigns(organization_id=1, brand_id=None, status=None, limit=100, offset=0):
+    """Lists campaigns for an organization with optional brand and status filtering."""
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+
+    with get_db_connection() as conn:
+        query = (
+            "SELECT c.*, b.name as brand_name, b.slug as brand_slug "
+            "FROM campaigns c "
+            "LEFT JOIN brands b ON c.brand_id = b.id "
+            "WHERE c.organization_id = ?"
+        )
+        params = [organization_id]
+        if brand_id:
+            query += " AND c.brand_id = ?"
+            params.append(int(brand_id))
+        if status:
+            query += " AND c.status = ?"
+            params.append(str(status).strip())
+
+        query += " ORDER BY c.updated_at DESC, c.id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
+                    brief=None, campaign_type=None, target_audience=None,
+                    target_markets=None, languages=None, start_date=None,
+                    end_date=None, status=None, budget=None):
+    """Updates an existing campaign ensuring tenant isolation."""
+    validate_campaign_ownership(campaign_id, organization_id)
+    c_id = int(campaign_id)
+
+    updates = []
+    params = []
+    if name is not None:
+        if not str(name).strip():
+            raise ValueError("Campaign name cannot be empty.")
+        updates.append("name = ?")
+        params.append(str(name).strip())
+    if objective is not None:
+        if not str(objective).strip():
+            raise ValueError("Campaign objective cannot be empty.")
+        updates.append("objective = ?")
+        params.append(str(objective).strip())
+    if brief is not None:
+        if not str(brief).strip():
+            raise ValueError("Campaign brief cannot be empty.")
+        updates.append("brief = ?")
+        params.append(str(brief).strip())
+    if campaign_type is not None:
+        updates.append("campaign_type = ?")
+        params.append(str(campaign_type).strip())
+    if target_audience is not None:
+        updates.append("target_audience = ?")
+        params.append(str(target_audience).strip())
+    if target_markets is not None:
+        updates.append("target_markets = ?")
+        params.append(str(target_markets).strip())
+    if languages is not None:
+        updates.append("languages = ?")
+        params.append(str(languages).strip())
+    if start_date is not None:
+        updates.append("start_date = ?")
+        params.append(str(start_date).strip() if start_date else None)
+    if end_date is not None:
+        updates.append("end_date = ?")
+        params.append(str(end_date).strip() if end_date else None)
+    if status is not None:
+        updates.append("status = ?")
+        params.append(str(status).strip())
+    if budget is not None:
+        updates.append("budget = ?")
+        params.append(str(budget).strip() if budget else None)
+
+    if not updates:
+        return get_campaign_by_id(c_id, organization_id=organization_id)
+
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    sql = f"UPDATE campaigns SET {', '.join(updates)} WHERE id = ? AND organization_id = ?"
+    params.extend([c_id, organization_id])
+
+    with get_db_connection() as conn:
+        conn.execute(sql, tuple(params))
+        conn.commit()
+
+    return get_campaign_by_id(c_id, organization_id=organization_id)
+
+def delete_campaign(campaign_id, organization_id=1):
+    """Deletes a campaign and its associated content drafts within the organization."""
+    validate_campaign_ownership(campaign_id, organization_id)
+    c_id = int(campaign_id)
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM content_drafts WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
+        res = conn.execute("DELETE FROM campaigns WHERE id = ? AND organization_id = ?", (c_id, organization_id))
+        conn.commit()
+        return res.rowcount > 0
+
+VALID_DRAFT_PLATFORMS = frozenset({'facebook', 'instagram', 'linkedin', 'x', 'whatsapp'})
+
+def create_content_draft(organization_id, brand_id, campaign_id, target_platform,
+                         caption, headline=None, hashtags=None, call_to_action=None,
+                         language='en', content_format='post', ai_provider=None,
+                         ai_model=None, metadata=None, status='draft', created_by=None):
+    """Creates a new content draft under an active campaign."""
+    camp = validate_campaign_ownership(campaign_id, organization_id)
+    if camp['brand_id'] != int(brand_id):
+        raise ValueError(f"Brand #{brand_id} does not match campaign #{campaign_id}'s assigned brand #{camp['brand_id']}.")
+
+    clean_platform = str(target_platform).strip().lower()
+    if clean_platform not in VALID_DRAFT_PLATFORMS:
+        raise ValueError(f"Invalid target_platform: '{target_platform}'. Must be one of: {', '.join(sorted(VALID_DRAFT_PLATFORMS))}.")
+
+    if not caption or not str(caption).strip():
+        raise ValueError("Draft caption/body is required and cannot be empty.")
+
+    clean_caption = str(caption).strip()
+    meta_str = json.dumps(metadata) if isinstance(metadata, (dict, list)) else (str(metadata) if metadata else None)
+
+    with get_db_connection() as conn:
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
+                "language, content_format, headline, caption, hashtags, call_to_action, "
+                "ai_provider, ai_model, metadata, status, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (organization_id, int(brand_id), int(campaign_id), clean_platform,
+                 language or 'en', content_format or 'post', headline, clean_caption,
+                 hashtags, call_to_action, ai_provider, ai_model, meta_str, status or 'draft', created_by)
+            )
+            did = cur.fetchone()['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
+                "language, content_format, headline, caption, hashtags, call_to_action, "
+                "ai_provider, ai_model, metadata, status, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (organization_id, int(brand_id), int(campaign_id), clean_platform,
+                 language or 'en', content_format or 'post', headline, clean_caption,
+                 hashtags, call_to_action, ai_provider, ai_model, meta_str, status or 'draft', created_by)
+            )
+            did = cur.lastrowid
+        conn.commit()
+
+        row = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (did,)).fetchone()
+        return dict(row) if row else None
+
+def get_content_draft_by_id(draft_id, organization_id=1):
+    """Retrieves a content draft by ID scoped to organization."""
+    try:
+        d_id = int(draft_id)
+    except (ValueError, TypeError):
+        return None
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT cd.*, c.name as campaign_name, b.name as brand_name "
+            "FROM content_drafts cd "
+            "LEFT JOIN campaigns c ON cd.campaign_id = c.id "
+            "LEFT JOIN brands b ON cd.brand_id = b.id "
+            "WHERE cd.id = ? AND cd.organization_id = ?",
+            (d_id, organization_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+def list_content_drafts(organization_id=1, campaign_id=None, brand_id=None,
+                        target_platform=None, status=None, limit=100, offset=0):
+    """Lists content drafts with tenant isolation and optional filters."""
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+
+    with get_db_connection() as conn:
+        query = (
+            "SELECT cd.*, c.name as campaign_name, b.name as brand_name "
+            "FROM content_drafts cd "
+            "LEFT JOIN campaigns c ON cd.campaign_id = c.id "
+            "LEFT JOIN brands b ON cd.brand_id = b.id "
+            "WHERE cd.organization_id = ?"
+        )
+        params = [organization_id]
+        if campaign_id:
+            query += " AND cd.campaign_id = ?"
+            params.append(int(campaign_id))
+        if brand_id:
+            query += " AND cd.brand_id = ?"
+            params.append(int(brand_id))
+        if target_platform:
+            query += " AND cd.target_platform = ?"
+            params.append(str(target_platform).strip().lower())
+        if status:
+            query += " AND cd.status = ?"
+            params.append(str(status).strip())
+
+        query += " ORDER BY cd.updated_at DESC, cd.id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def update_content_draft(draft_id, organization_id=1, caption=None, headline=None,
+                         hashtags=None, call_to_action=None, status=None,
+                         content_format=None, metadata=None):
+    """Updates a content draft ensuring organization ownership."""
+    try:
+        d_id = int(draft_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid draft ID '{draft_id}'.")
+
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM content_drafts WHERE id = ? AND organization_id = ?",
+            (d_id, organization_id)
+        ).fetchone()
+        if not existing:
+            raise ValueError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+
+        updates = []
+        params = []
+        if caption is not None:
+            if not str(caption).strip():
+                raise ValueError("Caption cannot be empty.")
+            updates.append("caption = ?")
+            params.append(str(caption).strip())
+        if headline is not None:
+            updates.append("headline = ?")
+            params.append(str(headline).strip() if headline else None)
+        if hashtags is not None:
+            updates.append("hashtags = ?")
+            params.append(str(hashtags).strip() if hashtags else None)
+        if call_to_action is not None:
+            updates.append("call_to_action = ?")
+            params.append(str(call_to_action).strip() if call_to_action else None)
+        if status is not None:
+            updates.append("status = ?")
+            params.append(str(status).strip())
+        if content_format is not None:
+            updates.append("content_format = ?")
+            params.append(str(content_format).strip())
+        if metadata is not None:
+            meta_str = json.dumps(metadata) if isinstance(metadata, (dict, list)) else str(metadata)
+            updates.append("metadata = ?")
+            params.append(meta_str)
+
+        if not updates:
+            return dict(existing)
+
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        sql = f"UPDATE content_drafts SET {', '.join(updates)} WHERE id = ? AND organization_id = ?"
+        params.extend([d_id, organization_id])
+
+        conn.execute(sql, tuple(params))
+        conn.commit()
+
+        row = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (d_id,)).fetchone()
+        return dict(row) if row else None
+
+def delete_content_draft(draft_id, organization_id=1):
+    """Deletes a content draft strictly scoped to organization."""
+    try:
+        d_id = int(draft_id)
+    except (ValueError, TypeError):
+        return False
+    with get_db_connection() as conn:
+        res = conn.execute("DELETE FROM content_drafts WHERE id = ? AND organization_id = ?", (d_id, organization_id))
+        conn.commit()
+        return res.rowcount > 0
+
 
