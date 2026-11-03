@@ -953,5 +953,59 @@ class TestCampaignAPI(unittest.TestCase):
         self.assertEqual(org2_data['summary']['total_tokens'], 0)
         self.assertEqual(len(org2_data['recent_logs']), 0)
 
+    def test_multi_brand_calendar_and_reschedule_workflow(self):
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Schedule a future post in Org 1
+        future_time = "2027-08-15T10:00:00"
+        res = self.client.post('/api/schedule', json={
+            'post_type': 'tour',
+            'scheduled_for': future_time,
+            'message': 'Calendar test scheduled post',
+            'brand_id': 10
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 201)
+        post_id = res.get_json()['id']
+
+        # 2. Query /api/calendar/events -> contains the scheduled post
+        res = self.client.get('/api/calendar/events', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        events = res.get_json()
+        self.assertTrue(any(e['raw_id'] == post_id and e['type'] == 'scheduled_post' for e in events))
+
+        # Filter by brand
+        res = self.client.get('/api/calendar/events?brand_id=10', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        for e in res.get_json():
+            self.assertEqual(e['brand_id'], 10)
+
+        # 3. Reschedule post to another future time -> 200
+        new_future_time = "2027-08-16T14:30:00"
+        res = self.client.put(f'/api/calendar/events/post_{post_id}/reschedule', json={
+            'scheduled_for': new_future_time
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.get_json()['success'])
+
+        # 4. Attempt to reschedule post into the past -> 400
+        past_time = "2025-01-01T10:00:00"
+        res = self.client.put(f'/api/calendar/events/post_{post_id}/reschedule', json={
+            'scheduled_for': past_time
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("past", res.get_json()['error'].lower())
+
+        # 5. Tenant isolation: Org 2 cannot see Org 1 events or reschedule Org 1 post
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res = self.client.get('/api/calendar/events', headers=headers_org2)
+        self.assertEqual(res.status_code, 200)
+        events_org2 = res.get_json()
+        self.assertFalse(any(e['raw_id'] == post_id for e in events_org2))
+
+        res = self.client.put(f'/api/calendar/events/post_{post_id}/reschedule', json={
+            'scheduled_for': new_future_time
+        }, headers=headers_org2)
+        self.assertEqual(res.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

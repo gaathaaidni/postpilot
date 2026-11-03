@@ -2221,11 +2221,13 @@ async function loadCalendarData() {
             }
         }
 
-        const res = await authFetch('/api/schedule?limit=500');
+        let calUrl = `/api/calendar/events?brand_id=${encodeURIComponent(calendarFilterBrand)}&status=${encodeURIComponent(calendarFilterStatus)}&platform=${encodeURIComponent(calendarFilterChannel)}`;
+        const res = await authFetch(calUrl);
         if (res.ok) {
             cachedScheduledPosts = await res.json();
         } else {
-            cachedScheduledPosts = [];
+            const fallbackRes = await authFetch('/api/schedule?limit=500');
+            cachedScheduledPosts = fallbackRes.ok ? await fallbackRes.json() : [];
         }
     } catch (e) {
         console.error('Error fetching calendar posts:', e);

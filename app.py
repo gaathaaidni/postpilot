@@ -1807,6 +1807,71 @@ def get_ai_usage_analytics():
     data = database.get_ai_usage_summary(organization_id=org_id, days=days_int)
     return jsonify(data), 200
 
+@app.route('/api/calendar/events', methods=['GET'])
+@login_required
+def get_calendar_events_route():
+    """Retrieves unified calendar events for scheduled posts and content drafts."""
+    org_id = session.get('organization_id', 1)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    brand_id = request.args.get('brand_id')
+    campaign_id = request.args.get('campaign_id')
+    platform = request.args.get('platform') or request.args.get('post_type')
+    status = request.args.get('status')
+    tz = request.args.get('timezone')
+
+    try:
+        events = database.get_calendar_events(
+            organization_id=org_id,
+            start_date=start_date,
+            end_date=end_date,
+            brand_id=brand_id,
+            campaign_id=campaign_id,
+            platform=platform,
+            status=status,
+            target_timezone=tz
+        )
+        return jsonify(events), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        status_code = 404 if 'Tenant' in type(e).__name__ else 400
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), status_code
+
+@app.route('/api/calendar/events/<string:event_id>/reschedule', methods=['PUT'])
+@login_required
+@csrf_protect
+def reschedule_calendar_event_route(event_id):
+    """Reschedules a calendar event (scheduled post) to a new future timestamp."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    new_time = data.get('scheduled_for')
+    tz_name = data.get('timezone')
+
+    if not new_time:
+        return jsonify({'error': 'scheduled_for timestamp is required', 'code': 'VALIDATION_ERROR'}), 400
+
+    raw_id = event_id.replace('post_', '') if event_id.startswith('post_') else event_id
+    try:
+        post_id = int(raw_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': f"Invalid event ID '{event_id}'", 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        updated = database.update_scheduled_post(
+            schedule_id=post_id,
+            scheduled_for=new_time,
+            timezone_name=tz_name,
+            organization_id=org_id,
+            allow_past=False
+        )
+        if not updated:
+            return jsonify({'error': 'Event not found or not editable'}), 404
+        return jsonify({'success': True, 'event_id': event_id, 'scheduled_for': new_time}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error rescheduling event {event_id}: {e}")
+        return jsonify({'error': 'Failed to reschedule event'}), 500
+
 # --- Main Entry Point ---
 
 def init_application():

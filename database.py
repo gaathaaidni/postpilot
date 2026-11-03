@@ -560,6 +560,8 @@ def init_db():
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_by', 'INTEGER')
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_at', 'TIMESTAMP')
         _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
+        _ensure_column_exists(conn, 'scheduled_posts', 'campaign_id', 'INTEGER')
+        _ensure_column_exists(conn, 'scheduled_posts', 'draft_id', 'INTEGER')
         _ensure_column_exists(conn, 'content_drafts', 'current_revision', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'content_draft_revisions', 'ai_provider', 'TEXT')
         _ensure_column_exists(conn, 'content_draft_revisions', 'ai_model', 'TEXT')
@@ -2730,6 +2732,160 @@ def get_ai_usage_summary(organization_id, days=30):
             'by_provider': [dict(r) for r in by_provider],
             'recent_logs': [dict(r) for r in recent]
         }
+
+def get_calendar_events(organization_id=1, start_date=None, end_date=None,
+                        brand_id=None, campaign_id=None, platform=None, status=None,
+                        target_timezone=None):
+    """
+    Retrieves unified calendar events across scheduled posts and content drafts
+    scoped to active organization with date bounds, localized timestamps, and filters.
+    """
+    org_id = int(organization_id)
+    org_tz = target_timezone or get_organization_timezone(org_id)
+    if target_timezone:
+        org_tz = timezone_utils.validate_timezone_name(target_timezone)
+
+    if brand_id and str(brand_id) != 'all':
+        validate_brand_ownership(int(brand_id), org_id)
+
+    start_utc = None
+    if start_date:
+        _, _, start_utc = timezone_utils.parse_and_convert_to_utc(str(start_date), tz_name=org_tz, allow_past=True)
+
+    end_utc = None
+    if end_date:
+        _, _, end_utc = timezone_utils.parse_and_convert_to_utc(str(end_date), tz_name=org_tz, allow_past=True)
+
+    if start_utc and end_utc and start_utc > end_utc:
+        raise ValueError(
+            f"Invalid date range: start_date ('{start_date}') must be earlier than or equal to end_date ('{end_date}')."
+        )
+
+    events = []
+
+    with get_db_connection() as conn:
+        # 1. Query scheduled_posts
+        sp_query = (
+            "SELECT sp.id, sp.organization_id, sp.post_type, sp.message, "
+            "sp.image_filename, sp.scheduled_for, sp.timezone, sp.status, "
+            "sp.created_at, sp.brand_id, sp.campaign_id, "
+            "b.name as brand_name, c.name as campaign_name "
+            "FROM scheduled_posts sp "
+            "LEFT JOIN brands b ON sp.brand_id = b.id "
+            "LEFT JOIN campaigns c ON sp.campaign_id = c.id "
+            "WHERE sp.organization_id = ?"
+        )
+        sp_params = [org_id]
+
+        if start_utc:
+            sp_query += " AND sp.scheduled_for >= ?"
+            sp_params.append(start_utc)
+        if end_utc:
+            sp_query += " AND sp.scheduled_for <= ?"
+            sp_params.append(end_utc)
+        if brand_id and str(brand_id) != 'all':
+            sp_query += " AND sp.brand_id = ?"
+            sp_params.append(int(brand_id))
+        if campaign_id and str(campaign_id) != 'all':
+            sp_query += " AND sp.campaign_id = ?"
+            sp_params.append(int(campaign_id))
+        if platform and str(platform) != 'all':
+            sp_query += " AND sp.post_type = ?"
+            sp_params.append(str(platform))
+        if status and str(status) != 'all':
+            sp_query += " AND sp.status = ?"
+            sp_params.append(str(status))
+
+        sp_query += " ORDER BY sp.scheduled_for ASC, sp.id ASC"
+        sp_rows = conn.execute(sp_query, tuple(sp_params)).fetchall()
+
+        for r in sp_rows:
+            d = dict(r)
+            try:
+                loc = timezone_utils.convert_utc_to_local(d['scheduled_for'], tz_name=d.get('timezone') or org_tz)
+                loc_str = loc['local_iso']
+                offset_str = loc.get('offset', '+00:00')
+            except Exception:
+                loc_str = str(d['scheduled_for'])
+                offset_str = '+00:00'
+            events.append({
+                'id': f"post_{d['id']}",
+                'raw_id': d['id'],
+                'type': 'scheduled_post',
+                'title': (d.get('message') or 'Untitled Post')[:60],
+                'message': d.get('message', ''),
+                'scheduled_for': d.get('scheduled_for'),
+                'local_scheduled_for': loc_str,
+                'timezone': d.get('timezone') or org_tz,
+                'display_timezone': org_tz,
+                'offset': offset_str,
+                'post_type': d.get('post_type'),
+                'platform': d.get('post_type'),
+                'status': d.get('status') or 'scheduled',
+                'brand_id': d.get('brand_id'),
+                'brand_name': d.get('brand_name'),
+                'campaign_id': d.get('campaign_id'),
+                'campaign_name': d.get('campaign_name'),
+                'image_filename': d.get('image_filename')
+            })
+
+        # 2. Query content_drafts
+        cd_query = (
+            "SELECT cd.id, cd.organization_id, cd.target_platform, cd.headline, "
+            "cd.caption, cd.status, cd.created_at, cd.brand_id, cd.campaign_id, "
+            "b.name as brand_name, c.name as campaign_name "
+            "FROM content_drafts cd "
+            "LEFT JOIN brands b ON cd.brand_id = b.id "
+            "LEFT JOIN campaigns c ON cd.campaign_id = c.id "
+            "WHERE cd.organization_id = ?"
+        )
+        cd_params = [org_id]
+
+        if start_utc:
+            cd_query += " AND cd.created_at >= ?"
+            cd_params.append(start_utc)
+        if end_utc:
+            cd_query += " AND cd.created_at <= ?"
+            cd_params.append(end_utc)
+        if brand_id and str(brand_id) != 'all':
+            cd_query += " AND cd.brand_id = ?"
+            cd_params.append(int(brand_id))
+        if campaign_id and str(campaign_id) != 'all':
+            cd_query += " AND cd.campaign_id = ?"
+            cd_params.append(int(campaign_id))
+        if platform and str(platform) != 'all':
+            cd_query += " AND cd.target_platform = ?"
+            cd_params.append(str(platform))
+        if status and str(status) != 'all':
+            cd_query += " AND cd.status = ?"
+            cd_params.append(str(status))
+
+        cd_query += " ORDER BY cd.created_at ASC, cd.id ASC"
+        cd_rows = conn.execute(cd_query, tuple(cd_params)).fetchall()
+
+        for r in cd_rows:
+            d = dict(r)
+            events.append({
+                'id': f"draft_{d['id']}",
+                'raw_id': d['id'],
+                'type': 'content_draft',
+                'title': (d.get('headline') or d.get('caption') or 'Untitled Draft')[:60],
+                'message': d.get('caption', ''),
+                'scheduled_for': d.get('created_at'),
+                'local_scheduled_for': d.get('created_at'),
+                'timezone': org_tz,
+                'display_timezone': org_tz,
+                'post_type': d.get('target_platform'),
+                'platform': d.get('target_platform'),
+                'status': d.get('status') or 'draft',
+                'brand_id': d.get('brand_id'),
+                'brand_name': d.get('brand_name'),
+                'campaign_id': d.get('campaign_id'),
+                'campaign_name': d.get('campaign_name'),
+                'headline': d.get('headline')
+            })
+
+    return events
 
 
 
