@@ -335,7 +335,7 @@ def api_login():
 def register_organization_route():
     """Public self-service SaaS registration: creates new organization and initial owner account."""
     data = request.get_json(silent=True) or request.form or {}
-    org_name = data.get('org_name')
+    org_name = data.get('org_name') or data.get('organization_name')
     org_slug = data.get('org_slug')
     username = data.get('username')
     password = data.get('password')
@@ -551,7 +551,7 @@ def upgrade_saas_subscription_route():
         return jsonify({'error': 'Forbidden: only organization owners and admins can manage subscriptions.'}), 403
 
     data = request.get_json(silent=True) or {}
-    plan_code = data.get('plan_code')
+    plan_code = data.get('plan_code') or data.get('plan_id')
     if not plan_code:
         return jsonify({'error': 'plan_code is required', 'code': 'VALIDATION_ERROR'}), 400
 
@@ -1697,7 +1697,12 @@ def generate_campaign_content_plan_route(campaign_id):
             success=True
         )
 
-        return jsonify({'status': 'success', 'plan': saved_plan}), 201
+        return jsonify({
+            'status': 'success',
+            'plan': saved_plan,
+            'content_plan': saved_plan,
+            'entries': saved_plan.get('entries', [])
+        }), 201
 
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 404
@@ -2103,6 +2108,7 @@ def validate_draft_creative_route(draft_id):
     return jsonify({
         'status': 'success',
         'is_valid': is_valid,
+        'valid': is_valid,
         'issues': issues,
         'platform': draft.get('target_platform'),
         'has_media': media_asset is not None
@@ -2391,7 +2397,7 @@ def schedule_draft_route(draft_id):
     user_id = session.get('user_id')
     user_role = session.get('role', 'contributor')
     data = request.get_json(silent=True) or {}
-    scheduled_for = data.get('scheduled_for')
+    scheduled_for = data.get('scheduled_for') or data.get('scheduled_time')
     timezone_name = data.get('timezone')
 
     if not scheduled_for:
@@ -2406,7 +2412,12 @@ def schedule_draft_route(draft_id):
             user_id=user_id,
             user_role=user_role
         )
-        return jsonify({'status': 'success', 'scheduled': res}), 201
+        return jsonify({
+            'status': 'success',
+            'scheduled': res,
+            'draft': {'id': res.get('draft_id'), 'status': res.get('status')},
+            'scheduled_post': res.get('scheduled_post')
+        }), 201
     except database.TenantIsolationError as e:
         return jsonify({'error': str(e)}), 404
     except ValueError as e:
@@ -2498,6 +2509,12 @@ def get_marketing_dashboard_analytics_route():
             brand_id=b_id,
             campaign_id=c_id
         )
+        data['total_campaigns'] = data.get('campaigns', {}).get('total', 0)
+        data['total_drafts'] = data.get('drafts', {}).get('total', 0)
+        data['scheduled_posts'] = data.get('publishing', {}).get('total', 0)
+        data['publishing_success_rate'] = data.get('publishing', {}).get('success_rate', 100.0)
+        data['draft_lifecycle_breakdown'] = data.get('drafts', {}).get('by_status', {})
+        data['platform_distribution'] = {p: v.get('drafts_count', 0) for p, v in data.get('platforms', {}).items()}
         return jsonify(data), 200
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
