@@ -14,10 +14,21 @@ Validates that PostPilot's unified codebase fully supports Android Termux:
 10. PID tracking, worker daemon duplicate prevention, and scoped safe shutdown
 11. Setup idempotency and template preservation (.env.example vs .env)
 12. Comprehensive operational documentation (worker requirement, wake-lock limitations)
+13. Behavioral test: Termux HOST=127.0.0.1 enforced; custom HOST overrides rejected
+14. Behavioral test: Development and production HOST behavior preserved
+15. Behavioral test: Stale PID file safe quarantine/cleanup without terminating processes
+16. Behavioral test: Foreign/unrelated process PID file preserved without termination
+17. Behavioral test: Valid PostPilot PID verified and cleanly terminated on stop
+18. Shell syntax validation for all Termux operational scripts
 """
 import os
 import sys
+import shutil
+import signal
+import subprocess
+import time
 import unittest
+import importlib
 from unittest.mock import patch
 from pathlib import Path
 
@@ -28,6 +39,27 @@ if REPO_ROOT not in sys.path:
 import config
 import database
 import backup
+
+
+def _find_bash():
+    """Locates a working bash binary across Windows (Git Bash), Linux, and Termux."""
+    candidates = [
+        'C:/Program Files/Git/bin/bash.exe',
+        'C:/Program Files/Git/usr/bin/bash.exe',
+        shutil.which('bash'),
+        '/bin/bash',
+        '/usr/bin/bash',
+        '/data/data/com.termux/files/usr/bin/bash'
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            try:
+                r = subprocess.run([c, '--version'], capture_output=True, timeout=2)
+                if r.returncode == 0:
+                    return c
+            except Exception:
+                continue
+    return None
 
 
 class TestTermuxCompatibility(unittest.TestCase):
@@ -198,7 +230,6 @@ class TestTermuxCompatibility(unittest.TestCase):
         # Test explicit AI_MOCK=1 override support
         test_env = {'AI_PROVIDER': 'groq', 'AI_MOCK': '1'}
         with patch.dict(os.environ, test_env):
-            # Evaluate override logic matching config.py
             prov = os.getenv('AI_PROVIDER', 'mock').strip().lower()
             if os.getenv('AI_MOCK', '').strip().lower() in ('1', 'true', 'yes'):
                 prov = 'mock'
@@ -221,15 +252,13 @@ class TestTermuxCompatibility(unittest.TestCase):
         self.assertIn("data/app.pid", stop_content, "stop-termux.sh must read app PID file")
         self.assertIn("data/worker.pid", stop_content, "stop-termux.sh must read worker PID file")
 
-        # start-termux.sh must coordinate the worker daemon and avoid duplicates
-        self.assertIn("worker.py", start_content, "start-termux.sh must handle worker startup")
-        self.assertIn("kill -0", start_content, "start-termux.sh must verify if process is already running")
+        # Both must verify process ownership before killing or assuming running
+        self.assertIn("verify_process_ownership", start_content, "start-termux.sh must verify process ownership")
+        self.assertIn("verify_process_ownership", stop_content, "stop-termux.sh must verify process ownership")
 
         # stop-termux.sh must NOT use indiscriminate pkill without path scoping
         self.assertNotIn('pkill -f "python app.py"', stop_content,
                          "stop-termux.sh must not indiscriminately pkill generic 'python app.py' across system")
-        self.assertIn('$DIR/app.py', stop_content,
-                         "stop-termux.sh fallback must scope matching to repository directory")
 
     def test_11_setup_termux_idempotency_and_template(self):
         """Verifies setup-termux.sh uses .env.example, preserves existing .env, and does not reference .env.termux."""
@@ -257,6 +286,187 @@ class TestTermuxCompatibility(unittest.TestCase):
         self.assertIn("low memory killer", text)
         self.assertIn("unrestricted", text)
         self.assertIn("battery optimization", text)
+
+    def test_13_termux_host_loopback_enforced_behavioral(self):
+        """
+        Behavioral test: Verifies config.py strictly enforces HOST=127.0.0.1 in Termux mode
+        and rejects custom HOST overrides (such as HOST=0.0.0.0 or LAN IP).
+        """
+        # Test A: Custom HOST=0.0.0.0 cannot override Termux loopback binding
+        with patch.dict(os.environ, {'APP_ENV': 'termux', 'HOST': '0.0.0.0'}):
+            importlib.reload(config)
+            self.assertEqual(config.APP_ENV, 'termux')
+            self.assertEqual(config.HOST, '127.0.0.1', "Termux MUST reject 0.0.0.0 and enforce 127.0.0.1")
+
+        # Test B: Custom LAN IP cannot override Termux loopback binding
+        with patch.dict(os.environ, {'APP_ENV': 'termux', 'HOST': '192.168.1.50'}):
+            importlib.reload(config)
+            self.assertEqual(config.HOST, '127.0.0.1', "Termux MUST reject LAN IPs and enforce 127.0.0.1")
+
+        # Reset config to clean state
+        with patch.dict(os.environ, {'APP_ENV': 'development', 'HOST': '127.0.0.1'}):
+            importlib.reload(config)
+
+    def test_14_development_and_production_host_behavior_preserved(self):
+        """
+        Behavioral test: Verifies existing development and production HOST resolution remains unchanged.
+        """
+        # A. Development with override allows custom HOST
+        with patch.dict(os.environ, {'APP_ENV': 'development', 'HOST': '0.0.0.0'}):
+            importlib.reload(config)
+            self.assertEqual(config.HOST, '0.0.0.0', "Development profile must allow custom HOST overrides")
+
+        # B. Development without HOST override defaults to 127.0.0.1
+        env_clean_dev = dict(os.environ)
+        env_clean_dev.pop('HOST', None)
+        env_clean_dev['APP_ENV'] = 'development'
+        with patch.dict(os.environ, env_clean_dev, clear=True):
+            importlib.reload(config)
+            self.assertEqual(config.HOST, '127.0.0.1', "Development profile must default to 127.0.0.1")
+
+        # C. Production with explicit HOST allows configuration
+        with patch.dict(os.environ, {'APP_ENV': 'production', 'HOST': '127.0.0.1'}):
+            importlib.reload(config)
+            self.assertEqual(config.HOST, '127.0.0.1', "Production must allow explicit HOST configuration")
+
+        # D. Production without HOST override defaults to 0.0.0.0
+        env_clean_prod = dict(os.environ)
+        env_clean_prod.pop('HOST', None)
+        env_clean_prod['APP_ENV'] = 'production'
+        with patch('dotenv.load_dotenv'):
+            with patch.dict(os.environ, env_clean_prod, clear=True):
+                importlib.reload(config)
+                self.assertEqual(config.HOST, '0.0.0.0', "Production must default to 0.0.0.0")
+
+        # Reset config to clean development state
+        with patch.dict(os.environ, {'APP_ENV': 'development', 'HOST': '127.0.0.1'}):
+            importlib.reload(config)
+
+    def test_15_pid_ownership_stale_pid_behavioral(self):
+        """
+        Behavioral test: Verifies that stop-termux.sh cleanly quarantines/removes a stale PID file
+        without attempting to terminate non-existent processes or failing.
+        """
+        bash_bin = _find_bash()
+        if not bash_bin:
+            self.skipTest("Bash binary not available in test environment")
+
+        data_dir = Path(REPO_ROOT) / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        test_pid_file = data_dir / "app.pid"
+
+        # Write a non-existent PID
+        test_pid_file.write_text("99999999", encoding="utf-8")
+
+        try:
+            res = subprocess.run([bash_bin, "stop-termux.sh"], cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            self.assertEqual(res.returncode, 0, f"stop-termux.sh failed on stale PID: {res.stderr}")
+            # PID file must have been removed safely
+            self.assertFalse(test_pid_file.exists(), "Stale PID file must be cleaned up")
+        finally:
+            if test_pid_file.exists():
+                test_pid_file.unlink()
+
+    def test_16_pid_ownership_unrelated_process_behavioral(self):
+        """
+        Behavioral test: Verifies that stop-termux.sh detects an unrelated process in the PID file,
+        safely preserves the unrelated process (does NOT terminate it), and removes the stale PID file.
+        """
+        bash_bin = _find_bash()
+        if not bash_bin:
+            self.skipTest("Bash binary not available in test environment")
+
+        # Spawn an unrelated Python process sleeping in background
+        unrelated_proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        data_dir = Path(REPO_ROOT) / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        app_pid_file = data_dir / "app.pid"
+
+        try:
+            # Write unrelated process PID into PostPilot app.pid
+            app_pid_file.write_text(str(unrelated_proc.pid), encoding="utf-8")
+
+            # Run stop-termux.sh
+            res = subprocess.run([bash_bin, "stop-termux.sh"], cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            self.assertEqual(res.returncode, 0, f"stop-termux.sh failed: {res.stderr}")
+
+            # Verify the unrelated process is STILL RUNNING (not terminated)
+            self.assertIsNone(unrelated_proc.poll(), "stop-termux.sh must NOT terminate an unrelated foreign process!")
+
+            # Verify the stale/foreign PID file was removed
+            self.assertFalse(app_pid_file.exists(), "Stale/foreign PID file must be cleaned up")
+        finally:
+            # Clean up test process
+            try:
+                unrelated_proc.terminate()
+                unrelated_proc.wait(timeout=2)
+            except Exception:
+                pass
+            if app_pid_file.exists():
+                app_pid_file.unlink()
+
+    def test_17_pid_ownership_valid_postpilot_process_behavioral(self):
+        """
+        Behavioral test: Verifies that stop-termux.sh correctly identifies a genuine PostPilot process,
+        terminates it cleanly, and removes the PID file.
+        """
+        bash_bin = _find_bash()
+        if not bash_bin:
+            self.skipTest("Bash binary not available in test environment")
+
+        # Spawn a genuine PostPilot worker process inside REPO_ROOT
+        mock_worker = subprocess.Popen(
+            [sys.executable, "worker.py"],
+            cwd=REPO_ROOT
+        )
+        data_dir = Path(REPO_ROOT) / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        worker_pid_file = data_dir / "worker.pid"
+
+        try:
+            worker_pid_file.write_text(str(mock_worker.pid), encoding="utf-8")
+
+            # Run stop-termux.sh
+            res = subprocess.run([bash_bin, "stop-termux.sh"], cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            self.assertEqual(res.returncode, 0, f"stop-termux.sh failed: {res.stderr}")
+
+            # Give process a moment to exit
+            try:
+                mock_worker.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+
+            # Verified process should be stopped
+            self.assertIsNotNone(mock_worker.poll(), "Valid PostPilot worker process must be cleanly stopped")
+            self.assertFalse(worker_pid_file.exists(), "PID file must be removed after clean termination")
+        finally:
+            try:
+                mock_worker.terminate()
+                mock_worker.wait(timeout=1)
+            except Exception:
+                pass
+            if worker_pid_file.exists():
+                worker_pid_file.unlink()
+
+    def test_18_shell_syntax_validation(self):
+        """
+        Validates syntax of all Termux shell scripts using bash -n.
+        """
+        bash_bin = _find_bash()
+        if not bash_bin:
+            self.skipTest("Bash binary not available in test environment")
+
+        scripts = [
+            "setup-termux.sh",
+            "start-termux.sh",
+            "stop-termux.sh",
+            "update-termux.sh"
+        ]
+        for script_name in scripts:
+            script_path = Path(REPO_ROOT) / script_name
+            self.assertTrue(script_path.exists(), f"Missing script {script_name}")
+            res = subprocess.run([bash_bin, "-n", str(script_path)], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"Syntax error in {script_name}: {res.stderr}")
 
 
 if __name__ == '__main__':

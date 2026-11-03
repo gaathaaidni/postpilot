@@ -54,8 +54,14 @@ if not SECRET_KEY:
 DEBUG = os.getenv('FLASK_DEBUG', '1' if APP_ENV == 'development' else '0') == '1'
 
 # Network binding
-# Termux and dev bind to 127.0.0.1 by default for safety; production binds to 0.0.0.0 or 127.0.0.1 behind Nginx
-HOST = os.getenv('HOST', '127.0.0.1' if APP_ENV in ('development', 'termux') else '0.0.0.0')
+# When running inside Termux, strictly enforce 127.0.0.1 (loopback) to prevent accidental
+# exposure on mobile hotspot, LAN, or cellular interfaces. Custom HOST overrides are rejected.
+# In development, HOST can be overridden (e.g. for LAN testing), defaulting to 127.0.0.1.
+# In production, HOST defaults to 0.0.0.0 or configured host behind reverse proxy.
+if APP_ENV == 'termux':
+    HOST = '127.0.0.1'
+else:
+    HOST = os.getenv('HOST', '127.0.0.1' if APP_ENV == 'development' else '0.0.0.0')
 PORT = int(os.getenv('PORT', 5000))
 
 # Security & Session Settings
