@@ -3324,3 +3324,137 @@ def schedule_content_draft(draft_id, scheduled_for, timezone_name=None, organiza
         'timezone': resolved_tz,
         'status': 'scheduled'
     }
+
+
+def get_marketing_dashboard_analytics(organization_id=1, brand_id=None, campaign_id=None):
+    """
+    Computes aggregated marketing performance analytics scoped to an organization:
+    - Campaigns summary (total, active, completed, archived)
+    - Drafts lifecycle distribution (draft, pending_approval, approved, scheduled, published, rejected)
+    - Publishing throughput and health (scheduled, publishing, published, failed, success rate)
+    - Platform distribution
+    - AI consumption summary
+    """
+    org_id = int(organization_id)
+    b_id = int(brand_id) if brand_id is not None else None
+    c_id = int(campaign_id) if campaign_id is not None else None
+
+    with get_db_connection() as conn:
+        # 1. Campaigns summary
+        c_query = "SELECT status, COUNT(*) as cnt FROM campaigns WHERE organization_id = ?"
+        c_params = [org_id]
+        if b_id is not None:
+            c_query += " AND brand_id = ?"
+            c_params.append(b_id)
+        if c_id is not None:
+            c_query += " AND id = ?"
+            c_params.append(c_id)
+        c_query += " GROUP BY status"
+        c_rows = conn.execute(c_query, tuple(c_params)).fetchall()
+
+        campaigns_by_status = {r['status']: r['cnt'] for r in c_rows}
+        total_campaigns = sum(campaigns_by_status.values())
+
+        # 2. Content Drafts breakdown
+        d_query = "SELECT status, target_platform, COUNT(*) as cnt FROM content_drafts WHERE organization_id = ?"
+        d_params = [org_id]
+        if b_id is not None:
+            d_query += " AND brand_id = ?"
+            d_params.append(b_id)
+        if c_id is not None:
+            d_query += " AND campaign_id = ?"
+            d_params.append(c_id)
+        d_query += " GROUP BY status, target_platform"
+        d_rows = conn.execute(d_query, tuple(d_params)).fetchall()
+
+        drafts_by_status = {}
+        drafts_by_platform = {}
+        total_drafts = 0
+        for r in d_rows:
+            st = r['status']
+            plat = r['target_platform']
+            cnt = r['cnt']
+            total_drafts += cnt
+            drafts_by_status[st] = drafts_by_status.get(st, 0) + cnt
+            drafts_by_platform[plat] = drafts_by_platform.get(plat, 0) + cnt
+
+        # 3. Scheduled posts throughput & health
+        sp_query = "SELECT status, post_type, COUNT(*) as cnt FROM scheduled_posts WHERE organization_id = ?"
+        sp_params = [org_id]
+        if b_id is not None:
+            sp_query += " AND brand_id = ?"
+            sp_params.append(b_id)
+        if c_id is not None:
+            sp_query += " AND campaign_id = ?"
+            sp_params.append(c_id)
+        sp_query += " GROUP BY status, post_type"
+        sp_rows = conn.execute(sp_query, tuple(sp_params)).fetchall()
+
+        posts_by_status = {}
+        posts_by_platform = {}
+        total_posts = 0
+        for r in sp_rows:
+            st = r['status']
+            ptype = r['post_type']
+            cnt = r['cnt']
+            total_posts += cnt
+            posts_by_status[st] = posts_by_status.get(st, 0) + cnt
+            posts_by_platform[ptype] = posts_by_platform.get(ptype, 0) + cnt
+
+        published_count = posts_by_status.get('published', 0)
+        failed_count = posts_by_status.get('failed', 0)
+        completed_or_failed = published_count + failed_count
+        success_rate = round((published_count / completed_or_failed * 100.0), 1) if completed_or_failed > 0 else 100.0
+
+        # 4. AI usage metrics
+        ai_summary = get_ai_usage_summary(organization_id=org_id, days=30)
+
+        # 5. Combined platform metrics
+        platforms = set(drafts_by_platform.keys()) | set(posts_by_platform.keys())
+        platform_distribution = {}
+        for p in platforms:
+            platform_distribution[p] = {
+                'drafts_count': drafts_by_platform.get(p, 0),
+                'scheduled_posts_count': posts_by_platform.get(p, 0)
+            }
+
+        return {
+            'organization_id': org_id,
+            'campaigns': {
+                'total': total_campaigns,
+                'active': campaigns_by_status.get('active', 0),
+                'draft': campaigns_by_status.get('draft', 0),
+                'completed': campaigns_by_status.get('completed', 0),
+                'archived': campaigns_by_status.get('archived', 0),
+                'by_status': campaigns_by_status
+            },
+            'drafts': {
+                'total': total_drafts,
+                'draft': drafts_by_status.get('draft', 0),
+                'pending_approval': drafts_by_status.get('pending_approval', 0),
+                'approved': drafts_by_status.get('approved', 0),
+                'scheduled': drafts_by_status.get('scheduled', 0),
+                'published': drafts_by_status.get('published', 0),
+                'rejected': drafts_by_status.get('rejected', 0),
+                'by_status': drafts_by_status
+            },
+            'publishing': {
+                'total_scheduled': total_posts,
+                'published': published_count,
+                'pending': posts_by_status.get('scheduled', 0) + posts_by_status.get('publishing', 0),
+                'failed': failed_count,
+                'success_rate_percentage': success_rate,
+                'by_status': posts_by_status
+            },
+            'platforms': platform_distribution,
+            'ai_usage': {
+                'total_requests': ai_summary['summary'].get('total_requests', 0),
+                'successful_requests': ai_summary['summary'].get('successful_requests', 0),
+                'total_tokens': ai_summary['summary'].get('total_tokens', 0),
+                'estimated_cost_usd': ai_summary['summary'].get('estimated_cost_usd', 0.0)
+            },
+            'social_engagement': {
+                'status': 'not_configured' if not getattr(config, 'FB_ACCESS_TOKEN', None) else 'active',
+                'message': 'Meta social credentials not configured; live social engagement metrics unavailable.' if not getattr(config, 'FB_ACCESS_TOKEN', None) else 'Live engagement connected.'
+            }
+        }

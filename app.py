@@ -2205,6 +2205,29 @@ def get_ai_usage_analytics():
     data = database.get_ai_usage_summary(organization_id=org_id, days=days_int)
     return jsonify(data), 200
 
+
+@app.route('/api/analytics/dashboard', methods=['GET'])
+@login_required
+def get_marketing_dashboard_analytics_route():
+    """Returns aggregated campaign, content draft, publishing throughput, and AI performance metrics."""
+    org_id = session.get('organization_id', 1)
+    brand_id = request.args.get('brand_id')
+    campaign_id = request.args.get('campaign_id')
+    try:
+        b_id = int(brand_id) if brand_id and str(brand_id).strip() else None
+        c_id = int(campaign_id) if campaign_id and str(campaign_id).strip() else None
+        data = database.get_marketing_dashboard_analytics(
+            organization_id=org_id,
+            brand_id=b_id,
+            campaign_id=c_id
+        )
+        return jsonify(data), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error computing marketing dashboard analytics: {e}")
+        return jsonify({'error': 'Failed to compute dashboard analytics'}), 500
+
 @app.route('/api/calendar/events', methods=['GET'])
 @login_required
 def get_calendar_events_route():

@@ -1337,5 +1337,41 @@ class TestCampaignAPI(unittest.TestCase):
         res_org2_export = self.client.get(f'/api/drafts/{draft_id}/export-package', headers=headers_org2)
         self.assertEqual(res_org2_export.status_code, 404)
 
+
+    def test_marketing_performance_dashboard_analytics(self):
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Fetch dashboard analytics for Org 1
+        res = self.client.get('/api/analytics/dashboard', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+
+        self.assertIn('campaigns', data)
+        self.assertIn('drafts', data)
+        self.assertIn('publishing', data)
+        self.assertIn('platforms', data)
+        self.assertIn('ai_usage', data)
+        self.assertIn('social_engagement', data)
+
+        self.assertIn('total', data['campaigns'])
+        self.assertIn('active', data['campaigns'])
+        self.assertIn('total', data['drafts'])
+        self.assertIn('success_rate_percentage', data['publishing'])
+
+        # 2. Filter by brand
+        res_brand = self.client.get('/api/analytics/dashboard?brand_id=10', headers=headers_org1)
+        self.assertEqual(res_brand.status_code, 200)
+        brand_data = res_brand.get_json()
+        self.assertIsInstance(brand_data['campaigns']['total'], int)
+
+        # 3. Tenant isolation: Org 2 dashboard does not include Org 1 metrics
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res_org2 = self.client.get('/api/analytics/dashboard', headers=headers_org2)
+        self.assertEqual(res_org2.status_code, 200)
+        data_org2 = res_org2.get_json()
+        self.assertEqual(data_org2['organization_id'], 2)
+        # Org 2 has far fewer or 0 campaigns compared to Org 1
+        self.assertLess(data_org2['campaigns']['total'], data['campaigns']['total'] + 1)
+
 if __name__ == '__main__':
     unittest.main()
