@@ -17,6 +17,7 @@ from flask import Flask, render_template, jsonify, request, session, send_from_d
 
 import config
 import database
+import timezone_utils
 import channel_runner
 import nexora_suite as tour
 import nexora_by_phoenix_international as visa
@@ -571,27 +572,128 @@ def get_timezones():
 @app.route('/api/schedule', methods=['GET'])
 @login_required
 def get_scheduled():
-    """Retrieves scheduled posts for the active organization with optional filtering."""
+    """Retrieves scheduled posts for the active organization with strict filtering and pagination."""
     post_type = request.args.get('post_type')
     status = request.args.get('status')
     brand_id = request.args.get('brand_id')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
     tz_param = request.args.get('timezone')
-    limit = min(int(request.args.get('limit', 100)), 500)
+    raw_limit = request.args.get('limit', 100)
+    raw_offset = request.args.get('offset', 0)
+    envelope = request.args.get('envelope', '').lower() in ('1', 'true', 'yes')
     org_id = session.get('organization_id', 1)
 
-    posts = database.get_scheduled_posts(
-        organization_id=org_id,
-        post_type=post_type,
-        status=status,
-        brand_id=brand_id,
-        start_date=start_date,
-        end_date=end_date,
-        limit=limit,
-        target_timezone=tz_param
-    )
-    return jsonify(posts)
+    try:
+        limit = int(raw_limit)
+        if limit < 1 or limit > 500:
+            return jsonify({'error': f"Limit must be between 1 and 500. Got: {limit}.", 'code': 'VALIDATION_ERROR'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': f"Limit must be an integer between 1 and 500. Got: '{raw_limit}'.", 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        offset = int(raw_offset)
+        if offset < 0:
+            return jsonify({'error': f"Offset cannot be negative. Got: {offset}.", 'code': 'VALIDATION_ERROR'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': f"Offset must be a non-negative integer. Got: '{raw_offset}'.", 'code': 'VALIDATION_ERROR'}), 400
+
+    if tz_param:
+        try:
+            timezone_utils.validate_timezone_name(tz_param)
+        except ValueError as e:
+            return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+
+    if post_type and post_type not in VALID_POST_TYPES:
+        return jsonify({'error': f"Invalid post_type: '{post_type}'. Must be one of: {', '.join(VALID_POST_TYPES)}.", 'code': 'VALIDATION_ERROR'}), 400
+
+    if status and status not in database.VALID_POST_STATUSES:
+        return jsonify({'error': f"Invalid status: '{status}'.", 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        posts = database.get_scheduled_posts(
+            organization_id=org_id,
+            post_type=post_type,
+            status=status,
+            brand_id=brand_id,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            offset=offset,
+            target_timezone=tz_param
+        )
+        if envelope:
+            resp = jsonify({
+                'success': True,
+                'posts': posts,
+                'count': len(posts),
+                'limit': limit,
+                'offset': offset
+            })
+        else:
+            resp = jsonify(posts)
+        resp.headers['X-Limit'] = str(limit)
+        resp.headers['X-Offset'] = str(offset)
+        return resp
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error fetching scheduled posts: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/queue', methods=['GET'])
+@login_required
+def get_publishing_queue():
+    """Retrieves upcoming posts queued for publishing (alias with scheduled status)."""
+    post_type = request.args.get('post_type')
+    brand_id = request.args.get('brand_id')
+    raw_limit = request.args.get('limit', 50)
+    raw_offset = request.args.get('offset', 0)
+    tz_param = request.args.get('timezone')
+    org_id = session.get('organization_id', 1)
+
+    try:
+        limit = int(raw_limit)
+        if limit < 1 or limit > 500:
+            return jsonify({'error': f"Limit must be between 1 and 500. Got: {limit}.", 'code': 'VALIDATION_ERROR'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': f"Limit must be an integer between 1 and 500. Got: '{raw_limit}'.", 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        offset = int(raw_offset)
+        if offset < 0:
+            return jsonify({'error': f"Offset cannot be negative. Got: {offset}.", 'code': 'VALIDATION_ERROR'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': f"Offset must be a non-negative integer. Got: '{raw_offset}'.", 'code': 'VALIDATION_ERROR'}), 400
+
+    if tz_param:
+        try:
+            timezone_utils.validate_timezone_name(tz_param)
+        except ValueError as e:
+            return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        posts = database.get_scheduled_posts(
+            organization_id=org_id,
+            post_type=post_type,
+            status='scheduled',
+            brand_id=brand_id,
+            limit=limit,
+            offset=offset,
+            target_timezone=tz_param
+        )
+        return jsonify({
+            'success': True,
+            'posts': posts,
+            'count': len(posts),
+            'limit': limit,
+            'offset': offset
+        })
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error fetching publishing queue: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/api/schedule', methods=['POST'])
 @login_required

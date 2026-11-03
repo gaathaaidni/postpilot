@@ -1035,12 +1035,59 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
         return created_rec
 
 def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id=None,
-                        start_date=None, end_date=None, limit=100, target_timezone=None):
+                        start_date=None, end_date=None, limit=100, offset=0, target_timezone=None):
     """
     Retrieves scheduled posts for an organization with optional filtering by channel,
     brand, status, and date range. Automatically augments each post with localized times.
+    Enforces strict pagination bounds and date range ordering.
     """
+    if limit is not None:
+        try:
+            limit = int(limit)
+        except (ValueError, TypeError):
+            raise ValueError(f"Limit must be an integer between 1 and 500. Got: '{limit}'.")
+        if limit < 1 or limit > 500:
+            raise ValueError(f"Limit must be between 1 and 500. Got: {limit}.")
+    else:
+        limit = 100
+
+    if offset is not None:
+        try:
+            offset = int(offset)
+        except (ValueError, TypeError):
+            raise ValueError(f"Offset must be a non-negative integer. Got: '{offset}'.")
+        if offset < 0:
+            raise ValueError(f"Offset cannot be negative. Got: {offset}.")
+    else:
+        offset = 0
+
+    if post_type:
+        if post_type not in ('tour', 'nz', 'gaatha', 'insta'):
+            raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of tour, nz, gaatha, insta.")
+
+    if status:
+        if status not in VALID_POST_STATUSES:
+            raise ValueError(f"Invalid status filter: '{status}'.")
+
+    if brand_id:
+        validate_brand_ownership(brand_id, organization_id)
+
     org_tz = target_timezone or get_organization_timezone(organization_id)
+    if target_timezone:
+        org_tz = timezone_utils.validate_timezone_name(target_timezone)
+
+    start_utc = None
+    if start_date:
+        _, _, start_utc = timezone_utils.parse_and_convert_to_utc(str(start_date), tz_name=org_tz, allow_past=True)
+
+    end_utc = None
+    if end_date:
+        _, _, end_utc = timezone_utils.parse_and_convert_to_utc(str(end_date), tz_name=org_tz, allow_past=True)
+
+    if start_utc and end_utc and start_utc > end_utc:
+        raise ValueError(
+            f"Invalid date range: start_date ('{start_date}') must be earlier than or equal to end_date ('{end_date}')."
+        )
 
     with get_db_connection() as conn:
         query = "SELECT * FROM scheduled_posts WHERE organization_id = ?"
@@ -1054,25 +1101,15 @@ def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id
         if brand_id:
             query += " AND brand_id = ?"
             params.append(int(brand_id))
-        if start_date:
-            try:
-                _, _, start_utc = timezone_utils.parse_and_convert_to_utc(str(start_date), tz_name=org_tz, allow_past=True)
-                query += " AND scheduled_for >= ?"
-                params.append(start_utc)
-            except Exception:
-                query += " AND scheduled_for >= ?"
-                params.append(str(start_date))
-        if end_date:
-            try:
-                _, _, end_utc = timezone_utils.parse_and_convert_to_utc(str(end_date), tz_name=org_tz, allow_past=True)
-                query += " AND scheduled_for <= ?"
-                params.append(end_utc)
-            except Exception:
-                query += " AND scheduled_for <= ?"
-                params.append(str(end_date))
+        if start_utc:
+            query += " AND scheduled_for >= ?"
+            params.append(start_utc)
+        if end_utc:
+            query += " AND scheduled_for <= ?"
+            params.append(end_utc)
 
-        query += " ORDER BY scheduled_for ASC, id ASC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY scheduled_for ASC, id ASC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
 
         rows = conn.execute(query, tuple(params)).fetchall()
         results = []

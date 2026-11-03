@@ -487,5 +487,88 @@ class TestSchedulerValidation(unittest.TestCase):
                 self.assertEqual(data.get('code'), 'VALIDATION_ERROR')
                 self.assertIn('timezone', data.get('error', '').lower())
 
+    def test_17_calendar_inverted_date_range_rejected(self):
+        """Verifies queries with inverted date ranges (start_date > end_date) return HTTP 400."""
+        # Query where start is after end
+        res = self.client.get('/api/schedule?start_date=2027-06-01T00:00:00&end_date=2027-05-01T00:00:00')
+        self.assertEqual(res.status_code, 400)
+        data = json.loads(res.data)
+        self.assertEqual(data.get('code'), 'VALIDATION_ERROR')
+        self.assertIn('date range', data.get('error', '').lower())
+
+        # Test direct database call
+        with self.assertRaises(ValueError) as ctx:
+            database.get_scheduled_posts(
+                organization_id=1,
+                start_date='2027-06-01T00:00:00',
+                end_date='2027-05-01T00:00:00'
+            )
+        self.assertIn('date range', str(ctx.exception).lower())
+
+    def test_18_calendar_malformed_timezone_filter_rejected(self):
+        """Verifies calendar and queue queries with malformed timezone filters return HTTP 400."""
+        for endpoint in ('/api/schedule?timezone=Mars/Olympus', '/api/queue?timezone=Invalid/Zone'):
+            with self.subTest(endpoint=endpoint):
+                res = self.client.get(endpoint)
+                self.assertEqual(res.status_code, 400)
+                data = json.loads(res.data)
+                self.assertEqual(data.get('code'), 'VALIDATION_ERROR')
+                self.assertIn('timezone', data.get('error', '').lower())
+
+    def test_19_pagination_bounds_and_offset_validation(self):
+        """Verifies pagination bounds enforcement on limits, offsets, and pagination slices."""
+        # 1. Negative offset
+        res_neg = self.client.get('/api/schedule?offset=-1')
+        self.assertEqual(res_neg.status_code, 400)
+        self.assertEqual(json.loads(res_neg.data).get('code'), 'VALIDATION_ERROR')
+
+        # 2. Oversized limit (> 500)
+        res_over = self.client.get('/api/schedule?limit=999')
+        self.assertEqual(res_over.status_code, 400)
+        self.assertEqual(json.loads(res_over.data).get('code'), 'VALIDATION_ERROR')
+
+        # 3. Invalid non-integer limit and offset
+        for bad_param in ('limit=abc', 'offset=xyz'):
+            res_bad = self.client.get(f'/api/schedule?{bad_param}')
+            self.assertEqual(res_bad.status_code, 400)
+            self.assertEqual(json.loads(res_bad.data).get('code'), 'VALIDATION_ERROR')
+
+        # 4. Valid pagination with envelope
+        res_env = self.client.get('/api/schedule?limit=2&offset=0&envelope=true')
+        self.assertEqual(res_env.status_code, 200)
+        data = json.loads(res_env.data)
+        self.assertTrue(data.get('success'))
+        self.assertIn('posts', data)
+        self.assertLessEqual(len(data['posts']), 2)
+        self.assertEqual(data.get('limit'), 2)
+        self.assertEqual(data.get('offset'), 0)
+
+    def test_20_calendar_filter_injection_and_channel_isolation(self):
+        """Verifies filter parameter injection attempts are rejected and tenant isolation preserved."""
+        # 1. Channel injection attempt
+        res_ch = self.client.get("/api/schedule?post_type=tour' OR '1'='1")
+        self.assertEqual(res_ch.status_code, 400)
+        self.assertEqual(json.loads(res_ch.data).get('code'), 'VALIDATION_ERROR')
+
+        # 2. Status injection attempt
+        res_st = self.client.get("/api/schedule?status=scheduled' OR 1=1--")
+        self.assertEqual(res_st.status_code, 400)
+        self.assertEqual(json.loads(res_st.data).get('code'), 'VALIDATION_ERROR')
+
+        # 3. Cross-tenant brand query
+        # Brand 201 belongs to Org 2, session is Org 1
+        res_br = self.client.get("/api/schedule?brand_id=201")
+        self.assertEqual(res_br.status_code, 400)
+        self.assertEqual(json.loads(res_br.data).get('code'), 'VALIDATION_ERROR')
+
+        # 4. Publishing queue endpoint returns only scheduled posts
+        res_q = self.client.get('/api/queue')
+        self.assertEqual(res_q.status_code, 200)
+        q_data = json.loads(res_q.data)
+        self.assertTrue(q_data.get('success'))
+        for p in q_data.get('posts', []):
+            self.assertEqual(p['status'], 'scheduled')
+            self.assertEqual(p['organization_id'], 1)
+
 if __name__ == '__main__':
     unittest.main()
