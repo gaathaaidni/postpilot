@@ -14,6 +14,7 @@ Features:
 - Safe live database backup mechanism
 """
 import os
+import json
 import sqlite3
 import logging
 from pathlib import Path
@@ -239,6 +240,8 @@ def _ensure_indexes(conn):
         ("idx_sched_idempotency", "CREATE INDEX IF NOT EXISTS idx_sched_idempotency ON scheduled_posts(idempotency_key)"),
         ("idx_brands_org", "CREATE INDEX IF NOT EXISTS idx_brands_org ON brands(organization_id, slug)"),
         ("idx_users_org", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(organization_id, username)"),
+        ("idx_audit_post", "CREATE INDEX IF NOT EXISTS idx_audit_post ON post_audit_logs(scheduled_post_id, created_at)"),
+        ("idx_audit_org", "CREATE INDEX IF NOT EXISTS idx_audit_org ON post_audit_logs(organization_id, created_at)"),
     ]
     for name, sql in indexes:
         try:
@@ -331,9 +334,27 @@ def init_db():
                 locked_at TIMESTAMP,
                 published_at TIMESTAMP,
                 idempotency_key TEXT UNIQUE,
+                approved_by INTEGER,
+                approved_at TIMESTAMP,
+                rejection_reason TEXT,
                 created_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 5b. Post audit logs table (lifecycle history & compliance)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS post_audit_logs (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                scheduled_post_id INTEGER NOT NULL,
+                from_status TEXT,
+                to_status TEXT NOT NULL,
+                changed_by INTEGER,
+                reason TEXT,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -378,6 +399,9 @@ def init_db():
         _ensure_column_exists(conn, 'posts', 'brand_id', 'INTEGER')
         _ensure_column_exists(conn, 'users', 'organization_id', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'is_active', 'INTEGER DEFAULT 1')
+        _ensure_column_exists(conn, 'scheduled_posts', 'approved_by', 'INTEGER')
+        _ensure_column_exists(conn, 'scheduled_posts', 'approved_at', 'TIMESTAMP')
+        _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
 
         # Create indexes
         _ensure_indexes(conn)
@@ -971,7 +995,7 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
             )
             row = cur.fetchone()
             conn.commit()
-            return get_scheduled_post_by_id(row['id'], post_type=post_type, organization_id=organization_id)
+            new_id = row['id']
         else:
             cur = conn.execute(
                 "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
@@ -981,7 +1005,19 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
                  scheduled_utc_str, resolved_tz, initial_status, idempotency_key, created_by)
             )
             conn.commit()
-            return get_scheduled_post_by_id(cur.lastrowid, post_type=post_type, organization_id=organization_id)
+            new_id = cur.lastrowid
+
+        created_rec = get_scheduled_post_by_id(new_id, post_type=post_type, organization_id=organization_id)
+        if created_rec:
+            log_post_transition(
+                scheduled_post_id=created_rec['id'],
+                from_status=None,
+                to_status=initial_status,
+                changed_by=created_by,
+                reason="Initial post creation",
+                organization_id=organization_id
+            )
+        return created_rec
 
 def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id=None,
                         start_date=None, end_date=None, limit=100, target_timezone=None):
@@ -1124,7 +1160,7 @@ def update_scheduled_post(schedule_id, message=None, image_filename=None, schedu
         conn.commit()
         return res.rowcount > 0
 
-def cancel_scheduled_post(schedule_id, post_type=None, organization_id=None):
+def cancel_scheduled_post(schedule_id, post_type=None, organization_id=None, user_id=None, reason=None):
     """Cancels a scheduled post if not already published or cancelled."""
     existing = get_scheduled_post_by_id(schedule_id, post_type=post_type, organization_id=organization_id)
     if not existing:
@@ -1143,7 +1179,19 @@ def cancel_scheduled_post(schedule_id, post_type=None, organization_id=None):
             params.append(organization_id)
         res = conn.execute(query, tuple(params))
         conn.commit()
-        return res.rowcount > 0
+        if res.rowcount > 0:
+            log_post_transition(
+                scheduled_post_id=schedule_id,
+                from_status=existing['status'],
+                to_status='cancelled',
+                changed_by=user_id,
+                reason=reason or 'Post cancelled by user',
+                organization_id=existing['organization_id'],
+                conn=conn
+            )
+            conn.commit()
+            return True
+        return False
 
 def delete_scheduled_post(schedule_id, post_type=None, organization_id=None):
     with get_db_connection() as conn:
@@ -1163,6 +1211,7 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
     """
     Atomically claims due scheduled posts across processes without race conditions.
     Also handles stale-lock recovery if a worker crashed while publishing.
+    Only claims posts in 'scheduled' status (drafts, pending_approval, rejected, cancelled are NEVER claimed).
     """
     now = _utcnow()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -1190,7 +1239,16 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
             if res.rowcount > 0:
                 row = conn.execute("SELECT * FROM scheduled_posts WHERE id = ?", (cid,)).fetchone()
                 if row:
-                    claimed.append(dict(row))
+                    row_dict = dict(row)
+                    claimed.append(row_dict)
+                    log_post_transition(
+                        scheduled_post_id=cid,
+                        from_status='scheduled',
+                        to_status='publishing',
+                        reason=f"Claimed by worker {worker_id}",
+                        organization_id=row_dict.get('organization_id', 1),
+                        conn=conn
+                    )
         conn.commit()
         return claimed
 
@@ -1225,6 +1283,14 @@ def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=
                     "UPDATE posts SET last_posted_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (post['post_id'],)
                 )
+            log_post_transition(
+                scheduled_post_id=schedule_id,
+                from_status='publishing',
+                to_status='published',
+                reason='Published successfully to Meta channel',
+                organization_id=post['organization_id'],
+                conn=conn
+            )
         else:
             new_retries = (post['retry_count'] or 0) + 1
             max_r = post['max_retries'] or 3
@@ -1234,5 +1300,175 @@ def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=
                 "locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ? AND locked_by = ?",
                 (new_status, new_retries, safe_err, now_str, schedule_id, worker_id)
             )
+            log_post_transition(
+                scheduled_post_id=schedule_id,
+                from_status='publishing',
+                to_status=new_status,
+                reason=f"Publishing failed (retry {new_retries}/{max_r}): {safe_err}",
+                organization_id=post['organization_id'],
+                conn=conn
+            )
         conn.commit()
         return True
+
+# --- Controlled Post Lifecycle & Approvals Engine ---
+
+VALID_POST_STATUSES = {
+    'draft',
+    'pending_approval',
+    'approved',
+    'scheduled',
+    'publishing',
+    'published',
+    'rejected',
+    'failed',
+    'cancelled'
+}
+
+VALID_TRANSITIONS = {
+    'draft': {'pending_approval', 'scheduled', 'cancelled'},
+    'pending_approval': {'approved', 'rejected', 'draft', 'cancelled', 'scheduled'},
+    'approved': {'scheduled', 'cancelled', 'draft'},
+    'scheduled': {'publishing', 'cancelled', 'draft'},
+    'publishing': {'published', 'scheduled', 'failed'},
+    'rejected': {'draft', 'pending_approval', 'cancelled'},
+    'failed': {'scheduled', 'draft', 'cancelled'},
+    'cancelled': {'draft'}
+}
+
+def log_post_transition(scheduled_post_id, from_status, to_status, changed_by=None,
+                        reason=None, metadata=None, organization_id=1, conn=None):
+    """Records an immutable lifecycle audit event."""
+    clean_reason = None
+    if reason:
+        try:
+            import facebook_api
+            clean_reason = facebook_api.sanitize_log_message(str(reason))
+        except Exception:
+            clean_reason = str(reason)
+
+    clean_meta = None
+    if metadata:
+        clean_meta = json.dumps(metadata) if isinstance(metadata, (dict, list)) else str(metadata)
+
+    if conn is not None:
+        conn.execute(
+            "INSERT INTO post_audit_logs (organization_id, scheduled_post_id, from_status, to_status, "
+            "changed_by, reason, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (organization_id, scheduled_post_id, from_status, to_status, changed_by, clean_reason, clean_meta)
+        )
+    else:
+        with get_db_connection() as c:
+            c.execute(
+                "INSERT INTO post_audit_logs (organization_id, scheduled_post_id, from_status, to_status, "
+                "changed_by, reason, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (organization_id, scheduled_post_id, from_status, to_status, changed_by, clean_reason, clean_meta)
+            )
+            c.commit()
+
+def get_post_audit_history(scheduled_post_id, organization_id=1):
+    """Retrieves chronological lifecycle audit events for a scheduled post."""
+    post = get_scheduled_post_by_id(scheduled_post_id, organization_id=organization_id)
+    if not post:
+        return None
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT pal.*, u.username as changed_by_username "
+            "FROM post_audit_logs pal "
+            "LEFT JOIN users u ON pal.changed_by = u.id "
+            "WHERE pal.scheduled_post_id = ? AND pal.organization_id = ? "
+            "ORDER BY pal.created_at ASC, pal.id ASC",
+            (scheduled_post_id, organization_id)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def transition_post_status(schedule_id, to_status, user_id=None, reason=None, metadata=None, organization_id=1):
+    """
+    Safely transitions a post's lifecycle state according to business rules.
+    Enforces transitions matrix, records approvals/rejections, and logs audit events.
+    """
+    if to_status not in VALID_POST_STATUSES:
+        raise ValueError(f"Invalid target status: '{to_status}'.")
+
+    post = get_scheduled_post_by_id(schedule_id, organization_id=organization_id)
+    if not post:
+        raise ValueError(f"Scheduled post #{schedule_id} does not exist or does not belong to active organization.")
+
+    current_status = post.get('status', 'draft')
+    if current_status == to_status:
+        return post
+
+    allowed = VALID_TRANSITIONS.get(current_status, set())
+    if to_status not in allowed:
+        raise ValueError(f"Illegal lifecycle transition: cannot move post #{schedule_id} from '{current_status}' to '{to_status}'.")
+
+    if to_status == 'rejected' and (not reason or not str(reason).strip()):
+        raise ValueError("A specific rejection reason is mandatory when rejecting content.")
+
+    now_str = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    updates = ["status = ?", "updated_at = ?"]
+    params = [to_status, now_str]
+
+    if to_status in ('approved', 'scheduled'):
+        if current_status == 'pending_approval' or not post.get('approved_by'):
+            updates.append("approved_by = ?")
+            params.append(user_id)
+            updates.append("approved_at = ?")
+            params.append(now_str)
+        updates.append("rejection_reason = NULL")
+    elif to_status == 'rejected':
+        updates.append("rejection_reason = ?")
+        params.append(reason.strip())
+    elif to_status == 'draft':
+        updates.append("rejection_reason = NULL")
+
+    query = f"UPDATE scheduled_posts SET {', '.join(updates)} WHERE id = ? AND organization_id = ?"
+    params.extend([schedule_id, organization_id])
+
+    with get_db_connection() as conn:
+        res = conn.execute(query, tuple(params))
+        if res.rowcount == 0:
+            raise ValueError(f"Failed to update post #{schedule_id}.")
+
+        log_post_transition(
+            scheduled_post_id=schedule_id,
+            from_status=current_status,
+            to_status=to_status,
+            changed_by=user_id,
+            reason=reason,
+            metadata=metadata,
+            organization_id=organization_id,
+            conn=conn
+        )
+        conn.commit()
+
+    return get_scheduled_post_by_id(schedule_id, organization_id=organization_id)
+
+def retry_failed_post(schedule_id, user_id=None, organization_id=1):
+    """Resets a failed post back into the 'scheduled' queue."""
+    post = get_scheduled_post_by_id(schedule_id, organization_id=organization_id)
+    if not post:
+        raise ValueError(f"Scheduled post #{schedule_id} not found.")
+    if post['status'] != 'failed':
+        raise ValueError(f"Only posts in 'failed' status can be retried. Current status is '{post['status']}'.")
+
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE scheduled_posts SET status = 'scheduled', retry_count = 0, error_message = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?",
+            (schedule_id, organization_id)
+        )
+        log_post_transition(
+            scheduled_post_id=schedule_id,
+            from_status='failed',
+            to_status='scheduled',
+            changed_by=user_id,
+            reason='Manual retry requested by user',
+            organization_id=organization_id,
+            conn=conn
+        )
+        conn.commit()
+
+    return get_scheduled_post_by_id(schedule_id, organization_id=organization_id)
+

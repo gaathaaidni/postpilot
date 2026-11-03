@@ -673,12 +673,136 @@ def cancel_scheduled(schedule_id):
     """Cancels a scheduled post scoped to organization."""
     org_id = session.get('organization_id', 1)
     try:
-        success = database.cancel_scheduled_post(schedule_id=schedule_id, organization_id=org_id)
+        success = database.cancel_scheduled_post(
+            schedule_id=schedule_id,
+            organization_id=org_id,
+            user_id=session.get('user_id')
+        )
         if not success:
             return jsonify({'error': 'Scheduled post not found or cannot be cancelled', 'code': 'NOT_FOUND'}), 404
         return jsonify({'success': True})
     except ValueError as e:
         return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+
+# --- Content Approvals & Lifecycle Endpoints ---
+
+@app.route('/api/approvals/pending', methods=['GET'])
+@login_required
+def get_pending_approvals():
+    """Retrieves posts in pending_approval status for the active organization."""
+    org_id = session.get('organization_id', 1)
+    brand_id = request.args.get('brand_id')
+    post_type = request.args.get('post_type')
+    posts = database.get_scheduled_posts(
+        organization_id=org_id,
+        status='pending_approval',
+        brand_id=brand_id,
+        post_type=post_type
+    )
+    return jsonify({'success': True, 'count': len(posts), 'posts': posts})
+
+@app.route('/api/approvals/<int:schedule_id>/approve', methods=['POST'])
+@login_required
+@csrf_protect
+def approve_post(schedule_id):
+    """Approves a post in pending_approval status, transitioning it to scheduled."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        updated = database.transition_post_status(
+            schedule_id=schedule_id,
+            to_status='scheduled',
+            user_id=user_id,
+            reason='Content approved for publishing',
+            organization_id=org_id
+        )
+        return jsonify({'success': True, 'post': updated})
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error approving post #{schedule_id}: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/approvals/<int:schedule_id>/reject', methods=['POST'])
+@login_required
+@csrf_protect
+def reject_post(schedule_id):
+    """Rejects a post in pending_approval status with mandatory reason."""
+    data = request.get_json() or {}
+    reason = data.get('reason', '').strip()
+    if not reason:
+        return jsonify({'error': 'A specific rejection reason is required', 'code': 'REASON_REQUIRED'}), 400
+
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        updated = database.transition_post_status(
+            schedule_id=schedule_id,
+            to_status='rejected',
+            user_id=user_id,
+            reason=reason,
+            organization_id=org_id
+        )
+        return jsonify({'success': True, 'post': updated})
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error rejecting post #{schedule_id}: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/schedule/<int:schedule_id>/history', methods=['GET'])
+@login_required
+def get_post_history(schedule_id):
+    """Retrieves full audit trail of lifecycle transitions for a scheduled post."""
+    org_id = session.get('organization_id', 1)
+    history = database.get_post_audit_history(schedule_id, organization_id=org_id)
+    if history is None:
+        return jsonify({'error': 'Post not found or inaccessible', 'code': 'NOT_FOUND'}), 404
+    return jsonify({'success': True, 'post_id': schedule_id, 'history': history})
+
+@app.route('/api/schedule/<int:schedule_id>/retry', methods=['POST'])
+@login_required
+@csrf_protect
+def retry_post(schedule_id):
+    """Retries a failed scheduled post by returning it to scheduled queue."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        updated = database.retry_failed_post(schedule_id, user_id=user_id, organization_id=org_id)
+        return jsonify({'success': True, 'post': updated})
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error retrying post #{schedule_id}: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/schedule/<int:schedule_id>/transition', methods=['POST'])
+@login_required
+@csrf_protect
+def transition_post(schedule_id):
+    """Direct lifecycle state transition endpoint (e.g. submit draft for approval)."""
+    data = request.get_json() or {}
+    to_status = data.get('status')
+    reason = data.get('reason')
+    if not to_status:
+        return jsonify({'error': 'status is required', 'code': 'MISSING_STATUS'}), 400
+
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        updated = database.transition_post_status(
+            schedule_id=schedule_id,
+            to_status=to_status,
+            user_id=user_id,
+            reason=reason,
+            organization_id=org_id
+        )
+        return jsonify({'success': True, 'post': updated})
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error transitioning post #{schedule_id}: {e}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 # --- Multi-Organization & Brand Workspaces Endpoints ---
