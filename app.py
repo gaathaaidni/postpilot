@@ -1248,6 +1248,142 @@ def update_campaign_strategy_route(campaign_id):
         logger.error(f"Error updating campaign strategy: {e}")
         return jsonify({'error': 'Failed to update campaign strategy'}), 500
 
+
+@app.route('/api/campaigns/<int:campaign_id>/planner', methods=['POST'])
+@login_required
+@csrf_protect
+def generate_campaign_content_plan_route(campaign_id):
+    """Generates an intelligent weekly or monthly editorial content plan for a campaign."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    period_type = str(data.get('period_type', 'weekly')).strip().lower()
+    if period_type not in ('weekly', 'monthly'):
+        period_type = 'weekly'
+
+    start_date = data.get('start_date')
+    platforms = data.get('platforms')
+    provider_name = data.get('provider')
+    model_name = data.get('model')
+
+    try:
+        camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+        if not camp:
+            return jsonify({'error': 'Campaign not found'}), 404
+
+        brand = database.get_brand_by_id(camp['brand_id'], organization_id=org_id)
+        if not brand:
+            return jsonify({'error': 'Associated brand not found'}), 404
+
+        profile = database.get_brand_marketing_profile(camp['brand_id'], organization_id=org_id) or {}
+        brand_info = {
+            'id': brand['id'],
+            'name': brand['name'],
+            'voice_tone': profile.get('voice_tone', 'Professional and engaging'),
+            'prohibited_claims': profile.get('prohibited_claims', '')
+        }
+
+        ai_provider = ai_service.get_ai_provider(provider_name=provider_name, model=model_name)
+        plan_dict = ai_service.generate_content_plan(
+            provider=ai_provider,
+            brand_info=brand_info,
+            campaign_info=camp,
+            period_type=period_type,
+            start_date=start_date,
+            platforms=platforms,
+            model=model_name
+        )
+
+        entries = plan_dict.get('entries') or []
+        s_date = entries[0]['suggested_date'] if entries else (start_date or 'today')
+        e_date = entries[-1]['suggested_date'] if entries else s_date
+
+        saved_plan = database.create_content_plan(
+            organization_id=org_id,
+            brand_id=camp['brand_id'],
+            campaign_id=campaign_id,
+            period_type=period_type,
+            start_date=s_date,
+            end_date=e_date,
+            entries=entries,
+            posting_frequency=plan_dict.get('posting_frequency'),
+            created_by=session.get('user_id')
+        )
+
+        database.log_ai_usage(
+            organization_id=org_id,
+            brand_id=camp['brand_id'],
+            campaign_id=campaign_id,
+            provider=provider_name or 'mock',
+            model=model_name or 'mock-v1',
+            prompt_tokens=400,
+            completion_tokens=600,
+            total_tokens=1000,
+            success=True
+        )
+
+        return jsonify({'status': 'success', 'plan': saved_plan}), 201
+
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except ai_service.AIRateLimitError as e:
+        return jsonify({'error': str(e)}), 429
+    except ai_service.AIConfigurationError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error generating campaign content plan: {e}")
+        return jsonify({'error': 'Failed to generate campaign content plan'}), 500
+
+@app.route('/api/campaigns/<int:campaign_id>/plans', methods=['GET'])
+@login_required
+def get_campaign_content_plans_route(campaign_id):
+    """Retrieves all editorial content plans created for a campaign."""
+    org_id = session.get('organization_id', 1)
+    try:
+        camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
+        if not camp:
+            return jsonify({'error': 'Campaign not found'}), 404
+        plans = database.get_content_plans(organization_id=org_id, campaign_id=campaign_id)
+        return jsonify({'status': 'success', 'plans': plans}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error retrieving content plans: {e}")
+        return jsonify({'error': 'Failed to retrieve content plans'}), 500
+
+@app.route('/api/plans/<int:plan_id>', methods=['GET'])
+@login_required
+def get_content_plan_by_id_route(plan_id):
+    """Retrieves a single editorial content plan and all its calendar entries."""
+    org_id = session.get('organization_id', 1)
+    try:
+        plan = database.get_content_plan_by_id(plan_id, organization_id=org_id)
+        if not plan:
+            return jsonify({'error': 'Content plan not found'}), 404
+        return jsonify({'status': 'success', 'plan': plan}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error retrieving content plan {plan_id}: {e}")
+        return jsonify({'error': 'Failed to retrieve content plan'}), 500
+
+@app.route('/api/plans/entries/<int:entry_id>/convert', methods=['POST'])
+@login_required
+@csrf_protect
+def convert_plan_entry_to_draft_route(entry_id):
+    """Converts a planned content plan entry into an editable content draft."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    try:
+        draft = database.convert_plan_entry_to_draft(entry_id, organization_id=org_id, user_id=user_id)
+        return jsonify({'status': 'success', 'draft': draft}), 201
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error converting plan entry {entry_id} to draft: {e}")
+        return jsonify({'error': 'Failed to convert plan entry to draft'}), 500
+
 _RECENT_GENERATION_CACHE = {}  # {key: (timestamp, status_code, response_data)}
 
 def _get_deduplicated_generation(key, window_seconds=15):

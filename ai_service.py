@@ -10,6 +10,7 @@ import re
 import json
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta, timezone
 import requests
 
 import config
@@ -386,6 +387,126 @@ def parse_strategy_json_response(raw_text, strict=False):
             res[k] = str(val).strip()
     return res
 
+
+def build_content_planner_prompts(brand_info, campaign_info, period_type="weekly", start_date=None, platforms=None):
+    """
+    Builds structured prompts for generating an editorial content plan (weekly or monthly).
+    Returns (system_prompt, user_prompt).
+    """
+    brand_name = brand_info.get("name", "GAATHA")
+    brand_voice = brand_info.get("voice_tone", "professional, engaging, and clear")
+    prohibited_claims = brand_info.get("prohibited_claims", "Never make unverified promises or unsubstantiated technical claims.")
+
+    target_platforms = platforms or ["linkedin", "instagram", "x", "facebook"]
+    num_entries = 6 if period_type == "weekly" else 14
+    s_date = start_date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    system_prompt = (
+        f"You are the Lead Marketing Strategist and Editorial Planner for {brand_name}.\n"
+        f"Brand Voice: {brand_voice}\n"
+        f"Prohibited Claims: {prohibited_claims}\n\n"
+        "Your task is to produce a structured, high-impact editorial content calendar. "
+        "Every planned entry must align strictly with the brand voice and campaign objectives.\n"
+        "You must respond ONLY with a valid JSON object matching this schema:\n"
+        "{\n"
+        '  "posting_frequency": "e.g. 5 posts / week across LinkedIn, Instagram, X, Facebook",\n'
+        '  "entries": [\n'
+        '    {\n'
+        '      "suggested_date": "YYYY-MM-DD",\n'
+        '      "platform": "linkedin|instagram|x|facebook",\n'
+        '      "theme": "Educational|Product Spotlight|Thought Leadership|Community",\n'
+        '      "content_format": "post|carousel|thread|reel",\n'
+        '      "topic": "Concise summary of the planned topic",\n'
+        '      "headline": "Catchy headline for the post",\n'
+        '      "call_to_action": "Clear action for the audience"\n'
+        '    }\n'
+        '  ]\n'
+        "}\n"
+        "Do not include markdown code block formatting if possible. Output pure JSON."
+    )
+
+    user_prompt = (
+        f"Generate a {period_type.upper()} editorial content plan starting from {s_date}.\n"
+        f"Campaign: {campaign_info.get('name', 'General Marketing')}\n"
+        f"Campaign Objective: {campaign_info.get('objective', 'Brand awareness and lead generation')}\n"
+        f"Target Audience: {campaign_info.get('target_audience', 'Professionals and decision makers')}\n"
+        f"Brief: {campaign_info.get('brief', 'Highlight product benefits and thought leadership')}\n"
+        f"Target Platforms: {', '.join(target_platforms)}\n"
+        f"Required number of entries: approximately {num_entries} entries distributed over the period.\n\n"
+        "Produce the JSON content plan now:"
+    )
+    return system_prompt, user_prompt
+
+def parse_content_plan_json_response(raw_text, default_start_date=None, period_type="weekly"):
+    """
+    Parses JSON containing editorial content plan entries from AI response.
+    Returns a dict with 'posting_frequency' and 'entries' list.
+    """
+    if not raw_text or not raw_text.strip():
+        raise AIResponseValidationError("Empty content plan response received from AI provider.")
+
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```(?:json)?\s*", "", clean)
+        clean = re.sub(r"\s*```$", "", clean)
+        clean = clean.strip()
+
+    data = None
+    try:
+        data = json.loads(clean)
+    except Exception:
+        match = re.search(r"\{[\s\S]*\}", clean)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                pass
+
+    if isinstance(data, list):
+        data = {"entries": data}
+    elif not isinstance(data, dict):
+        raise AIResponseValidationError("Could not parse valid JSON dictionary or list from content plan response.")
+
+    raw_entries = data.get("entries") or []
+    if not isinstance(raw_entries, list):
+        raw_entries = []
+
+    validated_entries = []
+    base_date = None
+    try:
+        base_date = datetime.strptime(default_start_date or "", "%Y-%m-%d").date()
+    except Exception:
+        base_date = datetime.now(timezone.utc).date()
+
+    for i, ent in enumerate(raw_entries):
+        if not isinstance(ent, dict):
+            continue
+        s_date = ent.get("suggested_date")
+        if not s_date or not re.match(r"^\d{4}-\d{2}-\d{2}$", str(s_date)):
+            offset = i if period_type == "weekly" else (i * 2)
+            s_date = (base_date + timedelta(days=offset)).strftime("%Y-%m-%d")
+
+        plat = str(ent.get("platform") or "linkedin").strip().lower()
+        if plat not in ("linkedin", "instagram", "x", "facebook", "twitter", "threads", "youtube", "tiktok", "pinterest"):
+            plat = "linkedin"
+        if plat == "twitter":
+            plat = "x"
+
+        validated_entries.append({
+            "suggested_date": str(s_date),
+            "platform": plat,
+            "theme": str(ent.get("theme") or "Marketing"),
+            "content_format": str(ent.get("content_format") or "post"),
+            "topic": str(ent.get("topic") or "General update"),
+            "headline": str(ent.get("headline") or "Exciting Developments"),
+            "call_to_action": str(ent.get("call_to_action") or "Learn More")
+        })
+
+    return {
+        "posting_frequency": str(data.get("posting_frequency") or f"{len(validated_entries)} posts across key channels"),
+        "entries": validated_entries
+    }
+
 # --- Base AI Provider ---
 
 class BaseAIProvider(ABC):
@@ -557,6 +678,60 @@ class MockAIProvider(BaseAIProvider):
             "posting_frequency": "LinkedIn: 3x/week; Instagram: 4x/week (carousels & reels); X: 5x/week (threads & updates); Facebook: 2x/week.",
             "success_metrics": "Impressions (50k+), Engagement rate (>3.5%), Demo requests (+40%), Marketing qualified leads (+25%).",
             "risks_and_verification": "Strictly enforce prohibited claims: do not cite unverified client numbers or unapproved certifications. All technical statements must align with official documentation."
+        }
+
+
+    def generate_content_plan(self, brand_info, campaign_info, period_type="weekly", start_date=None, platforms=None, model=None, temperature=0.7) -> dict:
+        if self.simulate_rate_limit or self.simulated_error == "rate_limit":
+            raise AIRateLimitError("Simulated provider rate limit exceeded (HTTP 429).", provider="mock", status_code=429)
+        if self.simulate_timeout or self.simulated_error == "timeout":
+            raise AITimeoutError("Simulated request timed out after 30s.", provider="mock")
+        if self.simulate_invalid_json or self.simulated_error == "invalid_json":
+            raise AIResponseValidationError("Simulated invalid JSON from model.", provider="mock")
+        if self.simulated_error:
+            err = self.simulated_error
+            if err == "config":
+                raise AIConfigurationError("Simulated AI provider API key is missing or invalid.", provider="mock")
+            else:
+                raise AIProviderError(f"Simulated AI provider error: {err}", provider="mock")
+
+        base_date = None
+        try:
+            base_date = datetime.strptime(start_date or "", "%Y-%m-%d").date()
+        except Exception:
+            base_date = datetime.now(timezone.utc).date()
+
+        target_platforms = platforms or ["linkedin", "instagram", "x", "facebook"]
+        brand_name = brand_info.get("name", "GAATHA")
+        camp_name = campaign_info.get("name", "Campaign")
+
+        is_weekly = (str(period_type).lower() == "weekly")
+        num_entries = 6 if is_weekly else 14
+        step = 1 if is_weekly else 2
+
+        entries = []
+        themes = ["Thought Leadership", "Product Spotlight", "Customer Success", "Behind The Scenes", "Industry Insights", "Educational Deep-Dive"]
+        formats = ["post", "carousel", "thread", "reel", "post", "infographic"]
+
+        for i in range(num_entries):
+            entry_date = (base_date + timedelta(days=i * step)).strftime("%Y-%m-%d")
+            plat = target_platforms[i % len(target_platforms)]
+            theme = themes[i % len(themes)]
+            fmt = formats[i % len(formats)]
+            entries.append({
+                "suggested_date": entry_date,
+                "platform": plat,
+                "theme": theme,
+                "content_format": fmt,
+                "topic": f"{brand_name} {theme}: Strategic perspective for {camp_name} on {plat}.",
+                "headline": f"Transforming Workflows with {brand_name}",
+                "call_to_action": f"Read the full story on {brand_name}."
+            })
+
+        return {
+            "posting_frequency": f"{len(entries)} posts scheduled over {period_type}",
+            "entries": entries,
+            "raw_response": json.dumps({"entries": entries})
         }
 
 # --- OpenAI-Compatible Provider (Groq, OpenAI, Together, DeepSeek, Local Ollama) ---
@@ -746,6 +921,53 @@ class OpenAICompatibleProvider(BaseAIProvider):
         parsed["raw_response"] = content
         return parsed
 
+
+    def generate_content_plan(self, brand_info, campaign_info, period_type="weekly", start_date=None, platforms=None, model=None, temperature=0.7, max_tokens=3000) -> dict:
+        system_prompt, user_prompt = build_content_planner_prompts(brand_info, campaign_info, period_type=period_type, start_date=start_date, platforms=platforms)
+        used_model = model or self.default_model
+
+        if not self.base_url:
+            raise AIConfigurationError(f"AI Provider '{self.provider_name}' is missing a configured base_url.", provider=self.provider_name)
+        if not self.api_key:
+            raise AIConfigurationError(f"AI Provider '{self.provider_name}' requires an API key.", provider=self.provider_name)
+
+        endpoint = f"{self.base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": used_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": float(temperature),
+            "max_tokens": int(max_tokens)
+        }
+        try:
+            resp = requests.post(endpoint, json=payload, headers=headers, timeout=self.timeout)
+        except requests.exceptions.Timeout as e:
+            raise AITimeoutError(f"AI Provider '{self.provider_name}' timed out after {self.timeout}s: {self._sanitize_error(e)}", provider=self.provider_name, model=used_model)
+        except requests.exceptions.RequestException as e:
+            raise AIProviderError(f"AI Provider '{self.provider_name}' network error: {self._sanitize_error(e)}", provider=self.provider_name, model=used_model)
+
+        if resp.status_code == 429:
+            raise AIRateLimitError("AI Provider rate limit reached.", provider=self.provider_name, model=used_model, status_code=429)
+        elif resp.status_code in (401, 403):
+            raise AIConfigurationError("AI Provider authentication failed.", provider=self.provider_name, model=used_model, status_code=resp.status_code)
+        elif resp.status_code != 200:
+            raise AIProviderError(f"AI Provider returned HTTP {resp.status_code}: {self._sanitize_error(resp.text)}", provider=self.provider_name, model=used_model, status_code=resp.status_code)
+
+        try:
+            content = resp.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            raise AIResponseValidationError(f"Failed to parse choices from response: {self._sanitize_error(e)}", provider=self.provider_name, model=used_model)
+
+        parsed = parse_content_plan_json_response(content, default_start_date=start_date, period_type=period_type)
+        parsed["raw_response"] = content
+        return parsed
+
 # --- Pre-Configured Provider Classes ---
 
 class GroqProvider(OpenAICompatibleProvider):
@@ -852,6 +1074,23 @@ def generate_campaign_strategy(provider, brand_info, campaign_info, model=None, 
         system_prompt, user_prompt = build_strategy_prompts(brand_info, campaign_info)
         gen_res = provider.generate(system_prompt, user_prompt, model=model, temperature=temperature, max_tokens=2500)
         res = parse_strategy_json_response(gen_res.raw_response or gen_res.caption)
+
+    if 'raw_response' not in res:
+        res['raw_response'] = json.dumps(res)
+    return res
+
+
+def generate_content_plan(provider, brand_info, campaign_info, period_type="weekly", start_date=None, platforms=None, model=None, temperature=0.7):
+    """
+    Orchestrates weekly or monthly editorial content plan generation.
+    Returns dict with posting_frequency, entries list, and raw_response.
+    """
+    if hasattr(provider, 'generate_content_plan'):
+        res = provider.generate_content_plan(brand_info, campaign_info, period_type=period_type, start_date=start_date, platforms=platforms, model=model, temperature=temperature)
+    else:
+        system_prompt, user_prompt = build_content_planner_prompts(brand_info, campaign_info, period_type=period_type, start_date=start_date, platforms=platforms)
+        gen_res = provider.generate(system_prompt, user_prompt, model=model, temperature=temperature, max_tokens=3000)
+        res = parse_content_plan_json_response(gen_res.raw_response or gen_res.caption, default_start_date=start_date, period_type=period_type)
 
     if 'raw_response' not in res:
         res['raw_response'] = json.dumps(res)

@@ -1007,5 +1007,73 @@ class TestCampaignAPI(unittest.TestCase):
         }, headers=headers_org2)
         self.assertEqual(res.status_code, 404)
 
+
+    def test_content_planner_generation_and_draft_conversion(self):
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Create a campaign for testing the planner
+        camp_res = self.client.post('/api/campaigns', json={
+            'name': 'Planner Q4 Campaign',
+            'brand_id': 10,
+            'objective': 'Expand Market Share',
+            'brief': 'Deliver high value thought leadership across channels',
+            'start_date': '2027-10-01',
+            'end_date': '2027-10-31'
+        }, headers=headers_org1)
+        self.assertEqual(camp_res.status_code, 201)
+        camp_id = camp_res.get_json()['id']
+
+        # 2. Generate a weekly content plan
+        plan_res = self.client.post(f'/api/campaigns/{camp_id}/planner', json={
+            'period_type': 'weekly',
+            'start_date': '2027-10-05',
+            'platforms': ['linkedin', 'x', 'instagram']
+        }, headers=headers_org1)
+        self.assertEqual(plan_res.status_code, 201)
+        plan_data = plan_res.get_json()['plan']
+        self.assertEqual(plan_data['period_type'], 'weekly')
+        self.assertEqual(plan_data['campaign_id'], camp_id)
+        self.assertGreaterEqual(len(plan_data['entries']), 5)
+
+        first_entry = plan_data['entries'][0]
+        self.assertIn('suggested_date', first_entry)
+        self.assertIn('platform', first_entry)
+        self.assertIn('topic', first_entry)
+        self.assertEqual(first_entry['status'], 'planned')
+
+        # 3. Retrieve plans list for the campaign
+        plans_res = self.client.get(f'/api/campaigns/{camp_id}/plans', headers=headers_org1)
+        self.assertEqual(plans_res.status_code, 200)
+        plans_list = plans_res.get_json()['plans']
+        self.assertTrue(any(p['id'] == plan_data['id'] for p in plans_list))
+
+        # 4. Retrieve plan details by ID
+        detail_res = self.client.get(f'/api/plans/{plan_data["id"]}', headers=headers_org1)
+        self.assertEqual(detail_res.status_code, 200)
+        self.assertEqual(len(detail_res.get_json()['plan']['entries']), len(plan_data['entries']))
+
+        # 5. Convert first planned entry into an editable content draft
+        convert_res = self.client.post(f'/api/plans/entries/{first_entry["id"]}/convert', json={}, headers=headers_org1)
+        self.assertEqual(convert_res.status_code, 201)
+        draft = convert_res.get_json()['draft']
+        self.assertEqual(draft['campaign_id'], camp_id)
+        self.assertEqual(draft['brand_id'], 10)
+        self.assertEqual(draft['target_platform'], first_entry['platform'])
+        self.assertEqual(draft['status'], 'draft')
+
+        # 6. Check that draft has revision 1 created
+        revs_res = self.client.get(f'/api/drafts/{draft["id"]}/revisions', headers=headers_org1)
+        self.assertEqual(revs_res.status_code, 200)
+        self.assertEqual(len(revs_res.get_json()['revisions']), 1)
+
+        # 7. Tenant isolation check: Org 2 cannot access Org 1 plan or convert its entries
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res_org2_get = self.client.get(f'/api/plans/{plan_data["id"]}', headers=headers_org2)
+        self.assertEqual(res_org2_get.status_code, 404)
+
+        second_entry = plan_data['entries'][1]
+        res_org2_convert = self.client.post(f'/api/plans/entries/{second_entry["id"]}/convert', json={}, headers=headers_org2)
+        self.assertEqual(res_org2_convert.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

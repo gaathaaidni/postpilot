@@ -260,6 +260,8 @@ def _ensure_indexes(conn):
         ("idx_cdr_campaign", "CREATE INDEX IF NOT EXISTS idx_cdr_campaign ON content_draft_revisions(organization_id, campaign_id)"),
         ("idx_campaign_strategies_camp", "CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_strategies_camp ON campaign_strategies(organization_id, campaign_id)"),
         ("idx_ai_usage_org_created", "CREATE INDEX IF NOT EXISTS idx_ai_usage_org_created ON ai_usage_logs(organization_id, created_at)"),
+        ("idx_content_plans_org_camp", "CREATE INDEX IF NOT EXISTS idx_content_plans_org_camp ON content_plans(organization_id, campaign_id)"),
+        ("idx_plan_entries_plan", "CREATE INDEX IF NOT EXISTS idx_plan_entries_plan ON content_plan_entries(organization_id, plan_id, suggested_date)"),
     ]
     for name, sql in indexes:
         try:
@@ -545,6 +547,45 @@ def init_db():
                 cost_estimate REAL DEFAULT 0.0,
                 success INTEGER DEFAULT 1,
                 error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 15. Content plans table (weekly and monthly editorial plans)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS content_plans (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL,
+                period_type TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                posting_frequency TEXT,
+                status TEXT DEFAULT 'draft',
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 16. Content plan entries table (individual calendar entries in a plan)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS content_plan_entries (
+                id {auto_id},
+                plan_id INTEGER NOT NULL,
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER NOT NULL,
+                campaign_id INTEGER NOT NULL,
+                suggested_date TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                theme TEXT,
+                content_format TEXT DEFAULT 'post',
+                topic TEXT NOT NULL,
+                headline TEXT,
+                call_to_action TEXT,
+                status TEXT DEFAULT 'planned',
+                converted_draft_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -2129,6 +2170,8 @@ def delete_campaign(campaign_id, organization_id=1):
     validate_campaign_ownership(campaign_id, organization_id)
     c_id = int(campaign_id)
     with get_db_connection() as conn:
+        conn.execute("DELETE FROM content_plan_entries WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
+        conn.execute("DELETE FROM content_plans WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         conn.execute("DELETE FROM campaign_strategies WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         conn.execute("DELETE FROM content_draft_revisions WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
         conn.execute("DELETE FROM content_drafts WHERE campaign_id = ? AND organization_id = ?", (c_id, organization_id))
@@ -2886,6 +2929,165 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
             })
 
     return events
+
+def create_content_plan(organization_id, brand_id, campaign_id, period_type,
+                        start_date, end_date, entries, posting_frequency=None,
+                        created_by=None):
+    """
+    Creates an editorial content plan and its scheduled entries.
+    entries is a list of dicts: [{suggested_date, platform, theme, content_format, topic, headline, call_to_action}]
+    """
+    validate_campaign_ownership(campaign_id, organization_id)
+    org_id = int(organization_id)
+    b_id = int(brand_id)
+    c_id = int(campaign_id)
+    clean_period = str(period_type).strip().lower()
+    if clean_period not in ('weekly', 'monthly'):
+        clean_period = 'weekly'
+
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO content_plans (organization_id, brand_id, campaign_id, "
+            "period_type, start_date, end_date, posting_frequency, created_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (org_id, b_id, c_id, clean_period, str(start_date), str(end_date),
+             str(posting_frequency or ''), created_by)
+        )
+        plan_id = cur.lastrowid
+
+        created_entries = []
+        for ent in entries:
+            s_date = str(ent.get('suggested_date') or start_date)
+            plat = str(ent.get('platform') or 'facebook').lower()
+            theme = str(ent.get('theme') or 'General')
+            fmt = str(ent.get('content_format') or 'post')
+            topic = str(ent.get('topic') or ent.get('headline') or 'Campaign Highlight')
+            headline = str(ent.get('headline') or topic)
+            cta = str(ent.get('call_to_action') or 'Learn More')
+
+            ecur = conn.execute(
+                "INSERT INTO content_plan_entries (plan_id, organization_id, brand_id, "
+                "campaign_id, suggested_date, platform, theme, content_format, "
+                "topic, headline, call_to_action) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (plan_id, org_id, b_id, c_id, s_date, plat, theme, fmt, topic, headline, cta)
+            )
+            created_entries.append({
+                'id': ecur.lastrowid,
+                'plan_id': plan_id,
+                'suggested_date': s_date,
+                'platform': plat,
+                'theme': theme,
+                'content_format': fmt,
+                'topic': topic,
+                'headline': headline,
+                'call_to_action': cta,
+                'status': 'planned'
+            })
+        conn.commit()
+
+        row = conn.execute("SELECT * FROM content_plans WHERE id = ?", (plan_id,)).fetchone()
+        plan_dict = dict(row) if row else {}
+        plan_dict['entries'] = created_entries
+        return plan_dict
+
+def get_content_plans(organization_id, campaign_id=None, brand_id=None):
+    """Retrieves content plans scoped to organization with optional campaign filter."""
+    org_id = int(organization_id)
+    query = (
+        "SELECT cp.*, b.name as brand_name, c.name as campaign_name, "
+        "(SELECT COUNT(*) FROM content_plan_entries cpe WHERE cpe.plan_id = cp.id) as entry_count "
+        "FROM content_plans cp "
+        "LEFT JOIN brands b ON cp.brand_id = b.id "
+        "LEFT JOIN campaigns c ON cp.campaign_id = c.id "
+        "WHERE cp.organization_id = ?"
+    )
+    params = [org_id]
+    if campaign_id:
+        query += " AND cp.campaign_id = ?"
+        params.append(int(campaign_id))
+    if brand_id:
+        query += " AND cp.brand_id = ?"
+        params.append(int(brand_id))
+
+    query += " ORDER BY cp.created_at DESC"
+    with get_db_connection() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_content_plan_by_id(plan_id, organization_id=1):
+    """Retrieves a content plan and its entries scoped to organization."""
+    org_id = int(organization_id)
+    p_id = int(plan_id)
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT cp.*, b.name as brand_name, c.name as campaign_name "
+            "FROM content_plans cp "
+            "LEFT JOIN brands b ON cp.brand_id = b.id "
+            "LEFT JOIN campaigns c ON cp.campaign_id = c.id "
+            "WHERE cp.id = ? AND cp.organization_id = ?",
+            (p_id, org_id)
+        ).fetchone()
+        if not row:
+            return None
+        plan_dict = dict(row)
+
+        entries = conn.execute(
+            "SELECT * FROM content_plan_entries "
+            "WHERE plan_id = ? AND organization_id = ? "
+            "ORDER BY suggested_date ASC, id ASC",
+            (p_id, org_id)
+        ).fetchall()
+        plan_dict['entries'] = [dict(e) for e in entries]
+        return plan_dict
+
+def convert_plan_entry_to_draft(entry_id, organization_id=1, user_id=None):
+    """
+    Converts a planned calendar entry into an editable content draft in content_drafts.
+    Creates immutable revision 1 and updates the entry status.
+    """
+    org_id = int(organization_id)
+    e_id = int(entry_id)
+
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM content_plan_entries WHERE id = ? AND organization_id = ?",
+            (e_id, org_id)
+        ).fetchone()
+        if not row:
+            raise TenantIsolationError(f"Plan entry #{e_id} does not exist or does not belong to active organization.")
+        entry = dict(row)
+
+        if entry.get('converted_draft_id'):
+            existing_draft = conn.execute(
+                "SELECT * FROM content_drafts WHERE id = ? AND organization_id = ?",
+                (entry['converted_draft_id'], org_id)
+            ).fetchone()
+            if existing_draft:
+                return dict(existing_draft)
+
+    draft = create_content_draft(
+        organization_id=org_id,
+        brand_id=entry['brand_id'],
+        campaign_id=entry['campaign_id'],
+        target_platform=entry['platform'],
+        caption=entry['topic'],
+        headline=entry.get('headline'),
+        call_to_action=entry.get('call_to_action'),
+        content_format=entry.get('content_format', 'post'),
+        status='draft',
+        created_by=user_id
+    )
+
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE content_plan_entries SET status = 'converted_to_draft', "
+            "converted_draft_id = ? WHERE id = ? AND organization_id = ?",
+            (draft['id'], e_id, org_id)
+        )
+        conn.commit()
+
+    return draft
 
 
 
