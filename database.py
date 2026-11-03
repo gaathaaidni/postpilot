@@ -625,6 +625,8 @@ def init_db():
         _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
         _ensure_column_exists(conn, 'scheduled_posts', 'campaign_id', 'INTEGER')
         _ensure_column_exists(conn, 'scheduled_posts', 'draft_id', 'INTEGER')
+        _ensure_column_exists(conn, 'content_drafts', 'media_asset_id', 'INTEGER')
+        _ensure_column_exists(conn, 'content_draft_revisions', 'media_asset_id', 'INTEGER')
         _ensure_column_exists(conn, 'content_drafts', 'current_revision', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'content_draft_revisions', 'ai_provider', 'TEXT')
         _ensure_column_exists(conn, 'content_draft_revisions', 'ai_model', 'TEXT')
@@ -2270,7 +2272,8 @@ VALID_DRAFT_PLATFORMS = frozenset({'facebook', 'instagram', 'linkedin', 'x', 'wh
 def create_content_draft(organization_id, brand_id, campaign_id, target_platform,
                          caption, headline=None, hashtags=None, call_to_action=None,
                          language='en', content_format='post', ai_provider=None,
-                         ai_model=None, metadata=None, status='draft', created_by=None):
+                         ai_model=None, metadata=None, status='draft', created_by=None,
+                         media_asset_id=None):
     """Creates a new content draft under an active campaign."""
     camp = validate_campaign_ownership(campaign_id, organization_id)
     if camp['brand_id'] != int(brand_id):
@@ -2292,27 +2295,37 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
 
     meta_str = json.dumps(metadata) if isinstance(metadata, (dict, list)) else (str(metadata) if metadata else None)
 
+    m_id = None
+    if media_asset_id is not None and str(media_asset_id).strip() != '':
+        try:
+            m_id = int(media_asset_id)
+            asset = get_media_asset_by_id(m_id, organization_id)
+            if not asset:
+                raise TenantIsolationError(f"Media asset #{m_id} does not exist or does not belong to active organization.")
+        except (ValueError, TypeError):
+            m_id = None
+
     with get_db_connection() as conn:
         if is_postgres():
             cur = conn.execute(
                 "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
                 "language, content_format, headline, caption, hashtags, call_to_action, "
-                "ai_provider, ai_model, metadata, status, current_revision, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) RETURNING id",
+                "ai_provider, ai_model, metadata, status, current_revision, created_by, media_asset_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?) RETURNING id",
                 (organization_id, int(brand_id), int(campaign_id), clean_platform,
                  language or 'en', content_format or 'post', headline, clean_caption,
-                 hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by)
+                 hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by, m_id)
             )
             did = cur.fetchone()['id']
         else:
             cur = conn.execute(
                 "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
                 "language, content_format, headline, caption, hashtags, call_to_action, "
-                "ai_provider, ai_model, metadata, status, current_revision, created_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                "ai_provider, ai_model, metadata, status, current_revision, created_by, media_asset_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
                 (organization_id, int(brand_id), int(campaign_id), clean_platform,
                  language or 'en', content_format or 'post', headline, clean_caption,
-                 hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by)
+                 hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by, m_id)
             )
             did = cur.lastrowid
 
@@ -2321,12 +2334,12 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
         conn.execute(
             "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
             "revision_number, headline, caption, hashtags, call_to_action, content_format, "
-            "ai_provider, ai_model, metadata, change_source, change_summary, edited_by) "
-            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "ai_provider, ai_model, metadata, change_source, change_summary, edited_by, media_asset_id) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (organization_id, int(brand_id), int(campaign_id), did,
              headline, clean_caption, hashtags, call_to_action, content_format or 'post',
              ai_provider, ai_model, meta_str,
-             initial_source, 'Initial draft creation', created_by)
+             initial_source, 'Initial draft creation', created_by, m_id)
         )
         conn.commit()
 
@@ -2341,10 +2354,12 @@ def get_content_draft_by_id(draft_id, organization_id=1):
         return None
     with get_db_connection() as conn:
         row = conn.execute(
-            "SELECT cd.*, c.name as campaign_name, b.name as brand_name "
+            "SELECT cd.*, c.name as campaign_name, b.name as brand_name, "
+            "m.filename as media_filename, m.original_name as media_original_name, m.file_type as media_file_type "
             "FROM content_drafts cd "
             "LEFT JOIN campaigns c ON cd.campaign_id = c.id "
             "LEFT JOIN brands b ON cd.brand_id = b.id "
+            "LEFT JOIN media_assets m ON cd.media_asset_id = m.id "
             "WHERE cd.id = ? AND cd.organization_id = ?",
             (d_id, organization_id)
         ).fetchone()
@@ -2389,7 +2404,7 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
                          content_format=None, metadata=None, ai_provider=None,
                          ai_model=None, allow_privileged_status=False,
                          expected_revision=None, edited_by=None, change_source='manual_edit',
-                         change_summary=None):
+                         change_summary=None, media_asset_id=None):
     """Updates a content draft ensuring organization ownership, optimistic concurrency, and lifecycle validity."""
     try:
         d_id = int(draft_id)
@@ -2492,6 +2507,24 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             updates.append("metadata = ?")
             params.append(meta_str)
 
+        new_media_id = existing.get('media_asset_id')
+        if media_asset_id is not None:
+            if media_asset_id in (0, '', False, 'null', 'None'):
+                updates.append("media_asset_id = NULL")
+                if existing.get('media_asset_id') is not None:
+                    content_changed = True
+                new_media_id = None
+            else:
+                m_val = int(media_asset_id)
+                asset = get_media_asset_by_id(m_val, organization_id)
+                if not asset:
+                    raise TenantIsolationError(f"Media asset #{m_val} does not exist or does not belong to active organization.")
+                updates.append("media_asset_id = ?")
+                params.append(m_val)
+                if existing.get('media_asset_id') != m_val:
+                    content_changed = True
+                new_media_id = m_val
+
         # Append revision if content changed or if explicit regenerated/restored_revision source
         if content_changed or change_source in ('regenerated', 'restored_revision'):
             next_rev = curr_rev + 1
@@ -2502,12 +2535,12 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             conn.execute(
                 "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
                 "revision_number, headline, caption, hashtags, call_to_action, content_format, "
-                "ai_provider, ai_model, metadata, change_source, change_summary, edited_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "ai_provider, ai_model, metadata, change_source, change_summary, edited_by, media_asset_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (organization_id, existing['brand_id'], existing['campaign_id'], d_id,
                  next_rev, new_headline, new_caption, new_hashtags, new_cta, new_format,
                  new_provider, new_model, rev_meta,
-                 change_source, summary, edited_by)
+                 change_source, summary, edited_by, new_media_id)
             )
 
         if not updates:
@@ -2672,11 +2705,12 @@ def restore_draft_revision(draft_id, revision_number, organization_id=1, restore
         # Update draft with restored content
         conn.execute(
             "UPDATE content_drafts SET headline = ?, caption = ?, hashtags = ?, call_to_action = ?, "
-            "content_format = ?, ai_provider = ?, ai_model = ?, metadata = ?, current_revision = ?, updated_at = CURRENT_TIMESTAMP "
+            "content_format = ?, ai_provider = ?, ai_model = ?, metadata = ?, media_asset_id = ?, current_revision = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE id = ? AND organization_id = ?",
             (target_rev['headline'], target_rev['caption'], target_rev['hashtags'],
              target_rev['call_to_action'], target_rev.get('content_format', 'post'),
              target_rev.get('ai_provider'), target_rev.get('ai_model'), target_rev.get('metadata'),
+             target_rev.get('media_asset_id'),
              next_rev, d_id, organization_id)
         )
 
@@ -2684,13 +2718,13 @@ def restore_draft_revision(draft_id, revision_number, organization_id=1, restore
         conn.execute(
             "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
             "revision_number, headline, caption, hashtags, call_to_action, content_format, "
-            "ai_provider, ai_model, metadata, change_source, change_summary, edited_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restored_revision', ?, ?)",
+            "ai_provider, ai_model, metadata, change_source, change_summary, edited_by, media_asset_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restored_revision', ?, ?, ?)",
             (organization_id, draft['brand_id'], draft['campaign_id'], d_id,
              next_rev, target_rev['headline'], target_rev['caption'], target_rev['hashtags'],
              target_rev['call_to_action'], target_rev.get('content_format', 'post'),
              target_rev.get('ai_provider'), target_rev.get('ai_model'), target_rev.get('metadata'),
-             f"Restored from revision #{r_num}", restored_by)
+             f"Restored from revision #{r_num}", restored_by, target_rev.get('media_asset_id'))
         )
         conn.commit()
 

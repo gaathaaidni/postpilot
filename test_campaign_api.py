@@ -1145,5 +1145,107 @@ class TestCampaignAPI(unittest.TestCase):
         # Check file was unlinked
         self.assertFalse(saved_path.exists())
 
+
+    def test_creative_asset_preparation_and_platform_validation(self):
+        import io
+        from PIL import Image
+        from validation import validate_platform_creative
+
+        # 1. Pure unit test on validation rules
+        # Instagram requires media
+        valid, issues = validate_platform_creative('instagram', caption='Nice picture!', media_asset=None)
+        self.assertFalse(valid)
+        self.assertTrue(any('image or video' in iss.lower() for iss in issues))
+
+        # Instagram valid with media
+        valid, issues = validate_platform_creative('instagram', caption='Nice picture!', media_asset={'file_type': 'image'})
+        self.assertTrue(valid)
+
+        # X character limits
+        valid, issues = validate_platform_creative('x', caption='A' * 281)
+        self.assertFalse(valid)
+        self.assertTrue(any('280' in iss for iss in issues))
+
+        # 2. Integration with draft lifecycle and media library
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # Upload an image in Org 1
+        img = Image.new('RGB', (10, 10), color='green')
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        res_upload = self.client.post('/api/media/upload', data={
+            'file': (img_bytes, 'ig_photo.png', 'image/png'),
+            'brand_id': '10'
+        }, content_type='multipart/form-data', headers=headers_org1)
+        self.assertEqual(res_upload.status_code, 201)
+        asset_id = res_upload.get_json()['asset']['id']
+
+        # Create campaign and Instagram draft without media
+        camp_res = self.client.post('/api/campaigns', json={
+            'name': 'Creative Prep Camp',
+            'brand_id': 10,
+            'objective': 'Brand Visuals',
+            'brief': 'Launch creative showcase on Instagram and LinkedIn'
+        }, headers=headers_org1)
+        camp_id = camp_res.get_json()['id']
+
+        draft = database.create_content_draft(
+            organization_id=1,
+            brand_id=10,
+            campaign_id=camp_id,
+            target_platform='instagram',
+            caption='Exciting product launch coming soon! #GAATHA',
+            created_by=1
+        )
+        draft_id = draft['id']
+
+        # Call validation endpoint -> invalid because Instagram requires media
+        val_res = self.client.get(f'/api/drafts/{draft_id}/validate-creative', headers=headers_org1)
+        self.assertEqual(val_res.status_code, 200)
+        val_data = val_res.get_json()
+        self.assertFalse(val_data['is_valid'])
+        self.assertFalse(val_data['has_media'])
+
+        # Attach uploaded media to the draft
+        update_res = self.client.put(f'/api/drafts/{draft_id}', json={
+            'media_asset_id': asset_id
+        }, headers=headers_org1)
+        self.assertEqual(update_res.status_code, 200)
+        updated_draft = update_res.get_json()
+        self.assertEqual(updated_draft['media_asset_id'], asset_id)
+        self.assertEqual(updated_draft['current_revision'], 2)
+
+        # Re-validate creative -> valid now
+        val_res2 = self.client.get(f'/api/drafts/{draft_id}/validate-creative', headers=headers_org1)
+        self.assertEqual(val_res2.status_code, 200)
+        val_data2 = val_res2.get_json()
+        self.assertTrue(val_data2['is_valid'])
+        self.assertTrue(val_data2['has_media'])
+
+        # Tenant isolation: Org 2 cannot attach Org 1's media asset to an Org 2 draft
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        camp2_res = self.client.post('/api/campaigns', json={
+            'name': 'Org2 Creative Camp',
+            'brand_id': 20,
+            'objective': 'Test Org2',
+            'brief': 'Validate cross-tenant creative isolation'
+        }, headers=headers_org2)
+        camp2_id = camp2_res.get_json()['id']
+
+        draft2 = database.create_content_draft(
+            organization_id=2,
+            brand_id=20,
+            campaign_id=camp2_id,
+            target_platform='instagram',
+            caption='Unauthorized media attachment attempt',
+            created_by=2
+        )
+        # Attempt to bind Org 1's asset_id to Org 2 draft
+        res_cross = self.client.put(f'/api/drafts/{draft2["id"]}', json={
+            'media_asset_id': asset_id
+        }, headers=headers_org2)
+        self.assertEqual(res_cross.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

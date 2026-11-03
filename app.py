@@ -19,6 +19,7 @@ from flask import Flask, render_template, jsonify, request, session, send_from_d
 import config
 import database
 import timezone_utils
+from validation import validate_platform_creative
 import channel_runner
 import ai_service
 import nexora_suite as tour
@@ -1792,7 +1793,8 @@ def update_draft(draft_id):
             expected_revision=data.get('expected_revision'),
             edited_by=user_id,
             change_source=data.get('change_source', 'manual_edit'),
-            change_summary=data.get('change_summary')
+            change_summary=data.get('change_summary'),
+            media_asset_id=data.get('media_asset_id')
         )
         if not updated:
             return jsonify({'error': 'Draft not found'}), 404
@@ -1805,6 +1807,36 @@ def update_draft(draft_id):
     except Exception as e:
         logger.error(f"Error updating draft: {e}")
         return jsonify({'error': 'Failed to update draft'}), 500
+
+
+@app.route('/api/drafts/<int:draft_id>/validate-creative', methods=['POST', 'GET'])
+@login_required
+def validate_draft_creative_route(draft_id):
+    """Validates draft creative, character counts, hashtags, and media attachments against platform rules."""
+    org_id = session.get('organization_id', 1)
+    draft = database.get_content_draft_by_id(draft_id, organization_id=org_id)
+    if not draft:
+        return jsonify({'error': 'Draft not found'}), 404
+
+    media_asset = None
+    if draft.get('media_asset_id'):
+        media_asset = database.get_media_asset_by_id(draft['media_asset_id'], organization_id=org_id)
+
+    is_valid, issues = validate_platform_creative(
+        platform=draft.get('target_platform'),
+        caption=draft.get('caption', ''),
+        headline=draft.get('headline', ''),
+        hashtags=draft.get('hashtags', ''),
+        media_asset=media_asset,
+        content_format=draft.get('content_format', 'post')
+    )
+    return jsonify({
+        'status': 'success',
+        'is_valid': is_valid,
+        'issues': issues,
+        'platform': draft.get('target_platform'),
+        'has_media': media_asset is not None
+    }), 200
 
 @app.route('/api/drafts/<int:draft_id>/revisions', methods=['GET'])
 @login_required
