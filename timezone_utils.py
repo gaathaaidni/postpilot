@@ -48,9 +48,10 @@ def validate_timezone_name(tz_name):
 def parse_and_convert_to_utc(timestamp_str, tz_name=None, org_default_tz='UTC', allow_past=False):
     """
     Strictly validates and converts an ISO 8601 date/time input to standardized UTC.
-    
+    Detects nonexistent spring-forward gap times and ambiguous fall-back overlap times.
+
     Arguments:
-        timestamp_str (str): ISO 8601 string (e.g. '2026-11-04T15:30:00' or '2026-11-04T15:30:00+05:30').
+        timestamp_str (str|datetime): ISO 8601 string or datetime object.
         tz_name (str, optional): Target timezone for naive timestamps.
         org_default_tz (str, optional): Fallback organization timezone if tz_name is omitted.
         allow_past (bool): If False, rejects timestamps scheduled in the past.
@@ -59,22 +60,25 @@ def parse_and_convert_to_utc(timestamp_str, tz_name=None, org_default_tz='UTC', 
         tuple: (utc_datetime, resolved_timezone_str, utc_formatted_str)
 
     Raises:
-        ValueError: For malformed timestamps, invalid timezones, or past times.
+        ValueError: For malformed timestamps, invalid timezones, ambiguous/nonexistent times, or past times.
     """
-    if not timestamp_str or not isinstance(timestamp_str, str):
+    if not timestamp_str or not isinstance(timestamp_str, (str, datetime)):
         raise ValueError("Scheduled date/time is required and must be an ISO 8601 string.")
 
-    raw_ts = timestamp_str.strip()
-    # Normalize trailing Z to +00:00 for fromisoformat compatibility
-    clean_ts = raw_ts.replace('Z', '+00:00')
-
-    try:
-        dt = datetime.fromisoformat(clean_ts)
-    except Exception as e:
-        raise ValueError(
-            f"Malformed date/time string: '{timestamp_str}'. "
-            f"Expected valid ISO 8601 format: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DDTHH:MM:SS±HH:MM"
-        )
+    if isinstance(timestamp_str, datetime):
+        dt = timestamp_str
+        raw_ts = dt.isoformat()
+    else:
+        raw_ts = timestamp_str.strip()
+        # Normalize trailing Z to +00:00 for fromisoformat compatibility
+        clean_ts = raw_ts.replace('Z', '+00:00')
+        try:
+            dt = datetime.fromisoformat(clean_ts)
+        except Exception:
+            raise ValueError(
+                f"Malformed date/time string: '{timestamp_str}'. "
+                f"Expected valid ISO 8601 format: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DDTHH:MM:SS±HH:MM"
+            )
 
     if dt.tzinfo is not None:
         # Timestamp contains explicit UTC offset
@@ -87,16 +91,38 @@ def parse_and_convert_to_utc(timestamp_str, tz_name=None, org_default_tz='UTC', 
             target_tz_str = "UTC"
         resolved_tz = validate_timezone_name(target_tz_str)
         local_tz = ZoneInfo(resolved_tz)
-        # Attach timezone without shifting wall-clock digits
-        dt_localized = dt.replace(tzinfo=local_tz)
-        utc_dt = dt_localized.astimezone(timezone.utc)
+
+        # DST Transition Analysis
+        dt0 = dt.replace(tzinfo=local_tz, fold=0)
+        dt1 = dt.replace(tzinfo=local_tz, fold=1)
+        u0 = dt0.astimezone(timezone.utc)
+        u1 = dt1.astimezone(timezone.utc)
+
+        # Check for nonexistent local time (spring-forward gap)
+        r0 = u0.astimezone(local_tz).replace(tzinfo=None)
+        r1 = u1.astimezone(local_tz).replace(tzinfo=None)
+        if r0 != dt and r1 != dt:
+            raise ValueError(
+                f"Nonexistent local schedule time: '{raw_ts}' does not exist in timezone '{resolved_tz}' "
+                f"due to daylight saving time spring-forward clock change."
+            )
+
+        # Check for ambiguous local time (fall-back overlap)
+        if u0 != u1:
+            raise ValueError(
+                f"Ambiguous local schedule time: '{raw_ts}' occurs twice in timezone '{resolved_tz}' "
+                f"due to daylight saving time fall-back clock change. "
+                f"Please provide an explicit UTC offset or an unambiguous timestamp."
+            )
+
+        utc_dt = u0
 
     # Validate against past scheduling times
     now_utc = datetime.now(timezone.utc)
     # Allow 60-second grace period for transit latency
     if not allow_past and utc_dt < (now_utc - timedelta(seconds=60)):
         raise ValueError(
-            f"Cannot schedule post in the past: requested time '{timestamp_str}' resolves to "
+            f"Cannot schedule post in the past: requested time '{raw_ts}' resolves to "
             f"{utc_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}, which is earlier than current time "
             f"{now_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}."
         )

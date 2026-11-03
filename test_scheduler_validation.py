@@ -375,5 +375,117 @@ class TestSchedulerValidation(unittest.TestCase):
             self.assertEqual(item['display_timezone'], 'America/New_York')
             self.assertIn('EDT', item['local_display'])
 
+    def test_12_spring_forward_gap_nonexistent_time_rejected(self):
+        """Verifies nonexistent local times during DST spring-forward are rejected."""
+        # America/New_York: 2027-03-14 02:30:00 does not exist (clocks jump 02:00 -> 03:00)
+        res_ny = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'tour',
+                'scheduled_for': '2027-03-14T02:30:00',
+                'timezone': 'America/New_York',
+                'message': 'Nonexistent NY time'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res_ny.status_code, 400)
+        data_ny = json.loads(res_ny.data)
+        self.assertEqual(data_ny.get('code'), 'VALIDATION_ERROR')
+        self.assertIn('nonexistent', data_ny.get('error', '').lower())
+
+        # Europe/London: 2027-03-28 01:30:00 does not exist (clocks jump 01:00 -> 02:00)
+        with self.assertRaises(ValueError) as ctx:
+            timezone_utils.parse_and_convert_to_utc(
+                '2027-03-28T01:30:00',
+                tz_name='Europe/London'
+            )
+        self.assertIn('nonexistent', str(ctx.exception).lower())
+
+    def test_13_fall_back_ambiguous_overlap_requires_explicit_offset(self):
+        """Verifies naive ambiguous local times during DST fall-back clock change are rejected."""
+        # America/New_York: 2027-11-07 01:30:00 occurs twice (EDT and EST)
+        res = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'tour',
+                'scheduled_for': '2027-11-07T01:30:00',
+                'timezone': 'America/New_York',
+                'message': 'Ambiguous NY time'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res.status_code, 400)
+        data = json.loads(res.data)
+        self.assertEqual(data.get('code'), 'VALIDATION_ERROR')
+        self.assertIn('ambiguous', data.get('error', '').lower())
+
+    def test_14_fall_back_explicit_offset_disambiguation(self):
+        """Verifies explicit UTC offsets cleanly disambiguate fall-back transition times."""
+        # 01:30:00-04:00 (EDT) -> 05:30:00 UTC
+        res_edt = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'tour',
+                'scheduled_for': '2027-11-07T01:30:00-04:00',
+                'timezone': 'America/New_York',
+                'message': 'Disambiguated EDT Post'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res_edt.status_code, 201)
+        rec_edt = json.loads(res_edt.data)
+        self.assertEqual(rec_edt['scheduled_for'], '2027-11-07 05:30:00')
+
+        # 01:30:00-05:00 (EST) -> 06:30:00 UTC
+        res_est = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'tour',
+                'scheduled_for': '2027-11-07T01:30:00-05:00',
+                'timezone': 'America/New_York',
+                'message': 'Disambiguated EST Post'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res_est.status_code, 201)
+        rec_est = json.loads(res_est.data)
+        self.assertEqual(rec_est['scheduled_for'], '2027-11-07 06:30:00')
+
+    def test_15_round_trip_conversions_across_dst_boundaries(self):
+        """Verifies round-trip conversions between UTC and local times across DST boundaries."""
+        # Summer EDT
+        edt_local = timezone_utils.convert_utc_to_local('2027-07-15 16:00:00', 'America/New_York')
+        self.assertEqual(edt_local['local_display'], '2027-07-15 12:00:00 EDT')
+        self.assertEqual(edt_local['offset'], '-0400')
+
+        # Winter EST
+        est_local = timezone_utils.convert_utc_to_local('2027-01-15 17:00:00', 'America/New_York')
+        self.assertEqual(est_local['local_display'], '2027-01-15 12:00:00 EST')
+        self.assertEqual(est_local['offset'], '-0500')
+
+        # Non-DST Asia/Kolkata
+        ist_local = timezone_utils.convert_utc_to_local('2027-03-14 02:30:00', 'Asia/Kolkata')
+        self.assertEqual(ist_local['offset'], '+0530')
+
+    def test_16_invalid_timezone_identifiers_rejected(self):
+        """Verifies invalid timezone names return HTTP 400 validation error."""
+        invalid_zones = ['Mars/Olympus', 'Invalid/Timezone', 'NotATimezone', '12345', '   ']
+        for bad_tz in invalid_zones:
+            with self.subTest(timezone=bad_tz):
+                res = self.client.post(
+                    '/api/schedule',
+                    json={
+                        'post_type': 'tour',
+                        'scheduled_for': '2027-06-01T12:00:00',
+                        'timezone': bad_tz,
+                        'message': 'Bad timezone post'
+                    },
+                    headers=self.headers
+                )
+                self.assertEqual(res.status_code, 400)
+                data = json.loads(res.data)
+                self.assertEqual(data.get('code'), 'VALIDATION_ERROR')
+                self.assertIn('timezone', data.get('error', '').lower())
+
 if __name__ == '__main__':
     unittest.main()
