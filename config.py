@@ -88,6 +88,23 @@ VISA_INTERVAL = int(os.getenv('VISA_INTERVAL', 1800))
 GAATHA_INTERVAL = int(os.getenv('GAATHA_INTERVAL', 1800))
 INSTA_INTERVAL = int(os.getenv('INSTA_CHECK_INTERVAL', 180))
 
+# AI Marketing Studio Provider Configuration
+AI_PROVIDER = os.getenv('AI_PROVIDER', 'mock' if os.getenv('TESTING') == 'true' or os.getenv('ENV') == 'testing' else os.getenv('AI_PROVIDER', 'mock'))
+AI_API_KEY = os.getenv('AI_API_KEY')
+AI_BASE_URL = os.getenv('AI_BASE_URL')
+AI_MODEL = os.getenv('AI_MODEL')
+AI_TIMEOUT_SECONDS = int(os.getenv('AI_TIMEOUT_SECONDS', 30))
+
+# Groq OpenAI-compatible provider settings
+GROQ_API_KEY = os.getenv('GROQ_API_KEY') or AI_API_KEY
+GROQ_BASE_URL = os.getenv('GROQ_BASE_URL', 'https://api.groq.com/openai/v1')
+GROQ_MODEL = os.getenv('GROQ_MODEL', AI_MODEL or 'llama-3.3-70b-versatile')
+
+# OpenAI-compatible provider settings
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY') or AI_API_KEY
+OPENAI_BASE_URL = os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+OPENAI_MODEL = os.getenv('OPENAI_MODEL', AI_MODEL or 'gpt-4o-mini')
+
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.avi', '.mkv'}
 ALLOWED_MIMETYPES = {
     'image/png', 'image/jpeg', 'image/gif', 'image/webp',
