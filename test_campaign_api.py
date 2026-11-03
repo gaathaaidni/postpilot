@@ -1075,5 +1075,75 @@ class TestCampaignAPI(unittest.TestCase):
         res_org2_convert = self.client.post(f'/api/plans/entries/{second_entry["id"]}/convert', json={}, headers=headers_org2)
         self.assertEqual(res_org2_convert.status_code, 404)
 
+
+    def test_media_library_lifecycle_and_tenant_isolation(self):
+        import io
+        from PIL import Image
+
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Create a minimal valid PNG image
+        img = Image.new('RGB', (10, 10), color='blue')
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+
+        # 2. Upload media asset in Org 1
+        data = {
+            'file': (img_bytes, 'logo_badge.png', 'image/png'),
+            'brand_id': '10',
+            'tags': 'badge, logo, corporate'
+        }
+        res = self.client.post('/api/media/upload', data=data, content_type='multipart/form-data', headers=headers_org1)
+        self.assertEqual(res.status_code, 201)
+        asset = res.get_json()['asset']
+        asset_id = asset['id']
+        saved_filename = asset['filename']
+        self.assertEqual(asset['brand_id'], 10)
+        self.assertEqual(asset['file_type'], 'image')
+        self.assertEqual(asset['original_name'], 'logo_badge.png')
+
+        # Check physical file exists
+        saved_path = Path(config.UPLOAD_FOLDER) / saved_filename
+        self.assertTrue(saved_path.exists())
+
+        # 3. Retrieve media list in Org 1
+        res = self.client.get('/api/media', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        assets = res.get_json()['assets']
+        self.assertTrue(any(a['id'] == asset_id for a in assets))
+
+        # Filter by search
+        res = self.client.get('/api/media?search=badge', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(any(a['id'] == asset_id for a in res.get_json()['assets']))
+
+        # 4. Reject unsupported extension
+        bad_file = io.BytesIO(b"malicious script content")
+        bad_data = {
+            'file': (bad_file, 'payload.exe', 'application/x-msdownload')
+        }
+        res = self.client.post('/api/media/upload', data=bad_data, content_type='multipart/form-data', headers=headers_org1)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Unsupported file extension", res.get_json()['error'])
+
+        # 5. Tenant isolation check: Org 2 cannot see or delete Org 1 asset
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res_org2_list = self.client.get('/api/media', headers=headers_org2)
+        self.assertEqual(res_org2_list.status_code, 200)
+        self.assertFalse(any(a['id'] == asset_id for a in res_org2_list.get_json()['assets']))
+
+        res_org2_del = self.client.delete(f'/api/media/{asset_id}', headers=headers_org2)
+        self.assertEqual(res_org2_del.status_code, 404)
+
+        # 6. Delete asset as Org 1
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+        res_del = self.client.delete(f'/api/media/{asset_id}', headers=headers_org1)
+        self.assertEqual(res_del.status_code, 200)
+        self.assertEqual(res_del.get_json()['deleted_id'], asset_id)
+
+        # Check file was unlinked
+        self.assertFalse(saved_path.exists())
+
 if __name__ == '__main__':
     unittest.main()

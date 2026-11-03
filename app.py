@@ -150,7 +150,11 @@ def _cleanup_images_worker():
     while True:
         try:
             with database.get_db_connection() as conn:
-                rows = conn.execute("SELECT DISTINCT image_filename FROM posts WHERE image_filename IS NOT NULL AND image_filename != ''").fetchall()
+                rows = conn.execute("""
+                    SELECT DISTINCT image_filename FROM posts WHERE image_filename IS NOT NULL AND image_filename != ''
+                    UNION
+                    SELECT DISTINCT filename as image_filename FROM media_assets WHERE filename IS NOT NULL AND filename != ''
+                """).fetchall()
                 db_images = {r['image_filename'] for r in rows}
 
             upload_dir = Path(config.UPLOAD_FOLDER)
@@ -444,6 +448,7 @@ def upload_image():
     extension = os.path.splitext(file.filename)[1].lower()
     filename = f"post_{int(time.time())}_{secrets.token_hex(4)}{extension}"
     save_path = Path(config.UPLOAD_FOLDER) / filename
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     file.save(str(save_path))
     return jsonify({'filename': filename}), 201
 
@@ -452,6 +457,142 @@ def serve_image(filename):
     """Serves uploaded images safely from UPLOAD_FOLDER with path traversal protection."""
     safe_filename = os.path.basename(filename)
     return send_from_directory(config.UPLOAD_FOLDER, safe_filename)
+
+
+# --- Central Media Library Endpoints ---
+
+@app.route('/api/media', methods=['GET'])
+@login_required
+def get_media_assets_route():
+    """Lists media library assets scoped to active organization with optional filters."""
+    org_id = session.get('organization_id', 1)
+    brand_id = request.args.get('brand_id')
+    campaign_id = request.args.get('campaign_id')
+    file_type = request.args.get('file_type')
+    search = request.args.get('search')
+
+    try:
+        b_id = int(brand_id) if brand_id else None
+        c_id = int(campaign_id) if campaign_id else None
+        assets = database.get_media_assets(
+            organization_id=org_id,
+            brand_id=b_id,
+            campaign_id=c_id,
+            file_type=file_type,
+            search=search
+        )
+        return jsonify({'status': 'success', 'assets': assets}), 200
+    except (database.TenantIsolationError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error fetching media assets: {e}")
+        return jsonify({'error': 'Failed to retrieve media assets'}), 500
+
+@app.route('/api/media/upload', methods=['POST'])
+@login_required
+@csrf_protect
+def upload_media_asset_route():
+    """Uploads a media asset to the organization media library with strict validation."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+
+    file = request.files['file']
+    if not file or file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    original_name = os.path.basename(file.filename)
+    extension = os.path.splitext(original_name)[1].lower()
+
+    # Allowed extensions
+    allowed_exts = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.mp4', '.mov', '.pdf'}
+    if extension not in allowed_exts:
+        return jsonify({'error': f'Unsupported file extension {extension}. Allowed: {sorted(list(allowed_exts))}'}), 400
+
+    # Validate image integrity if it's an image
+    if extension in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}:
+        try:
+            with Image.open(file) as img:
+                img.verify()
+            file.seek(0)
+        except Exception:
+            return jsonify({'error': 'Invalid or corrupted image file'}), 400
+
+    # Determine file size
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+
+    # Max size 50MB
+    if file_size > 50 * 1024 * 1024:
+        return jsonify({'error': 'File exceeds maximum permitted size of 50MB'}), 400
+
+    # Determine file type
+    if extension in {'.mp4', '.mov'}:
+        file_type = 'video'
+    elif extension == '.pdf':
+        file_type = 'document'
+    else:
+        file_type = 'image'
+
+    brand_id = request.form.get('brand_id')
+    campaign_id = request.form.get('campaign_id')
+    tags = request.form.get('tags')
+
+    try:
+        b_id = int(brand_id) if brand_id and str(brand_id).strip() else None
+        c_id = int(campaign_id) if campaign_id and str(campaign_id).strip() else None
+
+        safe_filename = f"asset_{int(time.time())}_{secrets.token_hex(4)}{extension}"
+        save_path = Path(config.UPLOAD_FOLDER) / safe_filename
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        file.save(str(save_path))
+
+        asset = database.save_media_asset(
+            organization_id=org_id,
+            filename=safe_filename,
+            original_name=original_name,
+            brand_id=b_id,
+            campaign_id=c_id,
+            file_type=file_type,
+            file_size=file_size,
+            mime_type=file.content_type or '',
+            tags=tags,
+            created_by=user_id
+        )
+        return jsonify({'status': 'success', 'asset': asset}), 201
+
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error saving media asset: {e}")
+        return jsonify({'error': 'Failed to save media asset'}), 500
+
+@app.route('/api/media/<int:asset_id>', methods=['DELETE'])
+@login_required
+@csrf_protect
+def delete_media_asset_route(asset_id):
+    """Deletes a media asset record and unlinks its file from storage."""
+    org_id = session.get('organization_id', 1)
+    try:
+        deleted = database.delete_media_asset(asset_id, organization_id=org_id)
+        if deleted and deleted.get('filename'):
+            fpath = Path(config.UPLOAD_FOLDER) / os.path.basename(deleted['filename'])
+            if fpath.exists():
+                try:
+                    fpath.unlink()
+                except Exception as e:
+                    logger.warning(f"Could not unlink media file {fpath}: {e}")
+        return jsonify({'status': 'success', 'deleted_id': asset_id}), 200
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error deleting media asset #{asset_id}: {e}")
+        return jsonify({'error': 'Failed to delete media asset'}), 500
 
 # --- Automation Task Control Endpoints ---
 

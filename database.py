@@ -262,6 +262,8 @@ def _ensure_indexes(conn):
         ("idx_ai_usage_org_created", "CREATE INDEX IF NOT EXISTS idx_ai_usage_org_created ON ai_usage_logs(organization_id, created_at)"),
         ("idx_content_plans_org_camp", "CREATE INDEX IF NOT EXISTS idx_content_plans_org_camp ON content_plans(organization_id, campaign_id)"),
         ("idx_plan_entries_plan", "CREATE INDEX IF NOT EXISTS idx_plan_entries_plan ON content_plan_entries(organization_id, plan_id, suggested_date)"),
+        ("idx_media_assets_org_brand", "CREATE INDEX IF NOT EXISTS idx_media_assets_org_brand ON media_assets(organization_id, brand_id)"),
+        ("idx_media_assets_org_created", "CREATE INDEX IF NOT EXISTS idx_media_assets_org_created ON media_assets(organization_id, created_at)"),
     ]
     for name, sql in indexes:
         try:
@@ -587,6 +589,26 @@ def init_db():
                 status TEXT DEFAULT 'planned',
                 converted_draft_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+
+        # 17. Media assets table (central organization and brand media library)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS media_assets (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER,
+                campaign_id INTEGER,
+                filename TEXT NOT NULL,
+                original_name TEXT,
+                file_type TEXT DEFAULT 'image',
+                file_size INTEGER DEFAULT 0,
+                mime_type TEXT,
+                tags TEXT,
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -3091,3 +3113,107 @@ def convert_plan_entry_to_draft(entry_id, organization_id=1, user_id=None):
 
 
 
+
+
+def save_media_asset(organization_id, filename, original_name=None, brand_id=None,
+                     campaign_id=None, file_type='image', file_size=0,
+                     mime_type=None, tags=None, created_by=None):
+    """
+    Saves a media asset record scoped to an organization, optionally bound to a brand and campaign.
+    """
+    org_id = int(organization_id)
+    b_id = int(brand_id) if brand_id is not None else None
+    c_id = int(campaign_id) if campaign_id is not None else None
+    
+    if b_id is not None:
+        validate_brand_ownership(b_id, org_id)
+    if c_id is not None:
+        validate_campaign_ownership(c_id, org_id)
+
+    f_name = str(filename).strip()
+    if not f_name:
+        raise ValueError("Filename is required.")
+
+    clean_file_type = str(file_type or 'image').strip().lower()
+    if clean_file_type not in ('image', 'video', 'document'):
+        clean_file_type = 'image'
+
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "INSERT INTO media_assets (organization_id, brand_id, campaign_id, "
+            "filename, original_name, file_type, file_size, mime_type, tags, created_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (org_id, b_id, c_id, f_name, str(original_name or f_name),
+             clean_file_type, int(file_size or 0), str(mime_type or ''),
+             str(tags or ''), created_by)
+        )
+        asset_id = cur.lastrowid
+        conn.commit()
+
+        row = conn.execute("SELECT * FROM media_assets WHERE id = ?", (asset_id,)).fetchone()
+        return dict(row) if row else {'id': asset_id, 'filename': f_name}
+
+def get_media_assets(organization_id, brand_id=None, campaign_id=None, file_type=None, search=None):
+    """
+    Retrieves media assets scoped to organization with optional brand, campaign, type, and search filters.
+    """
+    org_id = int(organization_id)
+    query = (
+        "SELECT m.*, b.name as brand_name, c.name as campaign_name "
+        "FROM media_assets m "
+        "LEFT JOIN brands b ON m.brand_id = b.id "
+        "LEFT JOIN campaigns c ON m.campaign_id = c.id "
+        "WHERE m.organization_id = ?"
+    )
+    params = [org_id]
+
+    if brand_id is not None:
+        query += " AND m.brand_id = ?"
+        params.append(int(brand_id))
+    if campaign_id is not None:
+        query += " AND m.campaign_id = ?"
+        params.append(int(campaign_id))
+    if file_type:
+        query += " AND m.file_type = ?"
+        params.append(str(file_type).strip().lower())
+    if search:
+        search_pattern = f"%{str(search).strip()}%"
+        query += " AND (m.filename LIKE ? OR m.original_name LIKE ? OR m.tags LIKE ?)"
+        params.extend([search_pattern, search_pattern, search_pattern])
+
+    query += " ORDER BY m.created_at DESC, m.id DESC"
+
+    with get_db_connection() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_media_asset_by_id(asset_id, organization_id=1):
+    """Retrieves a single media asset scoped to organization."""
+    org_id = int(organization_id)
+    a_id = int(asset_id)
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT m.*, b.name as brand_name, c.name as campaign_name "
+            "FROM media_assets m "
+            "LEFT JOIN brands b ON m.brand_id = b.id "
+            "LEFT JOIN campaigns c ON m.campaign_id = c.id "
+            "WHERE m.id = ? AND m.organization_id = ?",
+            (a_id, org_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+def delete_media_asset(asset_id, organization_id=1):
+    """Deletes a media asset record scoped to organization. Returns the deleted record dictionary."""
+    org_id = int(organization_id)
+    a_id = int(asset_id)
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM media_assets WHERE id = ? AND organization_id = ?",
+            (a_id, org_id)
+        ).fetchone()
+        if not row:
+            raise TenantIsolationError(f"Media asset #{a_id} does not exist or does not belong to active organization.")
+        asset = dict(row)
+        conn.execute("DELETE FROM media_assets WHERE id = ? AND organization_id = ?", (a_id, org_id))
+        conn.commit()
+        return asset
