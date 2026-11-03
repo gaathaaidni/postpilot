@@ -124,6 +124,23 @@ class TestTermuxCompatibility(unittest.TestCase):
         for sec in required_sections:
             self.assertIn(sec, text, f"Section '{sec}' missing from TERMUX_SETUP.md")
 
+    def test_07_offline_mock_ai_studio_portability(self):
+        """Verifies AI Marketing Studio functions in offline mode on Termux with zero API keys or external calls."""
+        import ai_service
+        provider = ai_service.get_ai_provider('mock')
+        brand = {'name': 'Termux Brand', 'positioning': 'Mobile Marketing'}
+        campaign = {'name': 'Field Campaign', 'objective': 'Direct Engagement', 'brief': 'On-the-go content'}
+
+        result = ai_service.generate_campaign_content(
+            provider=provider,
+            brand_info=brand,
+            campaign_info=campaign,
+            target_platform='whatsapp'
+        )
+        self.assertIsNotNone(result)
+        self.assertIn('Update:', result.headline)
+        self.assertIn('Field Campaign', result.caption)
+        self.assertEqual(result.ai_provider, 'mock')
 
 if __name__ == '__main__':
     unittest.main()
