@@ -1003,7 +1003,7 @@ def get_campaigns():
     org_id = session.get('organization_id', 1)
     brand_id = request.args.get('brand_id', type=int)
     status = request.args.get('status')
-    limit = min(request.args.get('limit', default=100, type=int), 200)
+    limit = max(1, min(request.args.get('limit', default=100, type=int), 100))
     offset = max(request.args.get('offset', default=0, type=int), 0)
     try:
         campaigns = database.list_campaigns(
@@ -1079,13 +1079,23 @@ def get_campaign(campaign_id):
 @login_required
 @csrf_protect
 def update_campaign_route(campaign_id):
-    """Updates campaign fields."""
+    """Updates campaign fields with mass-assignment protection."""
     org_id = session.get('organization_id', 1)
     data = request.get_json(silent=True) or {}
+
+    protected_keys = {'id', 'organization_id', 'created_by', 'created_at'}
+    attempted_protected = [k for k in protected_keys if k in data]
+    if attempted_protected:
+        return jsonify({
+            'error': f"Protected campaign field(s) cannot be modified: {', '.join(attempted_protected)}.",
+            'code': 'PROTECTED_FIELD_TAMPERING'
+        }), 400
+
     try:
         updated = database.update_campaign(
             campaign_id=campaign_id,
             organization_id=org_id,
+            brand_id=data.get('brand_id'),
             name=data.get('name'),
             objective=data.get('objective'),
             brief=data.get('brief'),
@@ -1322,12 +1332,14 @@ def generate_campaign_content_route(campaign_id):
 @app.route('/api/campaigns/<int:campaign_id>/drafts', methods=['GET'])
 @login_required
 def get_campaign_drafts(campaign_id):
-    """Retrieves all drafts created under a campaign."""
+    """Retrieves all drafts created under a campaign with pagination limits."""
     org_id = session.get('organization_id', 1)
     camp = database.get_campaign_by_id(campaign_id, organization_id=org_id)
     if not camp:
         return jsonify({'error': 'Campaign not found'}), 404
-    drafts = database.list_content_drafts(organization_id=org_id, campaign_id=campaign_id)
+    limit = max(1, min(request.args.get('limit', default=100, type=int), 100))
+    offset = max(request.args.get('offset', default=0, type=int), 0)
+    drafts = database.list_content_drafts(organization_id=org_id, campaign_id=campaign_id, limit=limit, offset=offset)
     return jsonify(drafts)
 
 @app.route('/api/drafts/<int:draft_id>', methods=['GET'])
@@ -1344,10 +1356,19 @@ def get_draft(draft_id):
 @login_required
 @csrf_protect
 def update_draft(draft_id):
-    """Updates editable draft copy, headline, hashtags, or CTA with revision tracking and optimistic concurrency."""
+    """Updates editable draft copy, headline, hashtags, or CTA with mass-assignment protection and revision tracking."""
     org_id = session.get('organization_id', 1)
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
+
+    protected_draft_keys = {'id', 'organization_id', 'campaign_id', 'brand_id', 'created_by', 'created_at'}
+    attempted_protected = [k for k in protected_draft_keys if k in data]
+    if attempted_protected:
+        return jsonify({
+            'error': f"Protected draft field(s) cannot be modified: {', '.join(attempted_protected)}.",
+            'code': 'PROTECTED_FIELD_TAMPERING'
+        }), 400
+
     try:
         updated = database.update_content_draft(
             draft_id=draft_id,

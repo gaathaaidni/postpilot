@@ -14,6 +14,7 @@ Features:
 - Safe live database backup mechanism
 """
 import os
+import re
 import json
 import sqlite3
 import logging
@@ -1841,6 +1842,51 @@ def validate_campaign_ownership(campaign_id, organization_id=1):
             raise TenantIsolationError(f"Campaign #{c_id} belongs to a different organization and cannot be accessed.")
         return dict(row)
 
+def validate_campaign_dates(start_date, end_date):
+    """
+    Validates that start_date and end_date (if provided) are valid date strings
+    and that end_date is not earlier than start_date.
+    """
+    def parse_dt(d_str):
+        if not d_str or not str(d_str).strip():
+            return None
+        clean = str(d_str).strip()
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%d %H:%M:%S.%f"):
+            try:
+                return datetime.strptime(clean[:19], fmt[:len(clean[:19])])
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(clean)
+        except Exception:
+            raise ValueError(f"Invalid date format: '{d_str}'. Must be a valid date string (e.g. YYYY-MM-DD).")
+
+    parsed_start = parse_dt(start_date)
+    parsed_end = parse_dt(end_date)
+    if parsed_start and parsed_end:
+        if parsed_end < parsed_start:
+            raise ValueError(f"Campaign end_date ({end_date}) cannot be earlier than start_date ({start_date}).")
+    return (str(start_date).strip() if start_date else None,
+            str(end_date).strip() if end_date else None)
+
+def validate_campaign_budget(budget):
+    """
+    Validates that budget (if provided) is non-negative and properly formatted.
+    """
+    if budget is None or str(budget).strip() == "":
+        return None
+    clean = str(budget).strip()
+    num_part = re.sub(r'^[$\€\£\₹\s]+', '', clean).replace(',', '').strip()
+    try:
+        val = float(num_part)
+        if val < 0:
+            raise ValueError(f"Campaign budget cannot be negative: '{budget}'.")
+        return clean
+    except ValueError as e:
+        if "cannot be negative" in str(e):
+            raise
+        raise ValueError(f"Invalid budget format: '{budget}'. Must be a non-negative number or currency string.")
+
 def create_campaign(organization_id, brand_id, name, objective, brief,
                     campaign_type='social', target_audience=None, target_markets=None,
                     languages=None, start_date=None, end_date=None, status='draft',
@@ -1853,6 +1899,9 @@ def create_campaign(organization_id, brand_id, name, objective, brief,
         raise ValueError("Campaign objective is required and cannot be empty.")
     if not brief or not str(brief).strip():
         raise ValueError("Campaign brief is required and cannot be empty.")
+
+    clean_start, clean_end = validate_campaign_dates(start_date, end_date)
+    clean_budget = validate_campaign_budget(budget)
 
     clean_name = str(name).strip()
     clean_obj = str(objective).strip()
@@ -1874,7 +1923,7 @@ def create_campaign(organization_id, brand_id, name, objective, brief,
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                 (organization_id, b_id, clean_name, clean_obj, campaign_type or 'social',
                  target_audience or '', target_markets or '', languages or '', clean_brief,
-                 start_date, end_date, clean_status, budget, created_by)
+                 clean_start, clean_end, clean_status, clean_budget, created_by)
             )
             cid = cur.fetchone()['id']
         else:
@@ -1885,7 +1934,7 @@ def create_campaign(organization_id, brand_id, name, objective, brief,
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (organization_id, b_id, clean_name, clean_obj, campaign_type or 'social',
                  target_audience or '', target_markets or '', languages or '', clean_brief,
-                 start_date, end_date, clean_status, budget, created_by)
+                 clean_start, clean_end, clean_status, clean_budget, created_by)
             )
             cid = cur.lastrowid
         conn.commit()
@@ -1938,7 +1987,7 @@ def list_campaigns(organization_id=1, brand_id=None, status=None, limit=100, off
 def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
                     brief=None, campaign_type=None, target_audience=None,
                     target_markets=None, languages=None, start_date=None,
-                    end_date=None, status=None, budget=None):
+                    end_date=None, status=None, budget=None, brand_id=None):
     """Updates an existing campaign ensuring tenant isolation and lifecycle validity."""
     existing = validate_campaign_ownership(campaign_id, organization_id)
     c_id = int(campaign_id)
@@ -1946,6 +1995,10 @@ def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
 
     updates = []
     params = []
+    if brand_id is not None:
+        validate_brand_ownership(brand_id, organization_id)
+        updates.append("brand_id = ?")
+        params.append(int(brand_id))
     if name is not None:
         if not str(name).strip():
             raise ValueError("Campaign name cannot be empty.")
@@ -1973,12 +2026,16 @@ def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
     if languages is not None:
         updates.append("languages = ?")
         params.append(str(languages).strip())
-    if start_date is not None:
-        updates.append("start_date = ?")
-        params.append(str(start_date).strip() if start_date else None)
-    if end_date is not None:
-        updates.append("end_date = ?")
-        params.append(str(end_date).strip() if end_date else None)
+    if start_date is not None or end_date is not None:
+        eval_start = start_date if start_date is not None else existing.get('start_date')
+        eval_end = end_date if end_date is not None else existing.get('end_date')
+        clean_start, clean_end = validate_campaign_dates(eval_start, eval_end)
+        if start_date is not None:
+            updates.append("start_date = ?")
+            params.append(clean_start)
+        if end_date is not None:
+            updates.append("end_date = ?")
+            params.append(clean_end)
     if status is not None:
         clean_status = str(status).strip().lower()
         if clean_status not in VALID_CAMPAIGN_STATUSES:
@@ -1992,8 +2049,9 @@ def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
         updates.append("status = ?")
         params.append(clean_status)
     if budget is not None:
+        clean_budget = validate_campaign_budget(budget)
         updates.append("budget = ?")
-        params.append(str(budget).strip() if budget else None)
+        params.append(clean_budget)
 
     if not updates:
         return get_campaign_by_id(c_id, organization_id=organization_id)

@@ -636,5 +636,118 @@ class TestCampaignAPI(unittest.TestCase):
                 self.assertEqual(res.status_code, 429)
                 self.assertIn('hourly AI generation limit', res.get_json()['error'])
 
+    def test_campaign_date_and_budget_integrity(self):
+        headers = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Invalid date range on creation (end_date < start_date)
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Bad Dates Camp', 'objective': 'Obj', 'brief': 'Brief',
+            'start_date': '2026-12-31', 'end_date': '2026-01-01'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('cannot be earlier than start_date', res.get_json()['error'])
+
+        # 2. Negative budget on creation
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Negative Budget Camp', 'objective': 'Obj', 'brief': 'Brief',
+            'budget': '-500'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('cannot be negative', res.get_json()['error'])
+
+        # 3. Valid creation
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Valid Integrity Camp', 'objective': 'Obj', 'brief': 'Brief',
+            'start_date': '2026-06-01', 'end_date': '2026-06-30', 'budget': '$2,500.00'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 201)
+        camp_id = res.get_json()['id']
+
+        # 4. Updating with invalid date range
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={
+            'end_date': '2026-05-01'  # earlier than existing start_date 2026-06-01
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('cannot be earlier than start_date', res.get_json()['error'])
+
+        # 5. Updating with negative budget
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={
+            'budget': '$-100'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('cannot be negative', res.get_json()['error'])
+
+    def test_mass_assignment_and_protected_field_tampering(self):
+        headers = self._login(user_id=1, role='admin', org_id=1)
+
+        # Create campaign and draft
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Security Test Camp', 'objective': 'Obj', 'brief': 'Brief'
+        }, headers=headers)
+        camp_id = res.get_json()['id']
+
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook'], 'provider': 'mock'
+        }, headers=headers)
+        draft_id = res.get_json()['drafts'][0]['id']
+
+        # 1. Attempt to tamper with campaign organization_id via PUT
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={
+            'organization_id': 999,
+            'name': 'Tampered Name'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.get_json()['code'], 'PROTECTED_FIELD_TAMPERING')
+
+        # 2. Attempt to tamper with campaign created_by
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={
+            'created_by': 999
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.get_json()['code'], 'PROTECTED_FIELD_TAMPERING')
+
+        # 3. Attempt to tamper with draft organization_id or brand_id via PUT
+        res = self.client.put(f'/api/drafts/{draft_id}', json={
+            'organization_id': 999
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.get_json()['code'], 'PROTECTED_FIELD_TAMPERING')
+
+        res = self.client.put(f'/api/drafts/{draft_id}', json={
+            'brand_id': 999
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.get_json()['code'], 'PROTECTED_FIELD_TAMPERING')
+
+    def test_campaign_cascade_delete_and_pagination(self):
+        headers = self._login(user_id=1, role='admin', org_id=1)
+
+        # Create campaign and drafts
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Cascade Camp', 'objective': 'Obj', 'brief': 'Brief'
+        }, headers=headers)
+        camp_id = res.get_json()['id']
+
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook', 'linkedin'], 'provider': 'mock'
+        }, headers=headers)
+        drafts = res.get_json()['drafts']
+        draft_ids = [d['id'] for d in drafts]
+
+        # Verify drafts exist
+        res = self.client.get(f'/api/campaigns/{camp_id}/drafts', headers=headers)
+        self.assertEqual(len(res.get_json()), 2)
+
+        # Delete campaign
+        res = self.client.delete(f'/api/campaigns/{camp_id}', headers=headers)
+        self.assertEqual(res.status_code, 200)
+
+        # Drafts are cascaded and cannot be found
+        for did in draft_ids:
+            res = self.client.get(f'/api/drafts/{did}', headers=headers)
+            self.assertEqual(res.status_code, 404)
+            res = self.client.get(f'/api/drafts/{did}/revisions', headers=headers)
+            self.assertEqual(res.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()
