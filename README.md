@@ -123,10 +123,15 @@ Production deployment templates are provided in the `deploy/` directory:
 
 ## Android / Termux Usage
 
-PostPilot is designed to run locally on Android devices using Termux:
-- Follow the setup guide in [TERMUX_SETUP.md](file:///C:/Users/Admin/.gemini/antigravity-ide/scratch/postpilot/TERMUX_SETUP.md).
-- Binds to `127.0.0.1:5000` for safe single-user access via phone browser.
-- *Note: While architectural portability is verified, physical device execution remains classified as pending actual hardware testing.*
+PostPilot is engineered to run natively on Android devices using Termux:
+- Complete step-by-step instructions in [TERMUX_SETUP.md](file:///C:/Users/Admin/.gemini/antigravity-ide/scratch/postpilot/TERMUX_SETUP.md).
+- Automated idempotent setup via `./setup-termux.sh` using `.env.example` as the configuration template.
+- Binds strictly to loopback (`127.0.0.1:5000`) with `LOCAL_MODE=1` granting automatic admin access only to local browser requests.
+- Integrated `./start-termux.sh` starts both the web dashboard (`app.py`) and background scheduler (`worker.py`) with PID tracking to avoid duplicate processes.
+- Background scheduler `worker.py` is required for publishing scheduled calendar posts at their due times.
+- Safe scoped shutdown via `./stop-termux.sh` terminates only PostPilot processes and releases the Android WakeLock.
+- Defaults to `AI_PROVIDER=mock` for 100% offline, zero-data operation without API keys or external network requests.
+- *Note: While architectural portability is verified, physical device execution remains classified as pending actual hardware testing by the user.*
 
 ---
 

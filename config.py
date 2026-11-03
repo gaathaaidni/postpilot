@@ -89,7 +89,17 @@ GAATHA_INTERVAL = int(os.getenv('GAATHA_INTERVAL', 1800))
 INSTA_INTERVAL = int(os.getenv('INSTA_CHECK_INTERVAL', 180))
 
 # AI Marketing Studio Provider Configuration
-AI_PROVIDER = os.getenv('AI_PROVIDER', 'mock' if os.getenv('TESTING') == 'true' or os.getenv('ENV') == 'testing' else os.getenv('AI_PROVIDER', 'mock'))
+# Supported providers: 'mock', 'groq', 'openai', 'openai_compatible'
+# Defaults to 'mock' for 100% offline functionality without API keys or external network dependencies.
+_configured_ai_prov = os.getenv('AI_PROVIDER', '').strip().lower()
+if not _configured_ai_prov:
+    AI_PROVIDER = 'mock'
+else:
+    AI_PROVIDER = _configured_ai_prov
+
+# If AI_MOCK is explicitly enabled, enforce mock provider
+if os.getenv('AI_MOCK', '').strip().lower() in ('1', 'true', 'yes'):
+    AI_PROVIDER = 'mock'
 AI_API_KEY = os.getenv('AI_API_KEY')
 AI_BASE_URL = os.getenv('AI_BASE_URL')
 AI_MODEL = os.getenv('AI_MODEL')

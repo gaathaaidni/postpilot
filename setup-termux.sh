@@ -4,9 +4,13 @@
 # ==============================================================================
 # Installs and configures PostPilot for native execution in Android Termux.
 # Uses pre-compiled ARM64 packages to guarantee fast, reliable installation.
+# Idempotent: safe to run repeatedly without overwriting existing data.
 # ==============================================================================
 
 set -e
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
 
 echo "======================================================="
 echo " POSTPILOT — ANDROID TERMUX AUTOMATED SETUP"
@@ -32,6 +36,9 @@ pkg install -y python git python-pillow libjpeg-turbo libpng freetype libwebp
 echo "🐍 [3/6] Setting up isolated Python virtual environment..."
 if [ ! -d ".venv" ]; then
     python -m venv --system-site-packages .venv
+    echo "   Created new virtual environment in .venv"
+else
+    echo "   Existing virtual environment detected in .venv (preserved)"
 fi
 
 source .venv/bin/activate
@@ -41,28 +48,36 @@ pip install --upgrade pip wheel setuptools
 echo "📥 [4/6] Installing Python dependencies from requirements.txt..."
 pip install -r requirements.txt
 
-# 5. Environment configuration (.env)
-echo "⚙️ [5/6] Configuring local environment..."
+# 5. Runtime storage directories & Environment configuration (.env)
+echo "⚙️ [5/6] Configuring local runtime directories and environment..."
+# Ensure runtime storage directories exist without overwriting existing data
+mkdir -p data/images data/media data/backups logs
+
 if [ ! -f ".env" ]; then
     cp .env.example .env
-    # Ensure Termux specific defaults
-    sed -i 's/APP_ENV=development/APP_ENV=termux/g' .env || true
-    echo "   Created .env with APP_ENV=termux and LOCAL_MODE=1"
+    # Enforce Termux-safe defaults: loopback host, termux profile, local auto-login, offline mock AI
+    sed -i 's/^APP_ENV=.*/APP_ENV=termux/g' .env || true
+    echo "   Created new .env template from .env.example with:"
+    echo "     - APP_ENV=termux"
+    echo "     - HOST=127.0.0.1"
+    echo "     - PORT=5000"
+    echo "     - LOCAL_MODE=1"
+    echo "     - AI_PROVIDER=mock (100% offline, 0 API keys required)"
 else
-    echo "   Existing .env detected; preserving existing configuration."
+    echo "   ℹ️ Existing .env detected; preserving existing user configuration."
 fi
 
-# 6. Initialize Database
-echo "🗄️ [6/6] Initializing PostPilot SQLite database..."
-python -c "import database; database.init_db(); print('   ✅ Database schema initialized successfully!')"
+# 6. Initialize Database (Idempotent: non-destructive table & column migrations)
+echo "🗄️ [6/6] Verifying SQLite database and applying schema migrations..."
+python -c "import database; database.init_db(); print('   ✅ Database schema verified and updated successfully!')"
 
-# Make scripts executable
+# Make helper scripts executable
 chmod +x start-termux.sh stop-termux.sh update-termux.sh run.sh setup.sh || true
 
 echo "======================================================="
 echo " 🎉 POSTPILOT INSTALLATION COMPLETE!"
 echo "======================================================="
-echo " To start PostPilot on Android:"
+echo " To start PostPilot (web server + background scheduler):"
 echo "   ./start-termux.sh"
 echo ""
 echo " Then open your phone's browser and visit:"
