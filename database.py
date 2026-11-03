@@ -1398,53 +1398,67 @@ def get_post_audit_history(scheduled_post_id, organization_id=1):
         ).fetchall()
         return [dict(r) for r in rows]
 
-def transition_post_status(schedule_id, to_status, user_id=None, reason=None, metadata=None, organization_id=1):
+def transition_post_status(schedule_id, to_status, user_id=None, reason=None, metadata=None,
+                           organization_id=1, expected_from_status=None):
     """
-    Safely transitions a post's lifecycle state according to business rules.
-    Enforces transitions matrix, records approvals/rejections, and logs audit events.
+    Safely and atomically transitions a post's lifecycle state according to business rules.
+    Enforces optimistic locking conditional updates, records approvals/rejections,
+    and logs audit events in the SAME database transaction.
     """
     if to_status not in VALID_POST_STATUSES:
         raise ValueError(f"Invalid target status: '{to_status}'.")
 
-    post = get_scheduled_post_by_id(schedule_id, organization_id=organization_id)
-    if not post:
-        raise ValueError(f"Scheduled post #{schedule_id} does not exist or does not belong to active organization.")
-
-    current_status = post.get('status', 'draft')
-    if current_status == to_status:
-        return post
-
-    allowed = VALID_TRANSITIONS.get(current_status, set())
-    if to_status not in allowed:
-        raise ValueError(f"Illegal lifecycle transition: cannot move post #{schedule_id} from '{current_status}' to '{to_status}'.")
-
-    if to_status == 'rejected' and (not reason or not str(reason).strip()):
-        raise ValueError("A specific rejection reason is mandatory when rejecting content.")
-
-    now_str = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    updates = ["status = ?", "updated_at = ?"]
-    params = [to_status, now_str]
-
-    if to_status in ('approved', 'scheduled'):
-        if current_status == 'pending_approval' or not post.get('approved_by'):
-            updates.append("approved_by = ?")
-            params.append(user_id)
-            updates.append("approved_at = ?")
-            params.append(now_str)
-        updates.append("rejection_reason = NULL")
-    elif to_status == 'rejected':
-        updates.append("rejection_reason = ?")
-        params.append(reason.strip())
-    elif to_status == 'draft':
-        updates.append("rejection_reason = NULL")
-
-    query = f"UPDATE scheduled_posts SET {', '.join(updates)} WHERE id = ? AND organization_id = ?"
-    params.extend([schedule_id, organization_id])
-
     with get_db_connection() as conn:
+        post = conn.execute(
+            "SELECT * FROM scheduled_posts WHERE id = ? AND organization_id = ?",
+            (schedule_id, organization_id)
+        ).fetchone()
+        if not post:
+            raise ValueError(f"Scheduled post #{schedule_id} does not exist or does not belong to active organization.")
+
+        current_status = post['status'] or 'draft'
+        if expected_from_status and current_status != expected_from_status:
+            raise ValueError(
+                f"Conflict: post #{schedule_id} is currently in status '{current_status}', "
+                f"expected '{expected_from_status}'."
+            )
+
+        if current_status == to_status:
+            return dict(post)
+
+        allowed = VALID_TRANSITIONS.get(current_status, set())
+        if to_status not in allowed:
+            raise ValueError(f"Illegal lifecycle transition: cannot move post #{schedule_id} from '{current_status}' to '{to_status}'.")
+
+        if to_status == 'rejected' and (not reason or not str(reason).strip()):
+            raise ValueError("A specific rejection reason is mandatory when rejecting content.")
+
+        now_str = _utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        updates = ["status = ?", "updated_at = ?"]
+        params = [to_status, now_str]
+
+        if to_status in ('approved', 'scheduled'):
+            if current_status == 'pending_approval' or not post['approved_by']:
+                updates.append("approved_by = ?")
+                params.append(user_id)
+                updates.append("approved_at = ?")
+                params.append(now_str)
+            updates.append("rejection_reason = NULL")
+        elif to_status == 'rejected':
+            updates.append("rejection_reason = ?")
+            params.append(reason.strip())
+        elif to_status == 'draft':
+            updates.append("rejection_reason = NULL")
+
+        query = f"UPDATE scheduled_posts SET {', '.join(updates)} WHERE id = ? AND organization_id = ? AND status = ?"
+        params.extend([schedule_id, organization_id, current_status])
+
         res = conn.execute(query, tuple(params))
         if res.rowcount == 0:
-            raise ValueError(f"Failed to update post #{schedule_id}.")
+            raise ValueError(
+                f"Conflict: Concurrent modification detected on post #{schedule_id}. "
+                f"Post status changed from '{current_status}' during transition."
+            )
 
         log_post_transition(
             scheduled_post_id=schedule_id,

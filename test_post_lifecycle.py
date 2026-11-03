@@ -7,6 +7,7 @@ import os
 import json
 import unittest
 import tempfile
+import threading
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -416,6 +417,89 @@ class TestPostLifecycle(unittest.TestCase):
         )
         self.assertEqual(res_ok.status_code, 201)
         self.assertEqual(json.loads(res_ok.data)['status'], 'pending_approval')
+
+    def test_12_concurrent_conflicting_transitions_race_protection(self):
+        """
+        Verifies atomic state transitions under concurrent competing operations.
+        Simultaneously attempts to approve and reject the same pending_approval post.
+        Asserts exactly one transition succeeds, final status is valid, and audit log
+        contains only the winning transition.
+        """
+        future_time = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        res = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'tour',
+                'scheduled_for': future_time,
+                'message': 'Race Condition Test Post',
+                'status': 'pending_approval'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res.status_code, 201)
+        post_id = json.loads(res.data)['id']
+
+        results = []
+        barrier = threading.Barrier(2)
+
+        def worker_approve():
+            barrier.wait()
+            try:
+                p = database.transition_post_status(
+                    schedule_id=post_id,
+                    to_status='scheduled',
+                    user_id=1,
+                    reason='Approved by Manager 1',
+                    organization_id=1,
+                    expected_from_status='pending_approval'
+                )
+                results.append(('approve', True, p))
+            except Exception as e:
+                results.append(('approve', False, str(e)))
+
+        def worker_reject():
+            barrier.wait()
+            try:
+                p = database.transition_post_status(
+                    schedule_id=post_id,
+                    to_status='rejected',
+                    user_id=2,
+                    reason='Rejected by Compliance Reviewer 2',
+                    organization_id=1,
+                    expected_from_status='pending_approval'
+                )
+                results.append(('reject', True, p))
+            except Exception as e:
+                results.append(('reject', False, str(e)))
+
+        t1 = threading.Thread(target=worker_approve)
+        t2 = threading.Thread(target=worker_reject)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # Exactly one operation should succeed and one should fail
+        successes = [r for r in results if r[1] is True]
+        failures = [r for r in results if r[1] is False]
+
+        self.assertEqual(len(successes), 1, f"Expected exactly 1 transition to succeed, got: {results}")
+        self.assertEqual(len(failures), 1, f"Expected exactly 1 transition to fail, got: {results}")
+
+        winner_action = successes[0][0]
+        loser_error = failures[0][2]
+        self.assertIn("Conflict", loser_error, "Failed operation must report a conflict error")
+
+        # Verify final post status in database
+        final_post = database.get_scheduled_post_by_id(post_id, organization_id=1)
+        expected_status = 'scheduled' if winner_action == 'approve' else 'rejected'
+        self.assertEqual(final_post['status'], expected_status)
+
+        # Verify audit logs record only the winning transition
+        history = database.get_post_audit_history(post_id, organization_id=1)
+        transition_events = [e for e in history if e['from_status'] == 'pending_approval']
+        self.assertEqual(len(transition_events), 1, "Only the winning transition should be recorded in audit log")
+        self.assertEqual(transition_events[0]['to_status'], expected_status)
 
 if __name__ == '__main__':
     unittest.main()
