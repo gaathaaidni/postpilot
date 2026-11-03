@@ -79,6 +79,13 @@
                 </button>
 
                 <div class="nav-section-title">Publishing & Workflow</div>
+                <button class="nav-item" data-tab="studio">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-wand-magic-sparkles" style="color: #c084fc;"></i>
+                        <span>AI Marketing Studio</span>
+                    </div>
+                    <span class="nav-badge" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">AI</span>
+                </button>
                 <button class="nav-item" data-tab="calendar">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-calendar-days" style="color: #60a5fa;"></i>
@@ -535,6 +542,156 @@
                 <button type="button" class="btn btn-secondary" onclick="closeConfirmModal()">Cancel</button>
                 <button id="confirm-yes-btn" type="button" class="btn btn-danger">
                     <i class="fa-solid fa-trash-can"></i> Confirm Delete
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         Brand Marketing Profile Modal
+         ========================================================================== -->
+    <div id="brand-profile-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="brand-profile-title">
+        <div class="modal-content" style="max-width: 720px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="brand-profile-title"><i class="fa-solid fa-id-card" style="color: var(--primary);"></i> Brand Marketing Intelligence Profile</h3>
+                    <p class="card-subtitle">Define factual guardrails, positioning, approved claims, and tone of voice</p>
+                </div>
+                <button class="close-btn" onclick="closeBrandProfileModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="brand-profile-form" onsubmit="event.preventDefault(); saveBrandProfileFromModal();">
+                    <input type="hidden" id="profile-brand-id">
+
+                    <div class="form-group">
+                        <label for="profile-positioning" class="form-label">Brand Positioning &amp; Mission</label>
+                        <textarea id="profile-positioning" class="form-control" rows="2" placeholder="e.g. Leading global consultancy specializing in student visas and skilled migration..."></textarea>
+                    </div>
+
+                    <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="profile-voice" class="form-label">Voice &amp; Tone</label>
+                            <input type="text" id="profile-voice" class="form-control" placeholder="e.g. Authoritative, reassuring, consultative, transparent">
+                        </div>
+                        <div class="form-group">
+                            <label for="profile-ctas" class="form-label">Preferred Calls to Action (CTAs)</label>
+                            <input type="text" id="profile-ctas" class="form-control" placeholder="e.g. Book a Free Assessment, Apply Today">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="profile-guidelines" class="form-label">Messaging &amp; Framing Guidelines</label>
+                        <textarea id="profile-guidelines" class="form-control" rows="2" placeholder="e.g. Focus on proven success rates, transparent fees, and strict regulatory compliance."></textarea>
+                    </div>
+
+                    <div class="form-group" style="background: rgba(16, 185, 129, 0.05); padding: 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--success-border);">
+                        <label for="profile-approved-facts" class="form-label" style="color: var(--success); font-weight: 700;">
+                            <i class="fa-solid fa-check-double"></i> Approved Product Facts (Factual Guardrails)
+                        </label>
+                        <textarea id="profile-approved-facts" class="form-control" rows="2" placeholder="e.g. Over 10,000 successful visa approvals. 15 years industry presence. Registered MARA/ICCRC consultants."></textarea>
+                        <div class="form-hint" style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.25rem;">AI models will strictly incorporate these verified factual anchors.</div>
+                    </div>
+
+                    <div class="form-group" style="background: rgba(239, 68, 68, 0.05); padding: 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--danger-border);">
+                        <label for="profile-prohibited-claims" class="form-label" style="color: var(--danger); font-weight: 700;">
+                            <i class="fa-solid fa-ban"></i> Prohibited Claims &amp; Disallowed Phrasing
+                        </label>
+                        <textarea id="profile-prohibited-claims" class="form-control" rows="2" placeholder="e.g. Never guarantee visa grant. Never give unofficial legal loopholes. Do not invent unverified awards."></textarea>
+                        <div class="form-hint" style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.25rem;">Models are instructed never to assert these statements or guarantees.</div>
+                    </div>
+
+                    <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="profile-audiences" class="form-label">Target Audiences</label>
+                            <input type="text" id="profile-audiences" class="form-control" placeholder="e.g. Students, Tech Workers, Founders">
+                        </div>
+                        <div class="form-group">
+                            <label for="profile-markets" class="form-label">Target Markets / Countries</label>
+                            <input type="text" id="profile-markets" class="form-control" placeholder="e.g. India, UAE, UK, Australia, Canada">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeBrandProfileModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveBrandProfileFromModal()">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Profile
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==========================================================================
+         New / Edit Campaign Modal
+         ========================================================================== -->
+    <div id="campaign-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="campaign-modal-title">
+        <div class="modal-content" style="max-width: 660px;">
+            <div class="modal-header">
+                <div>
+                    <h3 id="campaign-modal-title"><i class="fa-solid fa-bullhorn" style="color: var(--primary);"></i> New Marketing Campaign</h3>
+                    <p class="card-subtitle">Set objectives, brief, and targeting parameters for AI generation</p>
+                </div>
+                <button class="close-btn" onclick="closeCampaignModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="campaign-form" onsubmit="event.preventDefault(); saveCampaignFromModal();">
+                    <input type="hidden" id="modal-campaign-id">
+
+                    <div class="form-group">
+                        <label for="modal-campaign-brand-id" class="form-label">Brand Workspace</label>
+                        <select id="modal-campaign-brand-id" class="form-control">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="modal-campaign-name" class="form-label">Campaign Name *</label>
+                        <input type="text" id="modal-campaign-name" class="form-control" placeholder="e.g. Autumn 2027 Global Visa Drive" required>
+                    </div>
+
+                    <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="modal-campaign-objective" class="form-label">Campaign Objective *</label>
+                            <input type="text" id="modal-campaign-objective" class="form-control" placeholder="e.g. Lead Generation, Brand Awareness" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-campaign-type" class="form-label">Campaign Type</label>
+                            <select id="modal-campaign-type" class="form-control">
+                                <option value="social">Social Media Drive</option>
+                                <option value="product_launch">Product Launch</option>
+                                <option value="seasonal">Seasonal Promotion</option>
+                                <option value="lead_generation">Lead Generation Funnel</option>
+                                <option value="customer_update">Customer Update / Broadcast</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="modal-campaign-brief" class="form-label">Campaign Brief &amp; Key Message *</label>
+                        <textarea id="modal-campaign-brief" class="form-control" rows="3" placeholder="Provide background, core announcement details, special incentives, or key highlights..." required></textarea>
+                    </div>
+
+                    <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="modal-campaign-audience" class="form-label">Target Audience</label>
+                            <input type="text" id="modal-campaign-audience" class="form-control" placeholder="e.g. University applicants, parents">
+                        </div>
+                        <div class="form-group">
+                            <label for="modal-campaign-markets" class="form-label">Target Markets</label>
+                            <input type="text" id="modal-campaign-markets" class="form-control" placeholder="e.g. South Asia, GCC, North America">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="modal-campaign-languages" class="form-label">Language</label>
+                        <input type="text" id="modal-campaign-languages" class="form-control" value="en" placeholder="en, es, fr, hi">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeCampaignModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveCampaignFromModal()">
+                    <i class="fa-solid fa-check"></i> Save Campaign
                 </button>
             </div>
         </div>

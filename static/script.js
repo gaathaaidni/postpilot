@@ -171,6 +171,7 @@ function loadTab(tab) {
         'dashboard': 'System Overview',
         'accounts': 'Connected Social Accounts',
         'composer': 'Post Composer',
+        'studio': 'AI Marketing Studio',
         'calendar': 'Content Calendar',
         'approvals': 'Approvals Centre',
         'queue': 'Publishing Queue',
@@ -194,6 +195,8 @@ function loadTab(tab) {
         renderAccounts(content);
     } else if (tab === 'composer') {
         renderComposerView(content);
+    } else if (tab === 'studio') {
+        renderAIStudioView(content);
     } else if (tab === 'calendar') {
         renderCalendarView(content);
     } else if (tab === 'approvals') {
@@ -3229,4 +3232,619 @@ function renderQueueTable() {
     `;
 
     root.innerHTML = html;
+}
+
+/* ==========================================================================
+   AI MARKETING STUDIO CLIENT ENGINE
+   Brand-Aware Campaign Intelligence & Multi-Platform Generation
+   ========================================================================== */
+
+let studioBrands = [];
+let studioSelectedBrandId = null;
+let studioCampaigns = [];
+let studioSelectedCampaignId = null;
+let studioDrafts = [];
+let studioBrandProfile = null;
+let isGeneratingCopy = false;
+
+async function renderAIStudioView(container) {
+    if (!container) return;
+
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading AI Marketing Studio...</p>
+        </div>
+    `;
+
+    try {
+        // 1. Fetch available brands
+        const brandsRes = await authFetch('/api/brands');
+        if (brandsRes.ok) {
+            studioBrands = await brandsRes.json();
+        } else {
+            studioBrands = [];
+        }
+
+        if (studioBrands.length > 0 && !studioSelectedBrandId) {
+            studioSelectedBrandId = studioBrands[0].id;
+        }
+
+        // 2. Fetch campaigns for active brand
+        if (studioSelectedBrandId) {
+            const campRes = await authFetch(`/api/campaigns?brand_id=${studioSelectedBrandId}`);
+            if (campRes.ok) {
+                studioCampaigns = await campRes.json();
+            } else {
+                studioCampaigns = [];
+            }
+
+            // 3. Fetch brand marketing profile
+            const profRes = await authFetch(`/api/brands/${studioSelectedBrandId}/profile`);
+            if (profRes.ok) {
+                const profData = await profRes.json();
+                studioBrandProfile = profData.profile || null;
+            }
+        }
+
+        if (studioCampaigns.length > 0 && !studioSelectedCampaignId) {
+            studioSelectedCampaignId = studioCampaigns[0].id;
+        }
+
+        // 4. Fetch drafts for active campaign
+        if (studioSelectedCampaignId) {
+            const draftsRes = await authFetch(`/api/campaigns/${studioSelectedCampaignId}/drafts`);
+            if (draftsRes.ok) {
+                studioDrafts = await draftsRes.json();
+            } else {
+                studioDrafts = [];
+            }
+        } else {
+            studioDrafts = [];
+        }
+
+        renderAIStudioDOM(container);
+    } catch (err) {
+        console.error("Failed to render AI Marketing Studio:", err);
+        container.innerHTML = `
+            <div class="card" style="padding: 2rem; text-align: center;">
+                <i class="fa-solid fa-triangle-exclamation fa-2x" style="color: var(--danger);"></i>
+                <h3 style="margin-top: 0.5rem;">Could not load AI Marketing Studio</h3>
+                <p style="color: var(--text-muted);">${escapeHtml(err.message || String(err))}</p>
+                <button class="btn btn-primary" onclick="renderAIStudioView(document.getElementById('content-area'))" style="margin-top: 1rem;">Retry</button>
+            </div>
+        `;
+    }
+}
+
+function renderAIStudioDOM(container) {
+    const activeBrand = studioBrands.find(b => b.id === Number(studioSelectedBrandId)) || null;
+    const activeCampaign = studioCampaigns.find(c => c.id === Number(studioSelectedCampaignId)) || null;
+
+    let html = `
+        <div class="studio-container">
+            <!-- Studio Top Control Bar -->
+            <div class="studio-header-card">
+                <div class="studio-brand-selector-wrap">
+                    <span style="font-weight: 700; font-size: 0.88rem; color: var(--text-muted); text-transform: uppercase;">Brand:</span>
+                    <select id="studio-brand-select" class="form-control" style="min-width: 180px;" onchange="handleStudioBrandChange(this.value)">
+                        ${studioBrands.map(b => `<option value="${b.id}" ${b.id === Number(studioSelectedBrandId) ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                    </select>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openBrandProfileModal()" title="View &amp; Edit Brand Marketing Profile">
+                        <i class="fa-solid fa-id-badge" style="color: var(--primary);"></i> Brand Profile
+                    </button>
+                </div>
+
+                <div class="studio-campaign-selector-wrap">
+                    <span style="font-weight: 700; font-size: 0.88rem; color: var(--text-muted); text-transform: uppercase;">Campaign:</span>
+                    <select id="studio-campaign-select" class="form-control" style="min-width: 220px;" onchange="handleStudioCampaignChange(this.value)">
+                        ${studioCampaigns.length > 0
+                            ? studioCampaigns.map(c => `<option value="${c.id}" ${c.id === Number(studioSelectedCampaignId) ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('')
+                            : `<option value="">No campaigns yet</option>`
+                        }
+                    </select>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openNewCampaignModal()" title="Create New Marketing Campaign">
+                        <i class="fa-solid fa-plus"></i> New Campaign
+                    </button>
+                </div>
+            </div>
+    `;
+
+    // Active Campaign Brief or Empty Prompt
+    if (activeCampaign) {
+        html += `
+            <div class="studio-brief-banner">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
+                    <div>
+                        <div class="studio-brief-title">
+                            <i class="fa-solid fa-bullhorn" style="color: var(--primary);"></i>
+                            <span>${escapeHtml(activeCampaign.name)}</span>
+                            <span class="badge badge-success" style="font-size: 0.72rem; text-transform: capitalize;">${escapeHtml(activeCampaign.status || 'draft')}</span>
+                        </div>
+                        <p style="margin: 0; color: var(--text-secondary); font-size: 0.92rem; line-height: 1.5;">${escapeHtml(activeCampaign.brief)}</p>
+                    </div>
+                </div>
+
+                <div class="studio-meta-chips">
+                    <span class="studio-chip"><i class="fa-solid fa-bullseye" style="color: #6366f1;"></i> Objective: <strong>${escapeHtml(activeCampaign.objective)}</strong></span>
+                    ${activeCampaign.target_audience ? `<span class="studio-chip"><i class="fa-solid fa-users" style="color: #06b6d4;"></i> Audience: ${escapeHtml(activeCampaign.target_audience)}</span>` : ''}
+                    ${activeCampaign.target_markets ? `<span class="studio-chip"><i class="fa-solid fa-earth-americas" style="color: #10b981;"></i> Markets: ${escapeHtml(activeCampaign.target_markets)}</span>` : ''}
+                    <span class="studio-chip"><i class="fa-solid fa-language" style="color: #f59e0b;"></i> Lang: ${escapeHtml(activeCampaign.languages || 'en').toUpperCase()}</span>
+                </div>
+            </div>
+
+            <!-- AI Generation Control Bar -->
+            <div class="studio-generation-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h4 style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fa-solid fa-wand-magic-sparkles" style="color: #c084fc;"></i>
+                            Multi-Platform AI Generation
+                        </h4>
+                        <p style="margin: 0.25rem 0 0 0; font-size: 0.82rem; color: var(--text-muted);">
+                            Generates brand-aware marketing copy customized for each platform adhering to approved facts and tone.
+                        </p>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 0.4rem;">
+                            <label for="studio-provider-select" style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">Provider:</label>
+                            <select id="studio-provider-select" class="form-control" style="font-size: 0.85rem; padding: 0.35rem 0.65rem; width: auto;">
+                                <option value="mock">Offline Mock (Deterministic / Fast)</option>
+                                <option value="groq">Groq (Llama 3.3 70B Versatile)</option>
+                                <option value="openai">OpenAI (GPT-4o Mini)</option>
+                            </select>
+                        </div>
+
+                        <button id="studio-generate-btn" type="button" class="btn btn-primary" onclick="generateStudioCopy()" ${isGeneratingCopy ? 'disabled' : ''}>
+                            ${isGeneratingCopy
+                                ? `<i class="fa-solid fa-spinner fa-spin"></i> Generating Copy...`
+                                : `<i class="fa-solid fa-sparkles"></i> Generate Copy`
+                            }
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Platform Selection Checkbox Pills -->
+                <div class="studio-platform-selector-row">
+                    <label class="platform-pill-toggle active">
+                        <input type="checkbox" id="gen-plat-fb" value="facebook" checked>
+                        <i class="fa-brands fa-facebook" style="color: #1877f2;"></i> Facebook
+                    </label>
+                    <label class="platform-pill-toggle active">
+                        <input type="checkbox" id="gen-plat-ig" value="instagram" checked>
+                        <i class="fa-brands fa-instagram" style="color: #db2777;"></i> Instagram
+                    </label>
+                    <label class="platform-pill-toggle active">
+                        <input type="checkbox" id="gen-plat-li" value="linkedin" checked>
+                        <i class="fa-brands fa-linkedin" style="color: #0284c7;"></i> LinkedIn
+                    </label>
+                    <label class="platform-pill-toggle active">
+                        <input type="checkbox" id="gen-plat-x" value="x" checked>
+                        <i class="fa-brands fa-x-twitter" style="color: #0f172a;"></i> X (Twitter)
+                    </label>
+                    <label class="platform-pill-toggle active">
+                        <input type="checkbox" id="gen-plat-wa" value="whatsapp" checked>
+                        <i class="fa-brands fa-whatsapp" style="color: #059669;"></i> WhatsApp Draft
+                    </label>
+                </div>
+            </div>
+
+            <!-- Drafts Review & In-Place Editor Grid -->
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="font-size: 1.15rem; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fa-solid fa-layer-group" style="color: var(--primary);"></i>
+                        Generated Campaign Drafts
+                        <span class="badge badge-secondary" style="font-size: 0.78rem;">${studioDrafts.length}</span>
+                    </h3>
+                </div>
+
+                ${studioDrafts.length === 0 ? `
+                    <div class="card" style="padding: 3rem 1rem; text-align: center; border: 2px dashed var(--border);">
+                        <i class="fa-solid fa-file-pen fa-2x" style="color: var(--text-muted); margin-bottom: 0.5rem;"></i>
+                        <h4 style="margin: 0; color: var(--text-primary);">No copy generated yet for this campaign</h4>
+                        <p style="color: var(--text-muted); font-size: 0.88rem; max-width: 480px; margin: 0.5rem auto 1.25rem auto;">
+                            Click the <strong>Generate Copy</strong> button above to create customized, brand-aligned marketing drafts for Facebook, Instagram, LinkedIn, X, and WhatsApp.
+                        </p>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="generateStudioCopy()">
+                            <i class="fa-solid fa-sparkles"></i> Generate First Drafts
+                        </button>
+                    </div>
+                ` : `
+                    <div class="studio-drafts-grid">
+                        ${studioDrafts.map(d => renderStudioDraftCard(d)).join('')}
+                    </div>
+                `}
+            </div>
+        `;
+    } else {
+        html += `
+            <div class="card" style="padding: 4rem 1.5rem; text-align: center; border: 2px dashed var(--border);">
+                <i class="fa-solid fa-bullhorn fa-3x" style="color: var(--primary); margin-bottom: 1rem; opacity: 0.8;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Welcome to AI Marketing Studio</h3>
+                <p style="color: var(--text-muted); max-width: 520px; margin: 0 auto 1.5rem auto; line-height: 1.5;">
+                    PostPilot's Brand-Aware AI Marketing Studio creates high-converting, platform-specific copy anchored to your verified brand guidelines and product facts.
+                </p>
+                <button type="button" class="btn btn-primary" onclick="openNewCampaignModal()">
+                    <i class="fa-solid fa-plus"></i> Create Your First Campaign
+                </button>
+            </div>
+        `;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+function renderStudioDraftCard(draft) {
+    const plat = (draft.target_platform || 'facebook').toLowerCase();
+    const platIcons = {
+        'facebook': 'fa-brands fa-facebook',
+        'instagram': 'fa-brands fa-instagram',
+        'linkedin': 'fa-brands fa-linkedin',
+        'x': 'fa-brands fa-x-twitter',
+        'whatsapp': 'fa-brands fa-whatsapp'
+    };
+    const platLabels = {
+        'facebook': 'Facebook Post',
+        'instagram': 'Instagram Caption',
+        'linkedin': 'LinkedIn Post',
+        'x': 'X (Twitter) Post',
+        'whatsapp': 'WhatsApp Business Message'
+    };
+
+    return `
+        <div class="studio-draft-card" id="draft-card-${draft.id}">
+            <div class="studio-draft-header">
+                <span class="platform-badge ${plat}">
+                    <i class="${platIcons[plat] || 'fa-solid fa-share-nodes'}"></i>
+                    ${platLabels[plat] || plat.toUpperCase()}
+                </span>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">
+                    ${escapeHtml(draft.ai_provider || 'ai')} · ${draft.created_at ? formatReadableDateTime(draft.created_at) : 'Draft'}
+                </span>
+            </div>
+
+            ${plat === 'whatsapp' ? `
+                <div class="whatsapp-notice-banner">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span><strong>Conversational Messaging Draft:</strong> For direct customer chat/broadcast, distinct from social status updates.</span>
+                </div>
+            ` : ''}
+
+            <!-- Headline Editor -->
+            <div>
+                <label class="studio-card-field-label">Headline / Hook</label>
+                <input type="text" id="draft-headline-${draft.id}" class="form-control" style="font-size: 0.88rem; font-weight: 600;" value="${escapeHtml(draft.headline || '')}">
+            </div>
+
+            <!-- Body / Caption Editor -->
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                    <label class="studio-card-field-label" style="margin-bottom: 0;">Caption / Message Body</label>
+                    <span id="draft-count-${draft.id}" style="font-size: 0.74rem; color: var(--text-muted);">${(draft.caption || '').length} chars</span>
+                </div>
+                <textarea 
+                    id="draft-caption-${draft.id}" 
+                    class="form-control" 
+                    rows="5" 
+                    style="font-size: 0.85rem; line-height: 1.45;" 
+                    oninput="document.getElementById('draft-count-${draft.id}').textContent = this.value.length + ' chars'"
+                >${escapeHtml(draft.caption || '')}</textarea>
+            </div>
+
+            <!-- Hashtags & CTA -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                <div>
+                    <label class="studio-card-field-label">Hashtags</label>
+                    <input type="text" id="draft-hashtags-${draft.id}" class="form-control" style="font-size: 0.8rem;" value="${escapeHtml(draft.hashtags || '')}" placeholder="#Tags">
+                </div>
+                <div>
+                    <label class="studio-card-field-label">Call to Action</label>
+                    <input type="text" id="draft-cta-${draft.id}" class="form-control" style="font-size: 0.8rem;" value="${escapeHtml(draft.call_to_action || '')}" placeholder="Next step">
+                </div>
+            </div>
+
+            <!-- Action Controls -->
+            <div class="studio-draft-actions">
+                <div style="display: flex; gap: 0.4rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="saveStudioDraft(${draft.id})" title="Save manual edits to this draft">
+                        <i class="fa-solid fa-floppy-disk"></i> Save
+                    </button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="scheduleStudioDraft(${draft.id})" title="Send this draft into Post Composer / Scheduler">
+                        <i class="fa-solid fa-paper-plane"></i> Schedule
+                    </button>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteStudioDraft(${draft.id})" title="Delete draft">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+// Brand & Campaign Switchers
+function handleStudioBrandChange(brandId) {
+    studioSelectedBrandId = Number(brandId);
+    studioSelectedCampaignId = null; // Reset campaign on brand change
+    renderAIStudioView(document.getElementById('content-area'));
+}
+
+function handleStudioCampaignChange(campaignId) {
+    studioSelectedCampaignId = Number(campaignId);
+    renderAIStudioView(document.getElementById('content-area'));
+}
+
+// Brand Profile Modal Handling
+async function openBrandProfileModal() {
+    if (!studioSelectedBrandId) {
+        showToast("Please select a brand workspace first.", "warning");
+        return;
+    }
+
+    const modal = document.getElementById('brand-profile-modal');
+    document.getElementById('profile-brand-id').value = studioSelectedBrandId;
+
+    // Prefill if cached
+    const p = studioBrandProfile || {};
+    document.getElementById('profile-positioning').value = p.positioning || '';
+    document.getElementById('profile-voice').value = p.voice_and_tone || '';
+    document.getElementById('profile-guidelines').value = p.messaging_guidelines || '';
+    document.getElementById('profile-approved-facts').value = p.approved_product_facts || '';
+    document.getElementById('profile-prohibited-claims').value = p.prohibited_claims || '';
+    document.getElementById('profile-ctas').value = p.preferred_ctas || '';
+    document.getElementById('profile-audiences').value = p.target_audiences || '';
+    document.getElementById('profile-markets').value = p.target_markets || '';
+
+    modal.classList.add('active');
+}
+
+function closeBrandProfileModal() {
+    const modal = document.getElementById('brand-profile-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+async function saveBrandProfileFromModal() {
+    const brandId = document.getElementById('profile-brand-id').value;
+    const payload = {
+        positioning: document.getElementById('profile-positioning').value.trim(),
+        voice_and_tone: document.getElementById('profile-voice').value.trim(),
+        messaging_guidelines: document.getElementById('profile-guidelines').value.trim(),
+        approved_product_facts: document.getElementById('profile-approved-facts').value.trim(),
+        prohibited_claims: document.getElementById('profile-prohibited-claims').value.trim(),
+        preferred_ctas: document.getElementById('profile-ctas').value.trim(),
+        target_audiences: document.getElementById('profile-audiences').value.trim(),
+        target_markets: document.getElementById('profile-markets').value.trim()
+    };
+
+    try {
+        const res = await authFetch(`/api/brands/${brandId}/profile`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            const data = await res.json();
+            studioBrandProfile = data.profile;
+            closeBrandProfileModal();
+            showToast("Brand Marketing Profile updated successfully!", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to update profile", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// Campaign Modal Handling
+function openNewCampaignModal() {
+    const modal = document.getElementById('campaign-modal');
+    const brandSelect = document.getElementById('modal-campaign-brand-id');
+    brandSelect.innerHTML = studioBrands.map(b => `
+        <option value="${b.id}" ${b.id === Number(studioSelectedBrandId) ? 'selected' : ''}>${escapeHtml(b.name)}</option>
+    `).join('');
+
+    document.getElementById('modal-campaign-id').value = '';
+    document.getElementById('modal-campaign-name').value = '';
+    document.getElementById('modal-campaign-objective').value = '';
+    document.getElementById('modal-campaign-brief').value = '';
+    document.getElementById('modal-campaign-audience').value = '';
+    document.getElementById('modal-campaign-markets').value = '';
+
+    modal.classList.add('active');
+}
+
+function closeCampaignModal() {
+    const modal = document.getElementById('campaign-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+async function saveCampaignFromModal() {
+    const brandId = document.getElementById('modal-campaign-brand-id').value;
+    const name = document.getElementById('modal-campaign-name').value.trim();
+    const objective = document.getElementById('modal-campaign-objective').value.trim();
+    const brief = document.getElementById('modal-campaign-brief').value.trim();
+    const campaignType = document.getElementById('modal-campaign-type').value;
+    const audience = document.getElementById('modal-campaign-audience').value.trim();
+    const markets = document.getElementById('modal-campaign-markets').value.trim();
+    const languages = document.getElementById('modal-campaign-languages').value.trim();
+
+    if (!name || !objective || !brief) {
+        showToast("Please provide Campaign Name, Objective, and Brief.", "warning");
+        return;
+    }
+
+    const payload = {
+        brand_id: Number(brandId),
+        name,
+        objective,
+        brief,
+        campaign_type: campaignType,
+        target_audience: audience,
+        target_markets: markets,
+        languages: languages || 'en'
+    };
+
+    try {
+        const res = await authFetch('/api/campaigns', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+            const created = await res.json();
+            closeCampaignModal();
+            showToast("Marketing Campaign created successfully!", "success");
+            studioSelectedBrandId = Number(brandId);
+            studioSelectedCampaignId = created.id;
+            renderAIStudioView(document.getElementById('content-area'));
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to create campaign", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// Generate Copy via AI Service
+async function generateStudioCopy() {
+    if (!studioSelectedCampaignId) {
+        showToast("Please select or create a campaign first.", "warning");
+        return;
+    }
+
+    const platforms = [];
+    if (document.getElementById('gen-plat-fb')?.checked) platforms.push('facebook');
+    if (document.getElementById('gen-plat-ig')?.checked) platforms.push('instagram');
+    if (document.getElementById('gen-plat-li')?.checked) platforms.push('linkedin');
+    if (document.getElementById('gen-plat-x')?.checked) platforms.push('x');
+    if (document.getElementById('gen-plat-wa')?.checked) platforms.push('whatsapp');
+
+    if (platforms.length === 0) {
+        showToast("Please select at least one target social platform.", "warning");
+        return;
+    }
+
+    const provider = document.getElementById('studio-provider-select')?.value || 'mock';
+
+    isGeneratingCopy = true;
+    const btn = document.getElementById('studio-generate-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Generating Copy...`;
+    }
+
+    try {
+        const res = await authFetch(`/api/campaigns/${studioSelectedCampaignId}/generate`, {
+            method: 'POST',
+            body: JSON.stringify({
+                platforms,
+                provider
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+            showToast(`✨ Generated ${data.drafts.length} brand-aware copy drafts!`, "success");
+            // Prepend new drafts to studioDrafts without losing existing versions
+            studioDrafts = [...(data.drafts || []), ...studioDrafts];
+            renderAIStudioDOM(document.getElementById('content-area'));
+        } else {
+            showToast(data.error || "Content generation failed", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Generation network error", "danger");
+    } finally {
+        isGeneratingCopy = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<i class="fa-solid fa-sparkles"></i> Generate Copy`;
+        }
+    }
+}
+
+// Save Edited Draft
+async function saveStudioDraft(draftId) {
+    const headline = document.getElementById(`draft-headline-${draftId}`)?.value.trim();
+    const caption = document.getElementById(`draft-caption-${draftId}`)?.value.trim();
+    const hashtags = document.getElementById(`draft-hashtags-${draftId}`)?.value.trim();
+    const cta = document.getElementById(`draft-cta-${draftId}`)?.value.trim();
+
+    if (!caption) {
+        showToast("Caption cannot be empty.", "warning");
+        return;
+    }
+
+    try {
+        const res = await authFetch(`/api/drafts/${draftId}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                headline,
+                caption,
+                hashtags,
+                call_to_action: cta
+            })
+        });
+
+        if (res.ok) {
+            const updated = await res.json();
+            // Update in local array
+            const idx = studioDrafts.findIndex(d => d.id === draftId);
+            if (idx !== -1) studioDrafts[idx] = updated;
+            showToast("Draft saved successfully!", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to update draft", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// Delete Draft
+async function deleteStudioDraft(draftId) {
+    if (!confirm("Are you sure you want to delete this draft?")) return;
+
+    try {
+        const res = await authFetch(`/api/drafts/${draftId}`, {
+            method: 'DELETE'
+        });
+
+        if (res.ok) {
+            studioDrafts = studioDrafts.filter(d => d.id !== draftId);
+            const el = document.getElementById(`draft-card-${draftId}`);
+            if (el) el.remove();
+            showToast("Draft deleted.", "success");
+        } else {
+            const err = await res.json();
+            showToast(err.error || "Failed to delete draft", "danger");
+        }
+    } catch (e) {
+        showToast(e.message || "Network error", "danger");
+    }
+}
+
+// Schedule Draft -> Opens Composer Modal
+function scheduleStudioDraft(draftId) {
+    const draft = studioDrafts.find(d => d.id === draftId);
+    if (!draft) return;
+
+    // Combine caption and hashtags for the composer
+    let text = draft.caption || '';
+    if (draft.hashtags) {
+        text += `\n\n${draft.hashtags}`;
+    }
+
+    openModal('add');
+    const msgEl = document.getElementById('post-message');
+    if (msgEl) {
+        msgEl.value = text;
+        if (typeof handleCaptionInput === 'function') {
+            handleCaptionInput(text);
+        }
+    }
+
+    showToast("Draft loaded into Composer. Choose media and schedule time!", "info");
 }
