@@ -1,5 +1,8 @@
 # PostPilot Flask - Deployment Guide
 
+> ⚠️ **CRITICAL PRODUCTION ISOLATION WARNING**:  
+> PostPilot is an independent application that is maintained completely separate from the Gaatha production VPS (`/root/gaathacore`), production databases, and production web services. PostPilot must NEVER be deployed to or run against Gaatha production infrastructure. Deploy ONLY to isolated staging or dedicated hosts.
+
 This guide covers various deployment options for the PostPilot Flask application.
 
 ## Table of Contents
