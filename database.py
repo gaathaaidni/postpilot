@@ -491,6 +491,9 @@ def init_db():
                 hashtags TEXT,
                 call_to_action TEXT,
                 content_format TEXT DEFAULT 'post',
+                ai_provider TEXT,
+                ai_model TEXT,
+                metadata TEXT,
                 change_source TEXT DEFAULT 'manual_edit',
                 change_summary TEXT,
                 edited_by INTEGER,
@@ -510,18 +513,23 @@ def init_db():
         _ensure_column_exists(conn, 'scheduled_posts', 'approved_at', 'TIMESTAMP')
         _ensure_column_exists(conn, 'scheduled_posts', 'rejection_reason', 'TEXT')
         _ensure_column_exists(conn, 'content_drafts', 'current_revision', 'INTEGER DEFAULT 1')
+        _ensure_column_exists(conn, 'content_draft_revisions', 'ai_provider', 'TEXT')
+        _ensure_column_exists(conn, 'content_draft_revisions', 'ai_model', 'TEXT')
+        _ensure_column_exists(conn, 'content_draft_revisions', 'metadata', 'TEXT')
 
         # Non-destructive backfill of revision 1 for legacy drafts lacking revisions
         conn.execute('''
             INSERT INTO content_draft_revisions (
                 organization_id, brand_id, campaign_id, draft_id,
                 revision_number, headline, caption, hashtags, call_to_action,
-                content_format, change_source, change_summary, edited_by, created_at
+                content_format, ai_provider, ai_model, metadata,
+                change_source, change_summary, edited_by, created_at
             )
             SELECT
                 cd.organization_id, cd.brand_id, cd.campaign_id, cd.id,
                 COALESCE(cd.current_revision, 1), cd.headline, cd.caption, cd.hashtags, cd.call_to_action,
                 COALESCE(cd.content_format, 'post'),
+                cd.ai_provider, cd.ai_model, cd.metadata,
                 CASE WHEN cd.ai_provider IS NOT NULL THEN 'ai_generated' ELSE 'manual_creation' END,
                 'Initial draft creation',
                 cd.created_by,
@@ -2133,10 +2141,11 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
         conn.execute(
             "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
             "revision_number, headline, caption, hashtags, call_to_action, content_format, "
-            "change_source, change_summary, edited_by) "
-            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "ai_provider, ai_model, metadata, change_source, change_summary, edited_by) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (organization_id, int(brand_id), int(campaign_id), did,
              headline, clean_caption, hashtags, call_to_action, content_format or 'post',
+             ai_provider, ai_model, meta_str,
              initial_source, 'Initial draft creation', created_by)
         )
         conn.commit()
@@ -2197,7 +2206,8 @@ def list_content_drafts(organization_id=1, campaign_id=None, brand_id=None,
 
 def update_content_draft(draft_id, organization_id=1, caption=None, headline=None,
                          hashtags=None, call_to_action=None, status=None,
-                         content_format=None, metadata=None, allow_privileged_status=False,
+                         content_format=None, metadata=None, ai_provider=None,
+                         ai_model=None, allow_privileged_status=False,
                          expected_revision=None, edited_by=None, change_source='manual_edit',
                          change_summary=None):
     """Updates a content draft ensuring organization ownership, optimistic concurrency, and lifecycle validity."""
@@ -2207,12 +2217,13 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
         raise ValueError(f"Invalid draft ID '{draft_id}'.")
 
     with get_db_connection() as conn:
-        existing = conn.execute(
+        row = conn.execute(
             "SELECT * FROM content_drafts WHERE id = ? AND organization_id = ?",
             (d_id, organization_id)
         ).fetchone()
-        if not existing:
+        if not row:
             raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+        existing = dict(row)
 
         curr_rev = existing['current_revision'] if existing['current_revision'] is not None else 1
         if expected_revision is not None:
@@ -2234,6 +2245,8 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
         new_hashtags = str(hashtags).strip() if (hashtags is not None and str(hashtags).strip() != '') else (None if hashtags == '' else existing['hashtags'])
         new_cta = str(call_to_action).strip() if (call_to_action is not None and str(call_to_action).strip() != '') else (None if call_to_action == '' else existing['call_to_action'])
         new_format = str(content_format).strip() if content_format is not None else (existing['content_format'] or 'post')
+        new_provider = ai_provider if ai_provider is not None else existing.get('ai_provider')
+        new_model = ai_model if ai_model is not None else existing.get('ai_model')
 
         content_changed = False
         if caption is not None:
@@ -2268,6 +2281,14 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             updates.append("content_format = ?")
             params.append(new_format)
 
+        if ai_provider is not None:
+            updates.append("ai_provider = ?")
+            params.append(ai_provider)
+
+        if ai_model is not None:
+            updates.append("ai_model = ?")
+            params.append(ai_model)
+
         if status is not None:
             clean_status = str(status).strip().lower()
             if clean_status not in VALID_DRAFT_STATUSES:
@@ -2285,6 +2306,7 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             updates.append("status = ?")
             params.append(clean_status)
 
+        meta_str = None
         if metadata is not None:
             meta_str = json.dumps(metadata) if isinstance(metadata, (dict, list)) else str(metadata)
             updates.append("metadata = ?")
@@ -2296,13 +2318,15 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             updates.append("current_revision = ?")
             params.append(next_rev)
             summary = change_summary or ("Updated draft content" if change_source == 'manual_edit' else f"Updated content ({change_source})")
+            rev_meta = meta_str if metadata is not None else existing.get('metadata')
             conn.execute(
                 "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
                 "revision_number, headline, caption, hashtags, call_to_action, content_format, "
-                "change_source, change_summary, edited_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "ai_provider, ai_model, metadata, change_source, change_summary, edited_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (organization_id, existing['brand_id'], existing['campaign_id'], d_id,
                  next_rev, new_headline, new_caption, new_hashtags, new_cta, new_format,
+                 new_provider, new_model, rev_meta,
                  change_source, summary, edited_by)
             )
 
@@ -2453,13 +2477,14 @@ def restore_draft_revision(draft_id, revision_number, organization_id=1, restore
         if not draft:
             raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
 
-        target_rev = conn.execute(
+        target_row = conn.execute(
             "SELECT * FROM content_draft_revisions "
             "WHERE draft_id = ? AND revision_number = ? AND organization_id = ?",
             (d_id, r_num, organization_id)
         ).fetchone()
-        if not target_rev:
+        if not target_row:
             raise ValueError(f"Revision #{r_num} does not exist for draft #{d_id}.")
+        target_rev = dict(target_row)
 
         current_rev = draft['current_revision'] if draft['current_revision'] is not None else 1
         next_rev = current_rev + 1
@@ -2467,22 +2492,24 @@ def restore_draft_revision(draft_id, revision_number, organization_id=1, restore
         # Update draft with restored content
         conn.execute(
             "UPDATE content_drafts SET headline = ?, caption = ?, hashtags = ?, call_to_action = ?, "
-            "content_format = ?, current_revision = ?, updated_at = CURRENT_TIMESTAMP "
+            "content_format = ?, ai_provider = ?, ai_model = ?, metadata = ?, current_revision = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE id = ? AND organization_id = ?",
             (target_rev['headline'], target_rev['caption'], target_rev['hashtags'],
-             target_rev['call_to_action'], target_rev['content_format'], next_rev,
-             d_id, organization_id)
+             target_rev['call_to_action'], target_rev.get('content_format', 'post'),
+             target_rev.get('ai_provider'), target_rev.get('ai_model'), target_rev.get('metadata'),
+             next_rev, d_id, organization_id)
         )
 
         # Append new revision record
         conn.execute(
             "INSERT INTO content_draft_revisions (organization_id, brand_id, campaign_id, draft_id, "
             "revision_number, headline, caption, hashtags, call_to_action, content_format, "
-            "change_source, change_summary, edited_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restored_revision', ?, ?)",
+            "ai_provider, ai_model, metadata, change_source, change_summary, edited_by) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'restored_revision', ?, ?)",
             (organization_id, draft['brand_id'], draft['campaign_id'], d_id,
              next_rev, target_rev['headline'], target_rev['caption'], target_rev['hashtags'],
-             target_rev['call_to_action'], target_rev['content_format'],
+             target_rev['call_to_action'], target_rev.get('content_format', 'post'),
+             target_rev.get('ai_provider'), target_rev.get('ai_model'), target_rev.get('metadata'),
              f"Restored from revision #{r_num}", restored_by)
         )
         conn.commit()

@@ -1520,6 +1520,8 @@ def regenerate_draft_route(draft_id):
             hashtags=gen_res.hashtags,
             call_to_action=gen_res.call_to_action,
             content_format=draft.get('content_format', 'post'),
+            ai_provider=provider_name,
+            ai_model=model_name,
             edited_by=user_id,
             change_source='regenerated',
             change_summary='AI regenerated copy',

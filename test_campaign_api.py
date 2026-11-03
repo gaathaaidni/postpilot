@@ -462,6 +462,7 @@ class TestCampaignAPI(unittest.TestCase):
         self.assertEqual(rev1['revision_number'], 1)
         self.assertEqual(rev1['change_source'], 'ai_generated')
         self.assertEqual(rev1['caption'], draft['caption'])
+        self.assertEqual(rev1['ai_provider'], 'mock')
 
         # 3. Update draft caption -> creates revision 2
         res = self.client.put(f'/api/drafts/{draft_id}', json={
@@ -523,6 +524,14 @@ class TestCampaignAPI(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         regen_draft = res.get_json()['draft']
         self.assertEqual(regen_draft['current_revision'], 5)
+
+        # Check rev5 metadata
+        res = self.client.get(f'/api/drafts/{draft_id}/revisions/5', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        rev5 = res.get_json()
+        self.assertEqual(rev5['revision_number'], 5)
+        self.assertEqual(rev5['change_source'], 'regenerated')
+        self.assertEqual(rev5['ai_provider'], 'mock')
 
         # 10. Tenant isolation: Org 2 cannot view or restore Org 1's draft revisions
         headers_org2 = self._login(user_id=2, role='admin', org_id=2)
