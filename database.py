@@ -934,6 +934,8 @@ def get_all_synced_post_ids(target_platform='instagram'):
         return {r['post_id'] for r in rows}
 
 # --- Persistent Calendar Scheduler Engine ---
+ALLOWED_INITIAL_STATUSES = frozenset({'draft', 'pending_approval', 'scheduled'})
+
 def create_scheduled_post(post_type, scheduled_for, message="", image_filename=None, post_id=None,
                           organization_id=1, brand_id=None, idempotency_key=None, created_by=None,
                           timezone_name=None, initial_status='scheduled', allow_past=True, **kwargs):
@@ -944,8 +946,19 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
     import secrets
     import time
 
+    if not initial_status or initial_status not in ALLOWED_INITIAL_STATUSES:
+        raise ValueError(
+            f"Invalid initial post status: '{initial_status}'. Must be one of: {', '.join(sorted(ALLOWED_INITIAL_STATUSES))}."
+        )
+
     if post_type not in ('tour', 'nz', 'gaatha', 'insta'):
         raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of tour, nz, gaatha, insta.")
+
+    # Validate organization exists and is active
+    with get_db_connection() as conn:
+        org = conn.execute("SELECT id FROM organizations WHERE id = ? AND is_active = 1", (organization_id,)).fetchone()
+        if not org:
+            raise ValueError(f"Organization #{organization_id} does not exist or is inactive.")
 
     # Validate brand ownership
     if brand_id:
@@ -982,6 +995,8 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
         if existing:
             if existing['organization_id'] != organization_id:
                 raise ValueError("Idempotency key collision across organizations.")
+            if existing['post_type'] != post_type:
+                raise ValueError(f"Idempotency key collision across channels: post belongs to '{existing['post_type']}'.")
             return get_scheduled_post_by_id(existing['id'], organization_id=organization_id)
 
         msg_val = message if message is not None else ""

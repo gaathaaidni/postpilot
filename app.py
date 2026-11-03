@@ -615,7 +615,23 @@ def add_scheduled():
     timezone_name = data.get('timezone')
     idempotency_key = data.get('idempotency_key')
     allow_past = bool(data.get('allow_past', False))
-    initial_status = data.get('status', 'scheduled')
+    raw_status = data.get('status')
+    if raw_status is not None:
+        if raw_status not in database.ALLOWED_INITIAL_STATUSES:
+            return jsonify({
+                'error': f"Invalid initial status '{raw_status}'. Allowed initial states: {', '.join(sorted(database.ALLOWED_INITIAL_STATUSES))}.",
+                'code': 'VALIDATION_ERROR'
+            }), 400
+        initial_status = raw_status
+    else:
+        initial_status = 'scheduled'
+
+    user_role = session.get('role', 'admin')
+    if user_role == 'contributor' and initial_status == 'scheduled':
+        return jsonify({
+            'error': 'Users with contributor role cannot schedule directly; submission for approval is required.',
+            'code': 'APPROVAL_REQUIRED'
+        }), 403
 
     try:
         record = database.create_scheduled_post(

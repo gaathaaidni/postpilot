@@ -324,5 +324,98 @@ class TestPostLifecycle(unittest.TestCase):
         self.assertIn(b"reject-reason-modal", res.data)
         self.assertIn(b"reschedule-modal", res.data)
 
+    def test_10_invalid_initial_statuses_rejected_at_api_and_database(self):
+        """
+        Verifies that attempts to create posts directly as approved, publishing,
+        published, failed, rejected, cancelled, or arbitrary statuses are rejected
+        with HTTP 400 and code VALIDATION_ERROR, and zero records are inserted.
+        """
+        invalid_statuses = [
+            'approved',
+            'publishing',
+            'published',
+            'failed',
+            'rejected',
+            'cancelled',
+            'random_unsupported_state',
+            ''
+        ]
+        future_time = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+
+        # Count baseline posts
+        with database.get_db_connection() as conn:
+            initial_count = conn.execute("SELECT COUNT(*) as c FROM scheduled_posts").fetchone()['c']
+
+        for inv_status in invalid_statuses:
+            with self.subTest(invalid_status=inv_status):
+                # 1. API level test
+                res = self.client.post(
+                    '/api/schedule',
+                    json={
+                        'post_type': 'tour',
+                        'scheduled_for': future_time,
+                        'message': f'Post with illegal status {inv_status}',
+                        'status': inv_status
+                    },
+                    headers=self.headers
+                )
+                self.assertEqual(
+                    res.status_code, 400,
+                    f"Creating post with initial status '{inv_status}' must return 400 Bad Request"
+                )
+                data = json.loads(res.data)
+                self.assertEqual(data.get('code'), 'VALIDATION_ERROR')
+
+                # 2. Database function level test
+                with self.assertRaises(ValueError):
+                    database.create_scheduled_post(
+                        post_type='tour',
+                        scheduled_for=future_time,
+                        message='Direct DB insertion illegal status',
+                        initial_status=inv_status
+                    )
+
+        # Confirm no extra posts were inserted into database
+        with database.get_db_connection() as conn:
+            final_count = conn.execute("SELECT COUNT(*) as c FROM scheduled_posts").fetchone()['c']
+        self.assertEqual(
+            initial_count, final_count,
+            "Database count must not increase after rejected invalid initial status attempts"
+        )
+
+    def test_11_contributor_role_cannot_schedule_directly(self):
+        """Verifies that users with contributor role cannot schedule directly without approval."""
+        future_time = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        with self.client.session_transaction() as sess:
+            sess['role'] = 'contributor'
+
+        # Attempt direct scheduling as contributor
+        res = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'nz',
+                'scheduled_for': future_time,
+                'message': 'Contributor direct schedule attempt',
+                'status': 'scheduled'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(json.loads(res.data)['code'], 'APPROVAL_REQUIRED')
+
+        # Contributor submitting as draft or pending_approval succeeds
+        res_ok = self.client.post(
+            '/api/schedule',
+            json={
+                'post_type': 'nz',
+                'scheduled_for': future_time,
+                'message': 'Contributor draft submission',
+                'status': 'pending_approval'
+            },
+            headers=self.headers
+        )
+        self.assertEqual(res_ok.status_code, 201)
+        self.assertEqual(json.loads(res_ok.data)['status'], 'pending_approval')
+
 if __name__ == '__main__':
     unittest.main()
