@@ -259,6 +259,7 @@ def _ensure_indexes(conn):
         ("idx_cdr_draft_rev", "CREATE INDEX IF NOT EXISTS idx_cdr_draft_rev ON content_draft_revisions(organization_id, draft_id, revision_number)"),
         ("idx_cdr_campaign", "CREATE INDEX IF NOT EXISTS idx_cdr_campaign ON content_draft_revisions(organization_id, campaign_id)"),
         ("idx_campaign_strategies_camp", "CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_strategies_camp ON campaign_strategies(organization_id, campaign_id)"),
+        ("idx_ai_usage_org_created", "CREATE INDEX IF NOT EXISTS idx_ai_usage_org_created ON ai_usage_logs(organization_id, created_at)"),
     ]
     for name, sql in indexes:
         try:
@@ -526,6 +527,25 @@ def init_db():
                 raw_response TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 14. AI usage logs table (usage quotas, token tracking, and billing)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS ai_usage_logs (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                brand_id INTEGER,
+                campaign_id INTEGER,
+                provider TEXT NOT NULL,
+                model TEXT,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                cost_estimate REAL DEFAULT 0.0,
+                success INTEGER DEFAULT 1,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
@@ -2637,6 +2657,79 @@ def get_organization_ai_generation_count(organization_id, window_seconds=3600):
                 (org_id, secs)
             ).fetchone()
         return row['cnt'] if row else 0
+
+def log_ai_usage(organization_id, provider, model=None, prompt_tokens=0,
+                 completion_tokens=0, total_tokens=0, brand_id=None,
+                 campaign_id=None, cost_estimate=0.0, success=True,
+                 error_message=None):
+    """Logs an AI generation request with token metrics and cost estimates for billing and quota controls."""
+    org_id = int(organization_id)
+    b_id = int(brand_id) if brand_id is not None else None
+    c_id = int(campaign_id) if campaign_id is not None else None
+    p_tokens = int(prompt_tokens or 0)
+    c_tokens = int(completion_tokens or 0)
+    t_tokens = int(total_tokens or (p_tokens + c_tokens))
+    cost = float(cost_estimate or 0.0)
+    is_success = 1 if success else 0
+    clean_err = str(error_message)[:500] if error_message else None
+
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO ai_usage_logs (organization_id, brand_id, campaign_id, "
+            "provider, model, prompt_tokens, completion_tokens, total_tokens, "
+            "cost_estimate, success, error_message) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (org_id, b_id, c_id, str(provider), str(model or ''),
+             p_tokens, c_tokens, t_tokens, cost, is_success, clean_err)
+        )
+        conn.commit()
+
+def get_ai_usage_summary(organization_id, days=30):
+    """
+    Returns aggregated AI usage metrics and recent request logs for the active organization.
+    """
+    org_id = int(organization_id)
+    d = max(1, min(int(days), 365))
+
+    with get_db_connection() as conn:
+        if is_postgres():
+            time_filter = "created_at >= NOW() - make_interval(days => ?)"
+        else:
+            time_filter = "created_at >= datetime('now', '-' || ? || ' days')"
+
+        agg = conn.execute(
+            f"SELECT COUNT(*) as total_requests, "
+            f"COALESCE(SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END), 0) as successful_requests, "
+            f"COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) as failed_requests, "
+            f"COALESCE(SUM(prompt_tokens), 0) as total_prompt_tokens, "
+            f"COALESCE(SUM(completion_tokens), 0) as total_completion_tokens, "
+            f"COALESCE(SUM(total_tokens), 0) as total_tokens, "
+            f"COALESCE(SUM(cost_estimate), 0.0) as estimated_cost "
+            f"FROM ai_usage_logs WHERE organization_id = ? AND {time_filter}",
+            (org_id, d)
+        ).fetchone()
+
+        by_provider = conn.execute(
+            f"SELECT provider, COUNT(*) as request_count, "
+            f"COALESCE(SUM(total_tokens), 0) as total_tokens, "
+            f"COALESCE(SUM(cost_estimate), 0.0) as estimated_cost "
+            f"FROM ai_usage_logs WHERE organization_id = ? AND {time_filter} "
+            f"GROUP BY provider ORDER BY request_count DESC",
+            (org_id, d)
+        ).fetchall()
+
+        recent = conn.execute(
+            "SELECT * FROM ai_usage_logs WHERE organization_id = ? "
+            "ORDER BY created_at DESC LIMIT 50",
+            (org_id,)
+        ).fetchall()
+
+        return {
+            'period_days': d,
+            'summary': dict(agg) if agg else {},
+            'by_provider': [dict(r) for r in by_provider],
+            'recent_logs': [dict(r) for r in recent]
+        }
 
 
 

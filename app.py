@@ -1191,16 +1191,32 @@ def generate_campaign_strategy_route(campaign_id):
             campaign_id=campaign_id,
             strategy_data=strategy_dict
         )
+
+        database.log_ai_usage(
+            organization_id=org_id,
+            brand_id=camp['brand_id'],
+            campaign_id=campaign_id,
+            provider=provider_name or 'mock',
+            model=model_name or 'mock-v1',
+            prompt_tokens=350,
+            completion_tokens=450,
+            total_tokens=800,
+            success=True
+        )
         return jsonify({'success': True, 'strategy': saved}), 200
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 404
     except ai_service.AIConfigurationError as e:
+        database.log_ai_usage(organization_id=org_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e)}), 400
     except ai_service.AIRateLimitError as e:
+        database.log_ai_usage(organization_id=org_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e), 'code': 'RATE_LIMIT_EXCEEDED'}), 429
     except ai_service.AITimeoutError as e:
+        database.log_ai_usage(organization_id=org_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e), 'code': 'PROVIDER_TIMEOUT'}), 504
     except ai_service.AIProviderError as e:
+        database.log_ai_usage(organization_id=org_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e), 'code': 'PROVIDER_ERROR'}), 502
     except Exception as e:
         logger.error(f"Error generating campaign strategy: {e}")
@@ -1404,15 +1420,31 @@ def generate_campaign_content_route(campaign_id):
                 created_by=user_id
             )
             generated_drafts.append(created_draft)
+
+            meta = getattr(gen_res, 'metadata', {}) or {}
+            database.log_ai_usage(
+                organization_id=org_id,
+                brand_id=camp['brand_id'],
+                campaign_id=campaign_id,
+                provider=gen_res.ai_provider or provider_name or 'mock',
+                model=gen_res.ai_model,
+                prompt_tokens=meta.get('prompt_tokens', 120),
+                completion_tokens=meta.get('completion_tokens', 80),
+                total_tokens=meta.get('total_tokens', 200),
+                success=True
+            )
         except ai_service.AIRateLimitError as e:
             logger.warning(f"AI rate limit during generation for {plat}: {e}")
             errors.append({'platform': plat, 'error': str(e), 'code': 429})
+            database.log_ai_usage(organization_id=org_id, brand_id=camp['brand_id'], campaign_id=campaign_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         except ai_service.AITimeoutError as e:
             logger.warning(f"AI timeout during generation for {plat}: {e}")
             errors.append({'platform': plat, 'error': str(e), 'code': 504})
+            database.log_ai_usage(organization_id=org_id, brand_id=camp['brand_id'], campaign_id=campaign_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         except (ai_service.AIResponseValidationError, ai_service.AIProviderError) as e:
             logger.error(f"AI error during generation for {plat}: {e}")
             errors.append({'platform': plat, 'error': str(e), 'code': 502})
+            database.log_ai_usage(organization_id=org_id, brand_id=camp['brand_id'], campaign_id=campaign_id, provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
 
     if not generated_drafts and errors:
         primary_err = errors[0]
@@ -1627,16 +1659,33 @@ def regenerate_draft_route(draft_id):
             change_summary='AI regenerated copy',
             expected_revision=data.get('expected_revision')
         )
+
+        meta = getattr(gen_res, 'metadata', {}) or {}
+        database.log_ai_usage(
+            organization_id=org_id,
+            brand_id=draft['brand_id'],
+            campaign_id=draft['campaign_id'],
+            provider=provider_name or draft.get('ai_provider') or 'mock',
+            model=model_name or draft.get('ai_model') or 'mock-v1',
+            prompt_tokens=meta.get('prompt_tokens', 120),
+            completion_tokens=meta.get('completion_tokens', 80),
+            total_tokens=meta.get('total_tokens', 200),
+            success=True
+        )
         return jsonify({'success': True, 'draft': updated})
     except database.ConcurrencyConflictError as e:
         return jsonify({'error': str(e), 'code': 'CONCURRENT_EDIT_CONFLICT'}), 409
     except ai_service.AIConfigurationError as e:
+        database.log_ai_usage(organization_id=org_id, brand_id=draft.get('brand_id'), campaign_id=draft.get('campaign_id'), provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e)}), 400
     except ai_service.AIRateLimitError as e:
+        database.log_ai_usage(organization_id=org_id, brand_id=draft.get('brand_id'), campaign_id=draft.get('campaign_id'), provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e), 'code': 'RATE_LIMIT_EXCEEDED'}), 429
     except ai_service.AITimeoutError as e:
+        database.log_ai_usage(organization_id=org_id, brand_id=draft.get('brand_id'), campaign_id=draft.get('campaign_id'), provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e), 'code': 'TIMEOUT'}), 504
     except (ai_service.AIResponseValidationError, ai_service.AIProviderError) as e:
+        database.log_ai_usage(organization_id=org_id, brand_id=draft.get('brand_id'), campaign_id=draft.get('campaign_id'), provider=provider_name or 'mock', model=model_name, success=False, error_message=str(e))
         return jsonify({'error': str(e), 'code': 'AI_PROVIDER_ERROR'}), 502
     except Exception as e:
         logger.error(f"Error regenerating draft #{draft_id}: {e}")
@@ -1744,6 +1793,19 @@ def delete_draft(draft_id):
         return jsonify({'status': 'deleted', 'draft_id': draft_id})
     except (database.TenantIsolationError, ValueError) as e:
         return jsonify({'error': str(e)}), 404
+
+@app.route('/api/analytics/ai-usage', methods=['GET'])
+@login_required
+def get_ai_usage_analytics():
+    """Returns aggregated AI usage metrics and recent request logs for the active organization."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', 30)
+    try:
+        days_int = int(days)
+    except (ValueError, TypeError):
+        days_int = 30
+    data = database.get_ai_usage_summary(organization_id=org_id, days=days_int)
+    return jsonify(data), 200
 
 # --- Main Entry Point ---
 

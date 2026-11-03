@@ -899,5 +899,59 @@ class TestCampaignAPI(unittest.TestCase):
         res = self.client.get(f'/api/campaigns/{camp_id}/strategy', headers=headers_org1)
         self.assertEqual(res.status_code, 404)
 
+    def test_ai_usage_logging_and_analytics_endpoint(self):
+        headers_org1 = self._login(user_id=1, role='admin', org_id=1)
+
+        # 1. Query initial AI usage analytics for Org 1
+        res = self.client.get('/api/analytics/ai-usage', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        initial_data = res.get_json()
+        initial_total = initial_data['summary'].get('total_requests', 0)
+        initial_succ = initial_data['summary'].get('successful_requests', 0)
+
+        # 2. Create campaign and generate copy for 2 platforms
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10,
+            'name': 'Usage Log Test Campaign',
+            'objective': 'Test token tracking',
+            'brief': 'Validating that token and cost metrics are recorded accurately.'
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 201)
+        camp_id = res.get_json()['id']
+
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={
+            'platforms': ['facebook', 'linkedin'],
+            'provider': 'mock'
+        }, headers=headers_org1)
+        self.assertEqual(res.status_code, 201)
+        self.assertEqual(len(res.get_json()['drafts']), 2)
+
+        # 3. Query AI usage analytics -> total_requests increased by 2
+        res = self.client.get('/api/analytics/ai-usage', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        usage_data = res.get_json()
+        self.assertEqual(usage_data['summary']['total_requests'], initial_total + 2)
+        self.assertEqual(usage_data['summary']['successful_requests'], initial_succ + 2)
+        self.assertGreater(usage_data['summary']['total_tokens'], 0)
+        self.assertTrue(len(usage_data['by_provider']) > 0)
+        self.assertEqual(usage_data['by_provider'][0]['provider'], 'mock')
+
+        # 4. Generate strategy -> increases count by 1
+        res = self.client.post(f'/api/campaigns/{camp_id}/strategy', json={'provider': 'mock'}, headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+
+        res = self.client.get('/api/analytics/ai-usage', headers=headers_org1)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['summary']['total_requests'], initial_total + 3)
+
+        # 5. Tenant isolation: Org 2 has independent usage metrics (0 requests)
+        headers_org2 = self._login(user_id=2, role='admin', org_id=2)
+        res = self.client.get('/api/analytics/ai-usage', headers=headers_org2)
+        self.assertEqual(res.status_code, 200)
+        org2_data = res.get_json()
+        self.assertEqual(org2_data['summary']['total_requests'], 0)
+        self.assertEqual(org2_data['summary']['total_tokens'], 0)
+        self.assertEqual(len(org2_data['recent_logs']), 0)
+
 if __name__ == '__main__':
     unittest.main()
