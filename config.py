@@ -42,13 +42,14 @@ DEFAULT_SQLITE_PATH = DATA_DIR / "posts.db"
 DATABASE_URL = os.getenv('POSTPILOT_DATABASE_URL') or os.getenv('DATABASE_URL', f"sqlite:///{DEFAULT_SQLITE_PATH}")
 
 # Flask Core Settings
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY') or os.getenv('FLASK_SECRET_KEY')
 if not SECRET_KEY:
-    # If not provided, generate a deterministic fallback for dev, or random for session
-    SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'postpilot-dev-secret-key-change-in-production')
     if APP_ENV == 'production':
-        # Generate random key if none specified in production to prevent hardcoded vulnerability
-        SECRET_KEY = secrets.token_hex(32)
+        raise RuntimeError(
+            "Production security configuration violation: SECRET_KEY must be explicitly configured in the environment. "
+            "Silently generating transient secrets in production breaks multi-worker session persistence and CSRF validation."
+        )
+    SECRET_KEY = 'postpilot-dev-secret-key-change-in-production'
 
 DEBUG = os.getenv('FLASK_DEBUG', '1' if APP_ENV == 'development' else '0') == '1'
 

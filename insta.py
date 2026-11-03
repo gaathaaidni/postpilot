@@ -70,13 +70,17 @@ class InstaSync:
         self.stop_event.set()
 
     def get_recent_facebook_posts(self):
-        url = f"{facebook_api.BASE_URL}/{self.page_id}/posts"
-        params = {
-            'fields': 'id,message,attachments{media,type}',
-            'access_token': self.access_token or facebook_api.get_access_token()
-        }
-        res = facebook_api._request_with_retry("GET", url, params=params)
-        return res.get('data', [])
+        try:
+            url = f"{facebook_api.BASE_URL}/{self.page_id}/posts"
+            params = {
+                'fields': 'id,message,attachments{media,type}',
+                'access_token': self.access_token or facebook_api.get_access_token()
+            }
+            res = facebook_api._request_with_retry("GET", url, params=params)
+            return res.get('data', []) if isinstance(res, dict) else []
+        except Exception as e:
+            logger.error(f"Error fetching recent Facebook posts for page {self.page_id}: {facebook_api.sanitize_log_message(str(e))}")
+            return []
 
     def run(self):
         """Background loop to fetch new Facebook posts and cross-post to Instagram."""
@@ -100,7 +104,7 @@ class InstaSync:
                     image_url = media.get('image', {}).get('src')
                     if image_url and post_to_instagram(image_url, post.get('message', ''), self.ig_user_id, self.access_token):
                         post_count += 1
-                        summary = f"{post.get('message', '')[:30]}..."
+                        summary = facebook_api.sanitize_log_message(f"{post.get('message', '')[:30]}...")
                         if status_callback:
                             status_callback(self.name, True, f"Synced #{post_count}", summary)
                         mark_post_as_synced(post_id)
@@ -116,6 +120,7 @@ class InstaSync:
                     break
             except Exception as e:
                 safe_err = facebook_api.sanitize_log_message(str(e))
+                logger.error(f"Unexpected error in Instagram sync loop for {self.name}: {safe_err}")
                 if status_callback:
                     status_callback(self.name, False, f"Error: {safe_err}", None)
                 if self.stop_event.wait(timeout=10):

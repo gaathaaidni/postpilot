@@ -19,6 +19,7 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
+import requests
 import postpilot_cli
 import verify_token
 import fetch_full_info
@@ -111,6 +112,97 @@ class TestPostPilotCLI(unittest.TestCase):
 
         ret = postpilot_cli.cmd_list_pages(update_env=False)
         self.assertEqual(ret, 0)
+
+    @patch('postpilot_cli.get_auth_token')
+    @patch('requests.get')
+    def test_verify_token_api_error_redaction(self, mock_get, mock_tok):
+        """Verifies verify-token redacts credentials from API error output."""
+        mock_tok.return_value = "MOCK_TOKEN_CLI_TEST"
+        secret_leak = "SECRET_VERIFY_TOKEN_API_99999"
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            'error': {'message': f"Invalid OAuth access_token={secret_leak}", 'code': 190}
+        }
+        mock_get.return_value = mock_resp
+
+        with patch('sys.stdout', new=io.StringIO()) as fake_out:
+            ret = postpilot_cli.cmd_verify_token()
+            out = fake_out.getvalue()
+            self.assertEqual(ret, 1)
+            self.assertNotIn(secret_leak, out)
+            self.assertIn("[REDACTED]", out)
+
+    @patch('postpilot_cli.get_auth_token')
+    @patch('requests.get')
+    def test_verify_token_network_error_redaction(self, mock_get, mock_tok):
+        """Verifies verify-token redacts credentials from network exception output."""
+        mock_tok.return_value = "MOCK_TOKEN_CLI_TEST"
+        secret_leak = "SECRET_VERIFY_TOKEN_NET_88888"
+        mock_get.side_effect = requests.exceptions.ConnectionError(
+            f"HTTPSConnectionPool: Max retries exceeded with url: /v19.0/debug_token?access_token={secret_leak}"
+        )
+
+        with patch('sys.stdout', new=io.StringIO()) as fake_out:
+            ret = postpilot_cli.cmd_verify_token()
+            out = fake_out.getvalue()
+            self.assertEqual(ret, 1)
+            self.assertNotIn(secret_leak, out)
+            self.assertIn("[REDACTED]", out)
+
+    @patch('postpilot_cli.get_auth_token')
+    @patch('requests.get')
+    def test_list_pages_api_error_redaction(self, mock_get, mock_tok):
+        """Verifies list-pages redacts credentials from API error output."""
+        mock_tok.return_value = "MOCK_TOKEN_CLI_TEST"
+        secret_leak = "SECRET_LIST_PAGES_API_77777"
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            'error': {'message': f"Error validating access%5Ftoken={secret_leak}", 'code': 100}
+        }
+        mock_get.return_value = mock_resp
+
+        with patch('sys.stdout', new=io.StringIO()) as fake_out:
+            ret = postpilot_cli.cmd_list_pages()
+            out = fake_out.getvalue()
+            self.assertEqual(ret, 1)
+            self.assertNotIn(secret_leak, out)
+            self.assertIn("[REDACTED]", out)
+
+    @patch('postpilot_cli.get_auth_token')
+    @patch('requests.get')
+    def test_list_pages_network_error_redaction(self, mock_get, mock_tok):
+        """Verifies list-pages redacts credentials from network exception output."""
+        mock_tok.return_value = "MOCK_TOKEN_CLI_TEST"
+        secret_leak = "SECRET_LIST_PAGES_NET_66666"
+        mock_get.side_effect = requests.exceptions.ConnectionError(
+            f"ConnectTimeout: Headers: Authorization: Bearer {secret_leak}"
+        )
+
+        with patch('sys.stdout', new=io.StringIO()) as fake_out:
+            ret = postpilot_cli.cmd_list_pages()
+            out = fake_out.getvalue()
+            self.assertEqual(ret, 1)
+            self.assertNotIn(secret_leak, out)
+            self.assertIn("[REDACTED]", out)
+
+    @patch('postpilot_cli.get_auth_token')
+    @patch('requests.get')
+    def test_inspect_account_error_redaction(self, mock_get, mock_tok):
+        """Verifies inspect-account redacts credentials on API error or exception."""
+        mock_tok.return_value = "MOCK_TOKEN_CLI_TEST"
+        secret_leak = "SECRET_INSPECT_ACCOUNT_55555"
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            'error': {'message': f"Failed with {{\"access_token\": \"{secret_leak}\"}}"}
+        }
+        mock_get.return_value = mock_resp
+
+        with patch('sys.stdout', new=io.StringIO()) as fake_out:
+            ret = postpilot_cli.cmd_inspect_account()
+            out = fake_out.getvalue()
+            self.assertEqual(ret, 1)
+            self.assertNotIn(secret_leak, out)
+            self.assertIn("[REDACTED]", out)
 
     def test_cli_backward_compatibility_wrappers(self):
         """Verifies verify_token, fetch_full_info, and fetch_fb_info wrappers execute safely."""

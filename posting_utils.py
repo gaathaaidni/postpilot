@@ -16,7 +16,7 @@ def load_posts(post_type):
     try:
         return database.load_posts_by_type(post_type)
     except Exception as e:
-        logger.error(f"❌ Error loading posts for {post_type}: {e}")
+        logger.error(f"❌ Error loading posts for {post_type}: {facebook_api.sanitize_log_message(str(e))}")
         return []
 
 def update_last_posted_timestamp(post_id):
@@ -24,7 +24,7 @@ def update_last_posted_timestamp(post_id):
     try:
         database.update_last_posted_timestamp(post_id)
     except Exception as e:
-        logger.error(f"❌ Error updating last_posted_at for post {post_id}: {e}")
+        logger.error(f"❌ Error updating last_posted_at for post {post_id}: {facebook_api.sanitize_log_message(str(e))}")
 
 def post_on_facebook(message, image_filename, page_id, access_token, image_folder=None, ig_user_id=None, channel_key=None):
     """
@@ -157,11 +157,12 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
                 post_count += 1
                 msg = post.get('message', '')
                 summary = f"{msg[:50]}..." if len(msg) > 50 else (msg or 'No message')
+                safe_summary = facebook_api.sanitize_log_message(summary)
                 
                 if status_callback:
-                    status_callback(callback_key, True, f"Posting... (Post #{post_count})", summary)
+                    status_callback(callback_key, True, f"Posting... (Post #{post_count})", safe_summary)
                 else:
-                    database.set_task_state(callback_key, is_running=True, status=f"Posting... (Post #{post_count})", current_post_summary=summary)
+                    database.set_task_state(callback_key, is_running=True, status=f"Posting... (Post #{post_count})", current_post_summary=safe_summary)
 
                 try:
                     result = post_on_facebook(
@@ -196,11 +197,12 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
                     break
 
         except Exception as loop_err:
-            logger.error(f"Unexpected error in posting loop for {callback_key}: {facebook_api.sanitize_log_message(str(loop_err))}")
+            safe_err = facebook_api.sanitize_log_message(str(loop_err))
+            logger.error(f"Unexpected error in posting loop for {callback_key}: {safe_err}")
             if status_callback:
-                status_callback(callback_key, True, f"Error: {loop_err}", None)
+                status_callback(callback_key, True, f"Error: {safe_err}", None)
             else:
-                database.set_task_state(callback_key, is_running=True, status=f"Error: {loop_err}")
+                database.set_task_state(callback_key, is_running=True, status=f"Error: {safe_err}")
             # Prevent fast spin on persistent errors
             if stop_event.wait(timeout=5.0):
                 break

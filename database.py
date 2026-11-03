@@ -98,7 +98,12 @@ def get_db_connection():
         except ImportError:
             raise RuntimeError("PostgreSQL configured but psycopg2 is not installed. Install psycopg2-binary.")
         except Exception as e:
-            logger.error(f"Failed to connect to PostgreSQL: {e}")
+            try:
+                import facebook_api
+                safe_e = facebook_api.sanitize_log_message(str(e))
+            except Exception:
+                safe_e = str(e)
+            logger.error(f"Failed to connect to PostgreSQL: {safe_e}")
             raise
     else:
         sqlite_path = _get_sqlite_path()
@@ -113,16 +118,85 @@ def get_db_connection():
             pass
         return DBConnectionWrapper(conn, is_pg=False)
 
+def _ensure_column_exists(conn, table_name, column_name, column_def):
+    """Safely adds a column to an existing table if not already present."""
+    if is_postgres():
+        try:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_def}")
+            conn.commit()
+        except Exception as e:
+            logger.warning(f"Notice adding column {column_name} to {table_name}: {e}")
+    else:
+        try:
+            cur = conn.execute(f"PRAGMA table_info({table_name})")
+            cols = [r[1] for r in cur.fetchall()]
+            if column_name not in cols:
+                conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}")
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Notice adding column {column_name} to {table_name}: {e}")
+
+def _ensure_indexes(conn):
+    """Creates performance and integrity indexes safely."""
+    indexes = [
+        ("idx_posts_org_type", "CREATE INDEX IF NOT EXISTS idx_posts_org_type ON posts(organization_id, post_type, last_posted_at, id)"),
+        ("idx_posts_media", "CREATE INDEX IF NOT EXISTS idx_posts_media ON posts(image_filename)"),
+        ("idx_sched_due", "CREATE INDEX IF NOT EXISTS idx_sched_due ON scheduled_posts(status, scheduled_for)"),
+        ("idx_sched_org", "CREATE INDEX IF NOT EXISTS idx_sched_org ON scheduled_posts(organization_id, post_type, scheduled_for)"),
+        ("idx_sched_lock", "CREATE INDEX IF NOT EXISTS idx_sched_lock ON scheduled_posts(locked_by, locked_at)"),
+        ("idx_sched_idempotency", "CREATE INDEX IF NOT EXISTS idx_sched_idempotency ON scheduled_posts(idempotency_key)"),
+        ("idx_brands_org", "CREATE INDEX IF NOT EXISTS idx_brands_org ON brands(organization_id, slug)"),
+        ("idx_users_org", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(organization_id, username)"),
+    ]
+    for name, sql in indexes:
+        try:
+            conn.execute(sql)
+        except Exception as e:
+            logger.warning(f"Index creation notice for {name}: {e}")
+    conn.commit()
+
 def init_db():
     """Initializes tables and seeds initial administrator and task states."""
     is_pg = is_postgres()
     auto_id = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
 
     with get_db_connection() as conn:
-        # 1. Posts table
+        # 1. Organizations table (Multi-tenancy isolation)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS organizations (
+                id {auto_id},
+                name TEXT NOT NULL,
+                slug TEXT UNIQUE NOT NULL,
+                plan TEXT DEFAULT 'growth',
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 2. Brands / Workspaces table
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS brands (
+                id {auto_id},
+                organization_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                description TEXT,
+                logo_url TEXT,
+                color_hex TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, slug)
+            )
+        ''')
+
+        # 3. Posts table
         conn.execute(f'''
             CREATE TABLE IF NOT EXISTS posts (
                 id {auto_id},
+                organization_id INTEGER DEFAULT 1,
+                brand_id INTEGER,
                 post_type TEXT NOT NULL,
                 message TEXT,
                 image_filename TEXT,
@@ -131,18 +205,46 @@ def init_db():
             )
         ''')
         
-        # 2. Users table for authentication
+        # 4. Users table for authentication
         conn.execute(f'''
             CREATE TABLE IF NOT EXISTS users (
                 id {auto_id},
+                organization_id INTEGER DEFAULT 1,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 role TEXT DEFAULT 'admin',
+                is_active INTEGER DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
 
-        # 3. Task state table (decouples task state from in-process memory)
+        # 5. Scheduled posts table (persistent calendar scheduler)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS scheduled_posts (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                brand_id INTEGER,
+                post_type TEXT NOT NULL,
+                post_id INTEGER,
+                message TEXT,
+                image_filename TEXT,
+                scheduled_for TIMESTAMP NOT NULL,
+                timezone TEXT DEFAULT 'UTC',
+                status TEXT DEFAULT 'scheduled',
+                retry_count INTEGER DEFAULT 0,
+                max_retries INTEGER DEFAULT 3,
+                error_message TEXT,
+                locked_by TEXT,
+                locked_at TIMESTAMP,
+                published_at TIMESTAMP,
+                idempotency_key TEXT UNIQUE,
+                created_by INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 6. Task state table (decouples task state from in-process memory)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS task_state (
                 task_name TEXT PRIMARY KEY,
@@ -155,7 +257,7 @@ def init_db():
             )
         ''')
 
-        # 4. Worker leases table (ensures single active worker across processes)
+        # 7. Worker leases table (ensures single active worker across processes)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS worker_leases (
                 lease_name TEXT PRIMARY KEY,
@@ -166,7 +268,7 @@ def init_db():
             )
         ''')
 
-        # 5. Synced posts table (replaces legacy posted.txt for Instagram cross-posting)
+        # 8. Synced posts table (replaces legacy posted.txt for Instagram cross-posting)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS synced_posts (
                 post_id TEXT PRIMARY KEY,
@@ -177,8 +279,20 @@ def init_db():
 
         conn.commit()
 
+        # Non-destructive migrations for existing tables
+        _ensure_column_exists(conn, 'posts', 'organization_id', 'INTEGER DEFAULT 1')
+        _ensure_column_exists(conn, 'posts', 'brand_id', 'INTEGER')
+        _ensure_column_exists(conn, 'users', 'organization_id', 'INTEGER DEFAULT 1')
+        _ensure_column_exists(conn, 'users', 'is_active', 'INTEGER DEFAULT 1')
+
+        # Create indexes
+        _ensure_indexes(conn)
+
     # Seed default tasks if empty
     init_default_tasks()
+
+    # Seed default organizations & brands
+    init_default_organizations_and_brands()
 
     # Seed default admin user if none exists
     init_default_admin()
@@ -221,10 +335,101 @@ def init_default_admin():
 
             pw_hash = generate_password_hash(password)
             conn.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
+                "INSERT INTO users (username, password_hash, role, organization_id) VALUES (?, ?, 'admin', 1)",
                 (username, pw_hash)
             )
             conn.commit()
+
+def init_default_organizations_and_brands():
+    """Initializes default GAATHA organization and initial brand workspaces."""
+    with get_db_connection() as conn:
+        org = conn.execute("SELECT id FROM organizations WHERE id = 1").fetchone()
+        if not org:
+            conn.execute(
+                "INSERT INTO organizations (id, name, slug, plan, is_active) VALUES (1, ?, ?, ?, 1)",
+                ('GAATHA', 'gaatha', 'enterprise')
+            )
+            conn.commit()
+
+        initial_brands = [
+            ('GAATHA Suite', 'gaatha-suite', 'Core business marketing & customer engagement suite'),
+            ('GAATHA POS', 'gaatha-pos', 'Point of sale and retail operations marketing'),
+            ('Sentira AI', 'sentira-ai', 'AI-native intelligence and automation systems'),
+            ('GAATHA Terra', 'gaatha-terra', 'Sustainability, agriculture, and land systems'),
+            ('Phoenix — BY GAATHA', 'phoenix-by-gaatha', 'Flagship international and visa services'),
+            ('GAATHA AI', 'gaatha-ai', 'Next-generation AI research and generative applications')
+        ]
+        for name, slug, desc in initial_brands:
+            existing = conn.execute(
+                "SELECT id FROM brands WHERE organization_id = 1 AND slug = ?",
+                (slug,)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO brands (organization_id, name, slug, description, is_active) VALUES (1, ?, ?, ?, 1)",
+                    (name, slug, desc)
+                )
+        conn.commit()
+
+# --- Organization & Brand Multi-Tenancy Management ---
+def get_organization_by_id(org_id):
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT * FROM organizations WHERE id = ?", (org_id,)).fetchone()
+        return dict(row) if row else None
+
+def get_organization_by_slug(slug):
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT * FROM organizations WHERE slug = ?", (slug,)).fetchone()
+        return dict(row) if row else None
+
+def list_organizations():
+    with get_db_connection() as conn:
+        rows = conn.execute("SELECT * FROM organizations WHERE is_active = 1 ORDER BY id ASC").fetchall()
+        return [dict(r) for r in rows]
+
+def create_organization(name, slug, plan='growth'):
+    with get_db_connection() as conn:
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO organizations (name, slug, plan, is_active) VALUES (?, ?, ?, 1) RETURNING id",
+                (name, slug, plan)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO organizations (name, slug, plan, is_active) VALUES (?, ?, ?, 1)",
+                (name, slug, plan)
+            )
+            conn.commit()
+            return cur.lastrowid
+
+def get_brands_by_organization(org_id):
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM brands WHERE organization_id = ? AND is_active = 1 ORDER BY id ASC",
+            (org_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+def create_brand(organization_id, name, slug, description=''):
+    with get_db_connection() as conn:
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO brands (organization_id, name, slug, description, is_active) VALUES (?, ?, ?, ?, 1) RETURNING id",
+                (organization_id, name, slug, description)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO brands (organization_id, name, slug, description, is_active) VALUES (?, ?, ?, ?, 1)",
+                (organization_id, name, slug, description)
+            )
+            conn.commit()
+            return cur.lastrowid
 
 # --- User Management ---
 def get_user_by_username(username):
@@ -245,93 +450,157 @@ def verify_user_password(username, password):
         return user
     return None
 
-# --- Posts CRUD ---
-def load_posts_by_type(post_type):
+# --- Posts CRUD (Channel-Scoped & Organization-Scoped) ---
+def load_posts_by_type(post_type, organization_id=None):
     with get_db_connection() as conn:
-        posts = conn.execute(
-            "SELECT id, post_type, message, image_filename, created_at, last_posted_at "
-            "FROM posts WHERE post_type = ? ORDER BY last_posted_at ASC, id ASC",
-            (post_type,)
-        ).fetchall()
+        if organization_id is not None:
+            posts = conn.execute(
+                "SELECT id, post_type, message, image_filename, created_at, last_posted_at, organization_id, brand_id "
+                "FROM posts WHERE post_type = ? AND organization_id = ? ORDER BY last_posted_at ASC, id ASC",
+                (post_type, organization_id)
+            ).fetchall()
+        else:
+            posts = conn.execute(
+                "SELECT id, post_type, message, image_filename, created_at, last_posted_at, organization_id, brand_id "
+                "FROM posts WHERE post_type = ? ORDER BY last_posted_at ASC, id ASC",
+                (post_type,)
+            ).fetchall()
         return [dict(p) for p in posts]
 
-def load_all_posts():
+def load_all_posts(organization_id=None):
     """Retrieves all posts across all types ordered by id."""
     with get_db_connection() as conn:
-        posts = conn.execute(
-            "SELECT id, post_type, message, image_filename, created_at, last_posted_at "
-            "FROM posts ORDER BY post_type, id ASC"
-        ).fetchall()
+        if organization_id is not None:
+            posts = conn.execute(
+                "SELECT id, post_type, message, image_filename, created_at, last_posted_at, organization_id, brand_id "
+                "FROM posts WHERE organization_id = ? ORDER BY post_type, id ASC",
+                (organization_id,)
+            ).fetchall()
+        else:
+            posts = conn.execute(
+                "SELECT id, post_type, message, image_filename, created_at, last_posted_at, organization_id, brand_id "
+                "FROM posts ORDER BY post_type, id ASC"
+            ).fetchall()
         return [dict(p) for p in posts]
 
-def get_post_by_id(post_id):
+def get_post_by_id(post_id, post_type=None, organization_id=None):
     with get_db_connection() as conn:
-        row = conn.execute(
-            "SELECT id, post_type, message, image_filename, created_at, last_posted_at "
-            "FROM posts WHERE id = ?",
-            (post_id,)
-        ).fetchone()
+        query = "SELECT id, post_type, message, image_filename, created_at, last_posted_at, organization_id, brand_id FROM posts WHERE id = ?"
+        params = [post_id]
+        if post_type is not None:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id is not None:
+            query += " AND organization_id = ?"
+            params.append(organization_id)
+        row = conn.execute(query, tuple(params)).fetchone()
         return dict(row) if row else None
 
-def add_post(post_type, message, image_filename):
+def add_post(post_type, message, image_filename, organization_id=1, brand_id=None):
     with get_db_connection() as conn:
         if is_postgres():
             cur = conn.execute(
-                "INSERT INTO posts (post_type, message, image_filename) VALUES (?, ?, ?) RETURNING id",
-                (post_type, message, image_filename)
+                "INSERT INTO posts (post_type, message, image_filename, organization_id, brand_id) VALUES (?, ?, ?, ?, ?) RETURNING id",
+                (post_type, message, image_filename, organization_id, brand_id)
             )
             row = cur.fetchone()
             conn.commit()
             return row['id']
         else:
             cur = conn.execute(
-                "INSERT INTO posts (post_type, message, image_filename) VALUES (?, ?, ?)",
-                (post_type, message, image_filename)
+                "INSERT INTO posts (post_type, message, image_filename, organization_id, brand_id) VALUES (?, ?, ?, ?, ?)",
+                (post_type, message, image_filename, organization_id, brand_id)
             )
             conn.commit()
             return cur.lastrowid
 
-def update_post_by_id(post_id, message=None, image_filename=None):
+def update_post_by_id(post_id, message=None, image_filename=None, post_type=None, organization_id=None):
+    """
+    Updates post with strict database-level enforcement of channel and organization boundaries.
+    Prevents cross-channel or cross-tenant record tampering.
+    """
     with get_db_connection() as conn:
-        res = conn.execute(
-            "UPDATE posts SET message = COALESCE(?, message), image_filename = COALESCE(?, image_filename) "
-            "WHERE id = ?",
-            (message, image_filename, post_id)
-        )
+        query = "UPDATE posts SET message = COALESCE(?, message), image_filename = COALESCE(?, image_filename) WHERE id = ?"
+        params = [message, image_filename, post_id]
+        if post_type is not None:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id is not None:
+            query += " AND organization_id = ?"
+            params.append(organization_id)
+        res = conn.execute(query, tuple(params))
         conn.commit()
         return res.rowcount > 0
 
-def delete_post_by_id(post_id):
-    """Deletes a post by its stable ID and returns the image filename for cleanup."""
+def delete_post_by_id(post_id, post_type=None, organization_id=None):
+    """
+    Deletes a post ensuring channel and organization isolation at the database level.
+    Returns the image filename for cleanup and a boolean indicating success.
+    """
     with get_db_connection() as conn:
-        row = conn.execute("SELECT image_filename FROM posts WHERE id = ?", (post_id,)).fetchone()
+        select_query = "SELECT image_filename FROM posts WHERE id = ?"
+        params = [post_id]
+        if post_type is not None:
+            select_query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id is not None:
+            select_query += " AND organization_id = ?"
+            params.append(organization_id)
+            
+        row = conn.execute(select_query, tuple(params)).fetchone()
         if not row:
             return None, False
         image_filename = row['image_filename']
-        conn.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+
+        del_query = "DELETE FROM posts WHERE id = ?"
+        del_params = [post_id]
+        if post_type is not None:
+            del_query += " AND post_type = ?"
+            del_params.append(post_type)
+        if organization_id is not None:
+            del_query += " AND organization_id = ?"
+            del_params.append(organization_id)
+            
+        conn.execute(del_query, tuple(del_params))
         conn.commit()
         return image_filename, True
 
-def delete_all_posts_by_type(post_type):
-    """Deletes all posts for a type and returns distinct image filenames."""
+def delete_all_posts_by_type(post_type, organization_id=None):
+    """Deletes all posts for a type scoped to organization and returns distinct image filenames."""
     with get_db_connection() as conn:
-        rows = conn.execute(
-            "SELECT DISTINCT image_filename FROM posts WHERE post_type = ? AND image_filename IS NOT NULL AND image_filename != ''",
-            (post_type,)
-        ).fetchall()
+        select_query = "SELECT DISTINCT image_filename FROM posts WHERE post_type = ? AND image_filename IS NOT NULL AND image_filename != ''"
+        params = [post_type]
+        if organization_id is not None:
+            select_query += " AND organization_id = ?"
+            params.append(organization_id)
+            
+        rows = conn.execute(select_query, tuple(params)).fetchall()
         images = [r['image_filename'] for r in rows]
-        conn.execute("DELETE FROM posts WHERE post_type = ?", (post_type,))
+
+        del_query = "DELETE FROM posts WHERE post_type = ?"
+        del_params = [post_type]
+        if organization_id is not None:
+            del_query += " AND organization_id = ?"
+            del_params.append(organization_id)
+
+        conn.execute(del_query, tuple(del_params))
         conn.commit()
         return images
 
-def search_posts(query):
+def search_posts(query, organization_id=None):
+    """Searches posts across message and post_type scoped to organization."""
     with get_db_connection() as conn:
         pattern = f"%{query}%"
-        rows = conn.execute(
-            "SELECT id, post_type, message, image_filename, created_at, last_posted_at "
-            "FROM posts WHERE message LIKE ? OR post_type LIKE ? ORDER BY created_at DESC",
-            (pattern, pattern)
-        ).fetchall()
+        sql = (
+            "SELECT id, post_type, message, image_filename, created_at, last_posted_at, organization_id, brand_id "
+            "FROM posts WHERE (message LIKE ? OR post_type LIKE ?)"
+        )
+        params = [pattern, pattern]
+        if organization_id is not None:
+            sql += " AND organization_id = ?"
+            params.append(organization_id)
+        sql += " ORDER BY created_at DESC"
+        rows = conn.execute(sql, tuple(params)).fetchall()
         return [dict(r) for r in rows]
 
 def update_last_posted_timestamp(post_id):
@@ -381,10 +650,20 @@ def set_task_state(task_name, is_running=None, status=None, current_post_summary
             params.append(1 if is_running else 0)
         if status is not None:
             updates.append("status = ?")
-            params.append(status)
+            try:
+                import facebook_api
+                safe_status = facebook_api.sanitize_log_message(str(status))
+            except Exception:
+                safe_status = str(status)
+            params.append(safe_status)
         if current_post_summary is not None:
             updates.append("current_post_summary = ?")
-            params.append(current_post_summary)
+            try:
+                import facebook_api
+                safe_summary = facebook_api.sanitize_log_message(str(current_post_summary))
+            except Exception:
+                safe_summary = str(current_post_summary)
+            params.append(safe_summary)
         if interval_seconds is not None:
             updates.append("interval_seconds = ?")
             params.append(int(interval_seconds))
@@ -532,3 +811,235 @@ def get_all_synced_post_ids(target_platform='instagram'):
             (target_platform,)
         ).fetchall()
         return {r['post_id'] for r in rows}
+
+# --- Persistent Calendar Scheduler Engine ---
+def create_scheduled_post(post_type, scheduled_for, message=None, image_filename=None, post_id=None,
+                          organization_id=1, brand_id=None, idempotency_key=None, created_by=None,
+                          timezone_str='UTC'):
+    """
+    Creates a persistent scheduled post.
+    scheduled_for must be ISO datetime string (e.g. 2026-11-03T12:00:00) or datetime object.
+    Internal storage is standardized to UTC YYYY-MM-DD HH:MM:SS format.
+    """
+    import secrets
+    import time
+    if isinstance(scheduled_for, datetime):
+        scheduled_utc_str = scheduled_for.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        try:
+            dt = datetime.fromisoformat(str(scheduled_for).replace('Z', '+00:00'))
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+            scheduled_utc_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            scheduled_utc_str = str(scheduled_for)[:19].replace('T', ' ')
+
+    if not idempotency_key:
+        idempotency_key = f"sched-{organization_id}-{post_type}-{int(time.time())}-{secrets.token_hex(4)}"
+
+    with get_db_connection() as conn:
+        # Idempotency check: if already exists, return existing record
+        existing = conn.execute(
+            "SELECT * FROM scheduled_posts WHERE idempotency_key = ?",
+            (idempotency_key,)
+        ).fetchone()
+        if existing:
+            return dict(existing)
+
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
+                "scheduled_for, timezone, status, idempotency_key, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?) RETURNING id",
+                (organization_id, brand_id, post_type, post_id, message, image_filename,
+                 scheduled_utc_str, timezone_str, idempotency_key, created_by)
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return get_scheduled_post_by_id(row['id'], post_type=post_type, organization_id=organization_id)
+        else:
+            cur = conn.execute(
+                "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, post_id, message, image_filename, "
+                "scheduled_for, timezone, status, idempotency_key, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)",
+                (organization_id, brand_id, post_type, post_id, message, image_filename,
+                 scheduled_utc_str, timezone_str, idempotency_key, created_by)
+            )
+            conn.commit()
+            return get_scheduled_post_by_id(cur.lastrowid, post_type=post_type, organization_id=organization_id)
+
+def get_scheduled_posts(organization_id=1, post_type=None, status=None, limit=50):
+    with get_db_connection() as conn:
+        query = "SELECT * FROM scheduled_posts WHERE organization_id = ?"
+        params = [organization_id]
+        if post_type:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY scheduled_for ASC, id ASC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_scheduled_post_by_id(schedule_id, post_type=None, organization_id=None):
+    with get_db_connection() as conn:
+        query = "SELECT * FROM scheduled_posts WHERE id = ?"
+        params = [schedule_id]
+        if post_type:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id:
+            query += " AND organization_id = ?"
+            params.append(organization_id)
+        row = conn.execute(query, tuple(params)).fetchone()
+        return dict(row) if row else None
+
+def update_scheduled_post(schedule_id, message=None, image_filename=None, scheduled_for=None,
+                          post_type=None, organization_id=None):
+    with get_db_connection() as conn:
+        updates = []
+        params = []
+        if message is not None:
+            updates.append("message = ?")
+            params.append(message)
+        if image_filename is not None:
+            updates.append("image_filename = ?")
+            params.append(image_filename)
+        if scheduled_for is not None:
+            if isinstance(scheduled_for, datetime):
+                dt_str = scheduled_for.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                try:
+                    dt = datetime.fromisoformat(str(scheduled_for).replace('Z', '+00:00'))
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                    dt_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    dt_str = str(scheduled_for)[:19].replace('T', ' ')
+            updates.append("scheduled_for = ?")
+            params.append(dt_str)
+
+        if not updates:
+            return True
+
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        query = f"UPDATE scheduled_posts SET {', '.join(updates)} WHERE id = ? AND status IN ('scheduled', 'draft', 'failed')"
+        params.append(schedule_id)
+        if post_type:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id:
+            query += " AND organization_id = ?"
+            params.append(organization_id)
+
+        res = conn.execute(query, tuple(params))
+        conn.commit()
+        return res.rowcount > 0
+
+def cancel_scheduled_post(schedule_id, post_type=None, organization_id=None):
+    with get_db_connection() as conn:
+        query = "UPDATE scheduled_posts SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('scheduled', 'draft', 'failed')"
+        params = [schedule_id]
+        if post_type:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id:
+            query += " AND organization_id = ?"
+            params.append(organization_id)
+        res = conn.execute(query, tuple(params))
+        conn.commit()
+        return res.rowcount > 0
+
+def delete_scheduled_post(schedule_id, post_type=None, organization_id=None):
+    with get_db_connection() as conn:
+        query = "DELETE FROM scheduled_posts WHERE id = ?"
+        params = [schedule_id]
+        if post_type:
+            query += " AND post_type = ?"
+            params.append(post_type)
+        if organization_id:
+            query += " AND organization_id = ?"
+            params.append(organization_id)
+        res = conn.execute(query, tuple(params))
+        conn.commit()
+        return res.rowcount > 0
+
+def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
+    """
+    Atomically claims due scheduled posts across processes without race conditions.
+    Also handles stale-lock recovery if a worker crashed while publishing.
+    """
+    now = _utcnow()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    stale_str = (now - timedelta(seconds=lock_timeout_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_db_connection() as conn:
+        cur = conn.execute(
+            "SELECT id FROM scheduled_posts "
+            "WHERE (status = 'scheduled' AND scheduled_for <= ?) "
+            "   OR (status = 'publishing' AND locked_at <= ? AND retry_count < max_retries) "
+            "ORDER BY scheduled_for ASC LIMIT ?",
+            (now_str, stale_str, limit)
+        )
+        candidate_ids = [r['id'] for r in cur.fetchall()]
+        claimed = []
+        for cid in candidate_ids:
+            res = conn.execute(
+                "UPDATE scheduled_posts SET status = 'publishing', locked_by = ?, locked_at = ?, updated_at = ? "
+                "WHERE id = ? AND ("
+                "  (status = 'scheduled' AND scheduled_for <= ?) OR "
+                "  (status = 'publishing' AND (locked_by = ? OR locked_at <= ?))"
+                ")",
+                (worker_id, now_str, now_str, cid, now_str, worker_id, stale_str)
+            )
+            if res.rowcount > 0:
+                row = conn.execute("SELECT * FROM scheduled_posts WHERE id = ?", (cid,)).fetchone()
+                if row:
+                    claimed.append(dict(row))
+        conn.commit()
+        return claimed
+
+def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=None):
+    """
+    Marks a claimed scheduled post as published or failed/retried.
+    Sanitizes any error message before storage.
+    """
+    now = _utcnow()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        import facebook_api
+        safe_err = facebook_api.sanitize_log_message(str(error_message)) if error_message else None
+    except Exception:
+        safe_err = str(error_message) if error_message else None
+
+    with get_db_connection() as conn:
+        post = conn.execute("SELECT * FROM scheduled_posts WHERE id = ? AND locked_by = ?", (schedule_id, worker_id)).fetchone()
+        if not post:
+            return False
+
+        if success:
+            conn.execute(
+                "UPDATE scheduled_posts SET status = 'published', published_at = ?, locked_by = NULL, locked_at = NULL, "
+                "updated_at = ? WHERE id = ? AND locked_by = ?",
+                (now_str, now_str, schedule_id, worker_id)
+            )
+            # If associated with a base post_id, update last_posted_at
+            if post['post_id']:
+                conn.execute(
+                    "UPDATE posts SET last_posted_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (post['post_id'],)
+                )
+        else:
+            new_retries = (post['retry_count'] or 0) + 1
+            max_r = post['max_retries'] or 3
+            new_status = 'failed' if new_retries >= max_r else 'scheduled'
+            conn.execute(
+                "UPDATE scheduled_posts SET status = ?, retry_count = ?, error_message = ?, "
+                "locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ? AND locked_by = ?",
+                (new_status, new_retries, safe_err, now_str, schedule_id, worker_id)
+            )
+        conn.commit()
+        return True

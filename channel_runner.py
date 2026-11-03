@@ -149,7 +149,7 @@ class Channel:
 
             page_id = self.get_page_id()
         except Exception as e:
-            msg = f"Configuration Error: {e}"
+            msg = f"Configuration Error: {facebook_api.sanitize_log_message(str(e))}"
             logger.error(f"Cannot start channel runner loop '{self.key}': {msg}")
             if self.status_callback:
                 self.status_callback(self.key, False, msg, None)

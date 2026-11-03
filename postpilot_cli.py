@@ -60,7 +60,8 @@ def cmd_verify_token(args: Optional[argparse.Namespace] = None) -> int:
         data = response.json()
 
         if 'error' in data:
-            print(f"[API ERROR] {data['error'].get('message')}")
+            err_msg = data['error'].get('message', 'Unknown API Error') if isinstance(data['error'], dict) else str(data['error'])
+            print(f"[API ERROR] {facebook_api.sanitize_log_message(err_msg)}")
             return 1
 
         data = data.get('data', {})
@@ -112,7 +113,10 @@ def cmd_verify_token(args: Optional[argparse.Namespace] = None) -> int:
             print("\n[INVALID] Meta Access Token is INVALID")
             return 1
     except requests.exceptions.RequestException as e:
-        print(f"[NETWORK ERROR] Failed to connect to Meta Graph API: {e}")
+        print(f"[NETWORK ERROR] Failed to connect to Meta Graph API: {facebook_api.sanitize_log_message(str(e))}")
+        return 1
+    except Exception as e:
+        print(f"[ERROR] Token verification failed: {facebook_api.sanitize_log_message(str(e))}")
         return 1
 
 def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] = None) -> int:
@@ -134,7 +138,8 @@ def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] 
         # 1. Fetch User
         me_resp = requests.get(f"{BASE_GRAPH_URL}/me", params={'access_token': token}, timeout=10).json()
         if 'error' in me_resp:
-            print(f"[API ERROR] {me_resp['error'].get('message')}")
+            err_msg = me_resp['error'].get('message', 'Unknown API Error') if isinstance(me_resp['error'], dict) else str(me_resp['error'])
+            print(f"[API ERROR] {facebook_api.sanitize_log_message(err_msg)}")
             return 1
         print(f"[USER] {me_resp.get('name')} (ID: {me_resp.get('id')})\n")
 
@@ -142,7 +147,8 @@ def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] 
         resp = requests.get(f"{BASE_GRAPH_URL}/me/accounts", params=params, timeout=10)
         data = resp.json()
         if 'error' in data:
-            print(f"[API ERROR] {data['error'].get('message')}")
+            err_msg = data['error'].get('message', 'Unknown API Error') if isinstance(data['error'], dict) else str(data['error'])
+            print(f"[API ERROR] {facebook_api.sanitize_log_message(err_msg)}")
             return 1
 
         pages = data.get('data', [])
@@ -182,7 +188,10 @@ def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] 
 
         return 0
     except requests.exceptions.RequestException as e:
-        print(f"[NETWORK ERROR] Failed to fetch assets: {e}")
+        print(f"[NETWORK ERROR] Failed to fetch assets: {facebook_api.sanitize_log_message(str(e))}")
+        return 1
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch assets: {facebook_api.sanitize_log_message(str(e))}")
         return 1
 
 def _safely_update_env(updates: Dict[str, str]):
@@ -250,7 +259,7 @@ def cmd_health(args: Optional[argparse.Namespace] = None) -> int:
             posts_count = row['count'] if row else 0
         print(f"  [DB] SQLite/PostgreSQL Engine: OK ({posts_count} posts registered)")
     except Exception as e:
-        print(f"  [DB] Engine Error: {e}")
+        print(f"  [DB] Engine Error: {facebook_api.sanitize_log_message(str(e))}")
 
     # 2. Worker Lease Status
     active_lease = database.get_active_worker_lease('scheduler')

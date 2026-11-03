@@ -79,6 +79,7 @@ def login_required(f):
             session['user_id'] = 1
             session['username'] = 'local_admin'
             session['role'] = 'admin'
+            session['organization_id'] = 1
             get_or_create_csrf_token()
             return f(*args, **kwargs)
 
@@ -270,6 +271,15 @@ def login_page():
 
 # --- Authentication API Endpoints ---
 
+@app.after_request
+def set_security_headers(response):
+    """Enforces defensive HTTP response headers across all endpoints."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
 @app.route('/api/auth/me', methods=['GET'])
 def get_auth_status():
     """Returns current user session and authentication status."""
@@ -279,6 +289,7 @@ def get_auth_status():
         'authenticated': is_authed or is_local,
         'username': session.get('username', 'local_admin' if is_local else None),
         'role': session.get('role', 'admin' if is_local else None),
+        'organization_id': session.get('organization_id', 1),
         'local_mode': is_local,
         'csrf_token': get_or_create_csrf_token()
     })
@@ -300,11 +311,13 @@ def api_login():
     session['user_id'] = user['id']
     session['username'] = user['username']
     session['role'] = user['role']
+    session['organization_id'] = user.get('organization_id', 1)
     token = get_or_create_csrf_token()
     return jsonify({
         'success': True,
         'username': user['username'],
         'role': user['role'],
+        'organization_id': session['organization_id'],
         'csrf_token': token
     })
 
@@ -319,38 +332,42 @@ def api_logout():
 @app.route('/api/posts/<post_type>', methods=['GET'])
 @login_required
 def get_posts(post_type):
-    """Retrieves all posts for a specific type."""
+    """Retrieves all posts for a specific type scoped to the active organization."""
     if post_type not in VALID_POST_TYPES:
         return jsonify({'error': 'Invalid post type'}), 400
-    posts = database.load_posts_by_type(post_type)
+    org_id = session.get('organization_id', 1)
+    posts = database.load_posts_by_type(post_type, organization_id=org_id)
     return jsonify(posts)
 
 @app.route('/api/posts/<post_type>', methods=['POST'])
 @login_required
 @csrf_protect
 def add_post(post_type):
-    """Creates a new post record."""
+    """Creates a new post record scoped to the active organization."""
     if post_type not in VALID_POST_TYPES:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json() or {}
     message = data.get('message', '').strip()
     image_filename = data.get('image_filename', '').strip()
+    brand_id = data.get('brand_id')
+    org_id = session.get('organization_id', 1)
 
-    post_id = database.add_post(post_type, message, image_filename)
-    return jsonify({'id': post_id, 'message': message, 'image_filename': image_filename}), 201
+    post_id = database.add_post(post_type, message, image_filename, organization_id=org_id, brand_id=brand_id)
+    return jsonify({'id': post_id, 'message': message, 'image_filename': image_filename, 'organization_id': org_id}), 201
 
 @app.route('/api/posts/<post_type>/<int:post_id>', methods=['PUT'])
 @login_required
 @csrf_protect
 def update_post(post_type, post_id):
-    """Updates an existing post using its primary key ID."""
+    """Updates an existing post ensuring channel-scoped and organization-scoped record access."""
     if post_type not in VALID_POST_TYPES:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json() or {}
     message = data.get('message')
     image_filename = data.get('image_filename')
+    org_id = session.get('organization_id', 1)
 
-    success = database.update_post_by_id(post_id, message, image_filename)
+    success = database.update_post_by_id(post_id, message, image_filename, post_type=post_type, organization_id=org_id)
     if not success:
         return jsonify({'error': 'Post not found'}), 404
     return jsonify({'success': True})
@@ -359,11 +376,12 @@ def update_post(post_type, post_id):
 @login_required
 @csrf_protect
 def delete_post(post_type, post_id):
-    """Deletes a post by its primary key ID and purges its image if unreferenced."""
+    """Deletes a post ensuring channel-scoped and organization-scoped record access."""
     if post_type not in VALID_POST_TYPES:
         return jsonify({'error': 'Invalid post type'}), 400
+    org_id = session.get('organization_id', 1)
         
-    image_filename, success = database.delete_post_by_id(post_id)
+    image_filename, success = database.delete_post_by_id(post_id, post_type=post_type, organization_id=org_id)
     if not success:
         return jsonify({'error': 'Post not found'}), 404
 
@@ -376,11 +394,12 @@ def delete_post(post_type, post_id):
 @login_required
 @csrf_protect
 def delete_all_posts(post_type):
-    """Deletes all posts for a type and cleans up orphaned media."""
+    """Deletes all posts for a type scoped to organization and cleans up orphaned media."""
     if post_type not in VALID_POST_TYPES:
         return jsonify({'error': 'Invalid post type'}), 400
+    org_id = session.get('organization_id', 1)
 
-    deleted_images = database.delete_all_posts_by_type(post_type)
+    deleted_images = database.delete_all_posts_by_type(post_type, organization_id=org_id)
     for img in deleted_images:
         _cleanup_single_image(img)
 
@@ -389,12 +408,13 @@ def delete_all_posts(post_type):
 @app.route('/api/search', methods=['GET'])
 @login_required
 def search_posts():
-    """Searches posts across message and post_type."""
+    """Searches posts across message and post_type scoped to organization."""
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify([])
     try:
-        results = database.search_posts(query)
+        org_id = session.get('organization_id', 1)
+        results = database.search_posts(query, organization_id=org_id)
         return jsonify(results)
     except Exception as e:
         logger.error(f"Search error: {e}")
@@ -426,8 +446,9 @@ def upload_image():
 
 @app.route('/images/<filename>')
 def serve_image(filename):
-    """Serves uploaded images safely from UPLOAD_FOLDER."""
-    return send_from_directory(config.UPLOAD_FOLDER, filename)
+    """Serves uploaded images safely from UPLOAD_FOLDER with path traversal protection."""
+    safe_filename = os.path.basename(filename)
+    return send_from_directory(config.UPLOAD_FOLDER, safe_filename)
 
 # --- Automation Task Control Endpoints ---
 
@@ -531,6 +552,97 @@ def set_interval(post_type):
         insta_phoenix.set_interval(interval)
 
     return jsonify({'success': True, 'interval': interval})
+
+# --- Calendar Scheduling API Endpoints ---
+
+@app.route('/api/schedule', methods=['GET'])
+@login_required
+def get_scheduled():
+    """Retrieves scheduled posts for the active organization."""
+    post_type = request.args.get('post_type')
+    status = request.args.get('status')
+    org_id = session.get('organization_id', 1)
+    posts = database.get_scheduled_posts(organization_id=org_id, post_type=post_type, status=status)
+    return jsonify(posts)
+
+@app.route('/api/schedule', methods=['POST'])
+@login_required
+@csrf_protect
+def add_scheduled():
+    """Schedules a post with persistent date/time and idempotency."""
+    data = request.get_json() or {}
+    post_type = data.get('post_type')
+    if post_type not in VALID_POST_TYPES:
+        return jsonify({'error': 'Invalid post type'}), 400
+    scheduled_for = data.get('scheduled_for')
+    if not scheduled_for:
+        return jsonify({'error': 'scheduled_for is required'}), 400
+
+    org_id = session.get('organization_id', 1)
+    brand_id = data.get('brand_id')
+    message = data.get('message', '').strip()
+    image_filename = data.get('image_filename', '').strip()
+    post_id = data.get('post_id')
+    idempotency_key = data.get('idempotency_key')
+
+    record = database.create_scheduled_post(
+        post_type=post_type,
+        scheduled_for=scheduled_for,
+        message=message,
+        image_filename=image_filename,
+        post_id=post_id,
+        organization_id=org_id,
+        brand_id=brand_id,
+        idempotency_key=idempotency_key,
+        created_by=session.get('user_id')
+    )
+    return jsonify(record), 201
+
+@app.route('/api/schedule/<int:schedule_id>', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_scheduled(schedule_id):
+    """Updates a scheduled post."""
+    data = request.get_json() or {}
+    org_id = session.get('organization_id', 1)
+    success = database.update_scheduled_post(
+        schedule_id=schedule_id,
+        message=data.get('message'),
+        image_filename=data.get('image_filename'),
+        scheduled_for=data.get('scheduled_for'),
+        organization_id=org_id
+    )
+    if not success:
+        return jsonify({'error': 'Scheduled post not found or cannot be modified'}), 404
+    return jsonify({'success': True})
+
+@app.route('/api/schedule/<int:schedule_id>', methods=['DELETE'])
+@login_required
+@csrf_protect
+def cancel_scheduled(schedule_id):
+    """Cancels a scheduled post."""
+    org_id = session.get('organization_id', 1)
+    success = database.cancel_scheduled_post(schedule_id=schedule_id, organization_id=org_id)
+    if not success:
+        return jsonify({'error': 'Scheduled post not found'}), 404
+    return jsonify({'success': True})
+
+# --- Multi-Organization & Brand Workspaces Endpoints ---
+
+@app.route('/api/organizations', methods=['GET'])
+@login_required
+def get_organizations():
+    """Lists active organizations."""
+    orgs = database.list_organizations()
+    return jsonify(orgs)
+
+@app.route('/api/brands', methods=['GET'])
+@login_required
+def get_brands():
+    """Lists brand workspaces for the current organization."""
+    org_id = session.get('organization_id', 1)
+    brands = database.get_brands_by_organization(org_id)
+    return jsonify(brands)
 
 # --- Main Entry Point ---
 

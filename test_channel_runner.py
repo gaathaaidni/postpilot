@@ -439,27 +439,228 @@ class TestChannelRunner(unittest.TestCase):
 
     def test_sanitize_log_message_redacts_credentials(self):
         """Verifies sanitize_log_message redacts access tokens and parameters in all formats."""
-        # 1. URL query parameters
-        url_with_token = "https://graph.facebook.com/v19.0/12345?fields=images&access_token=EAATsecretTokenValue1234567890"
+        # 1. URL query parameters (standard and URL-encoded)
+        url_with_token = "https://graph.facebook.com/v19.0/12345?fields=images&access_token=EAATsecretTokenValue1234567890&access%5Ftoken=MOCK_ENC_SECRET_111&token_type=bearer"
         sanitized = facebook_api.sanitize_log_message(url_with_token)
         self.assertNotIn("EAATsecretTokenValue1234567890", sanitized)
+        self.assertNotIn("MOCK_ENC_SECRET_111", sanitized)
         self.assertIn("access_token=[REDACTED]", sanitized)
+        self.assertIn("access%5Ftoken=[REDACTED]", sanitized)
+        self.assertIn("token_type=bearer", sanitized)
 
-        # 2. Key-value string representation
-        kv_with_token = "Payload sent: {'access_token': 'EAATsecretTokenValue1234567890', 'caption': 'Hello'}"
+        # 2. Key-value string representation in JSON and dicts
+        kv_with_token = "Payload sent: {'access_token': 'EAATsecretTokenValue1234567890', 'client_secret': 'SECRET_CLIENT_222', 'caption': 'Hello'}"
         sanitized_kv = facebook_api.sanitize_log_message(kv_with_token)
         self.assertNotIn("EAATsecretTokenValue1234567890", sanitized_kv)
+        self.assertNotIn("SECRET_CLIENT_222", sanitized_kv)
         self.assertIn("'access_token': '[REDACTED]'", sanitized_kv)
+        self.assertIn("'client_secret': '[REDACTED]'", sanitized_kv)
 
-        # 3. Meta error message with raw token
-        err_with_token = "Invalid OAuth access token EAATsuperSecretToken1234567890"
-        sanitized_err = facebook_api.sanitize_log_message(err_with_token)
-        self.assertNotIn("EAATsuperSecretToken1234567890", sanitized_err)
-        self.assertIn("[REDACTED_TOKEN]", sanitized_err)
+        # 3. Authorization headers (Bearer, OAuth)
+        auth_header_str = "Request failed: Authorization: Bearer MOCK_BEARER_SECRET_333 and {'authorization': 'OAuth MOCK_OAUTH_444'}"
+        sanitized_auth = facebook_api.sanitize_log_message(auth_header_str)
+        self.assertNotIn("MOCK_BEARER_SECRET_333", sanitized_auth)
+        self.assertNotIn("MOCK_OAUTH_444", sanitized_auth)
+        self.assertIn("Authorization: Bearer [REDACTED]", sanitized_auth)
+        self.assertIn("'authorization': 'OAuth [REDACTED]'", sanitized_auth)
 
-        # 4. Safe strings remain intact
-        safe_msg = "Successfully published post 12345 to page 967550829768297"
+        # 4. Meta tokens without assuming EAA prefix (App tokens, IG tokens)
+        app_token_str = "Using app token 967550829768297|abcdefghijklmnopqrstuvwxyz12345 and IG token IGQVJabcdefghijklmnopqrstuvwxyz999"
+        sanitized_app = facebook_api.sanitize_log_message(app_token_str)
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz12345", sanitized_app)
+        self.assertNotIn("IGQVJabcdefghijklmnopqrstuvwxyz999", sanitized_app)
+        self.assertIn("[REDACTED_APP_TOKEN]", sanitized_app)
+        self.assertIn("[REDACTED_TOKEN]", sanitized_app)
+
+        # 5. Configured environment token values dynamically redacted
+        test_custom_tok = "custom_non_eaa_pat_secret_9876543210"
+        with patch.dict(os.environ, {'FB_ACCESS_TOKEN_TOUR': test_custom_tok}):
+            env_leak_str = f"Unhandled exception with {test_custom_tok} for page 967550829768297"
+            sanitized_env = facebook_api.sanitize_log_message(env_leak_str)
+            self.assertNotIn(test_custom_tok, sanitized_env)
+            self.assertIn("[REDACTED_SECRET]", sanitized_env)
+            self.assertIn("967550829768297", sanitized_env)
+
+        # 6. Safe strings remain intact
+        safe_msg = "Successfully published post 12345 to page 967550829768297 (code=190, subcode=463)"
         self.assertEqual(facebook_api.sanitize_log_message(safe_msg), safe_msg)
+
+    @patch('time.sleep')
+    @patch('posting_utils.load_posts')
+    def test_posting_loop_exception_status_callback_and_db_state_redacted(self, mock_load, mock_sleep):
+        """Verifies posting-loop exceptions passed to status callbacks or saved in database are safely redacted."""
+        import database
+        import threading
+        database.init_db()
+
+        secret_token = "SECRET_POSTING_LOOP_LEAK_12345678"
+        mock_load.side_effect = Exception(f"Database query crashed with access_token={secret_token}")
+
+        callback_messages = []
+        stop_evt = threading.Event()
+        def test_callback(key, is_running, status, current_post):
+            callback_messages.append((key, is_running, status, current_post))
+            stop_evt.set()
+
+        def mock_interval():
+            stop_evt.set()
+            return 1
+
+        with patch.object(stop_evt, 'wait', return_value=True):
+            posting_utils.run_posting_loop(
+                stop_event=stop_evt,
+                status_callback=test_callback,
+                get_interval_func=mock_interval,
+                callback_key="tour",
+                post_type="tour",
+                page_id="967550829768297",
+                access_token="MOCK_ACCESS_TOKEN"
+            )
+
+        self.assertTrue(len(callback_messages) >= 1)
+        error_call = [c for c in callback_messages if "Error:" in c[2]]
+        self.assertTrue(len(error_call) >= 1)
+        for _, _, status_msg, _ in error_call:
+            self.assertNotIn(secret_token, status_msg)
+            self.assertIn("[REDACTED]", status_msg)
+
+        # Verify database.set_task_state persistence path without in-memory callback
+        stop_evt_db = threading.Event()
+        with patch.object(stop_evt_db, 'wait', return_value=True):
+            posting_utils.run_posting_loop(
+                stop_event=stop_evt_db,
+                status_callback=None,
+                get_interval_func=mock_interval,
+                callback_key="tour",
+                post_type="tour",
+                page_id="967550829768297",
+                access_token="MOCK_ACCESS_TOKEN"
+            )
+
+        task_state = database.get_task_state("tour")
+        self.assertIsNotNone(task_state)
+        self.assertNotIn(secret_token, task_state['status'])
+
+    @patch('facebook_api.logger.debug')
+    @patch('requests.get')
+    def test_facebook_api_token_verification_exception_sanitized(self, mock_get, mock_debug):
+        """Verifies /me token verification exception does not leak credentials in debug logs."""
+        secret_tok = "SECRET_VERIFY_TOKEN_LEAK_88888"
+        mock_get.side_effect = requests.exceptions.RequestException(
+            f"Failed /me check with access_token={secret_tok}"
+        )
+
+        facebook_api.get_page_token(user_token="TEST_TOKEN", page_id="967550829768297")
+        self.assertTrue(mock_debug.called)
+        for call in mock_debug.call_args_list:
+            msg = call[0][0]
+            self.assertNotIn(secret_tok, msg)
+            self.assertIn("[REDACTED]", msg)
+
+    @patch('facebook_api.logger.warning')
+    @patch('os.path.exists', return_value=True)
+    def test_facebook_api_env_read_exception_sanitized(self, mock_exists, mock_warn):
+        """Verifies .env parsing exception does not leak credentials in warning logs."""
+        secret_tok = "SECRET_ENV_FILE_LEAK_77777"
+        with patch('builtins.open', side_effect=Exception(f"Disk read error on line FB_ACCESS_TOKEN={secret_tok}")):
+            with patch.dict(os.environ, {}, clear=True):
+                facebook_api.get_access_token()
+                self.assertTrue(mock_warn.called)
+                for call in mock_warn.call_args_list:
+                    msg = call[0][0]
+                    self.assertNotIn(secret_tok, msg)
+                    self.assertIn("[REDACTED]", msg)
+
+    @patch('facebook_api.logger.error')
+    @patch('requests.request')
+    def test_facebook_api_request_with_retry_non_json_error_sanitization(self, mock_request, mock_log_err):
+        """Verifies non-JSON response resp.text containing credentials is sanitized."""
+        secret_tok = "SECRET_NON_JSON_RESP_66666"
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = f"<html><body>OAuth error: access_token={secret_tok} revoked</body></html>"
+        mock_resp.json.side_effect = ValueError("Invalid JSON")
+        mock_request.return_value = mock_resp
+
+        res = facebook_api._request_with_retry("POST", "https://graph.facebook.com/v19.0/me")
+        self.assertIn('error', res)
+        err_msg = res['error']['message']
+        self.assertNotIn(secret_tok, err_msg)
+        self.assertIn("[REDACTED]", err_msg)
+
+    @patch('insta.logger.error')
+    def test_insta_sync_exception_sanitization(self, mock_log_err):
+        """Verifies Instagram sync loop exceptions are sanitized in callbacks and logs."""
+        import insta
+        secret_tok = "SECRET_INSTA_SYNC_LEAK_55555"
+
+        sync = insta.InstaSync(page_id="967550829768297", ig_user_id="17841449080283492", name="insta_tour")
+        
+        callback_msgs = []
+        def test_callback(name, is_running, msg, post_summary):
+            callback_msgs.append((name, is_running, msg, post_summary))
+            sync.stop()
+
+        insta.set_status_callback(test_callback)
+
+        with patch.object(sync, 'get_recent_facebook_posts', side_effect=Exception(f"Graph error: access_token={secret_tok}")):
+            with patch.object(sync.stop_event, 'wait', side_effect=lambda timeout: True):
+                sync.run()
+
+        self.assertTrue(len(callback_msgs) >= 1)
+        for _, _, status, _ in callback_msgs:
+            self.assertNotIn(secret_tok, status)
+            self.assertIn("[REDACTED]", status)
+
+        self.assertTrue(mock_log_err.called)
+        for call in mock_log_err.call_args_list:
+            msg = call[0][0]
+            self.assertNotIn(secret_tok, msg)
+            self.assertIn("[REDACTED]", msg)
+
+    @patch('insta.logger.error')
+    @patch('facebook_api._request_with_retry')
+    def test_insta_get_recent_posts_exception_sanitization(self, mock_retry, mock_log_err):
+        """Verifies get_recent_facebook_posts catches and sanitizes exceptions."""
+        import insta
+        secret_tok = "SECRET_GET_RECENT_POSTS_44444"
+        mock_retry.side_effect = Exception(f"Failed with Authorization: Bearer {secret_tok}")
+
+        sync = insta.InstaSync(page_id="967550829768297", ig_user_id="17841449080283492")
+        posts = sync.get_recent_facebook_posts()
+        self.assertEqual(posts, [])
+        self.assertTrue(mock_log_err.called)
+        for call in mock_log_err.call_args_list:
+            msg = call[0][0]
+            self.assertNotIn(secret_tok, msg)
+            self.assertIn("[REDACTED]", msg)
+
+    def test_channel_runner_configuration_error_sanitization(self):
+        """Verifies channel runner configuration errors sanitize credentials before logging or database state."""
+        import database
+        database.init_db()
+
+        ch = channel_runner.Channel(
+            key="test_ch",
+            display_name="Test Channel",
+            post_type="tour",
+            page_id_env_keys=("FB_PAGE_ID_SUITE",),
+            default_page_id="967550829768297",
+            default_interval=1800,
+            token_env_keys=("FB_ACCESS_TOKEN_TOUR",)
+        )
+        secret_tok = "SECRET_RUNNER_CONFIG_33333"
+
+        callback_msgs = []
+        ch.set_status_callback(lambda key, running, msg, post: callback_msgs.append((key, running, msg)))
+
+        with patch.object(ch, 'get_access_token', side_effect=Exception(f"Token read failure with access_token={secret_tok}")):
+            ch.run()
+
+        self.assertTrue(len(callback_msgs) >= 1)
+        for _, _, status in callback_msgs:
+            self.assertNotIn(secret_tok, status)
+            self.assertIn("[REDACTED]", status)
 
     @patch('posting_utils.logger.error')
     @patch('facebook_api.get_page_token')

@@ -23,21 +23,63 @@ def mask_token_preview(token):
         return "****"
     return f"{token[:4]}...{token[-4:]}"
 
+# Precompiled regex patterns for comprehensive credential sanitization
+_RE_AUTH_HEADER = re.compile(
+    r'(?i)(authorization:\s*(?:bearer|oauth|basic)?\s*)[^\s\'",\)]+'
+)
+_RE_AUTH_DICT = re.compile(
+    r'(?i)(["\']authorization["\']\s*:\s*["\'](?:bearer|oauth|basic)?\s*)[^"\']+(["\'])'
+)
+_RE_QUERY_CREDENTIALS = re.compile(
+    r'(?i)(\b(?:[a-zA-Z0-9_]*(?:token|secret|password|api_key)|access(?:_|%5f)token|input(?:_|%5f)token|appsecret(?:_|%5f)proof)=)'
+    r'([^\s&\'"\)>]+)'
+)
+_RE_DICT_CREDENTIALS = re.compile(
+    r'(?i)(["\'](?:[a-zA-Z0-9_]*(?:token|secret|password|api_key)|access_token|input_token|appsecret_proof)["\']\s*:\s*["\'])'
+    r'[^"\']+'
+    r'(["\'])'
+)
+_RE_EAA_TOKEN = re.compile(r'\bEAA[a-zA-Z0-9_\-]{15,}\b')
+_RE_APP_TOKEN = re.compile(r'\b\d{14,18}\|[a-zA-Z0-9_\-]{20,}\b')
+_RE_IG_TOKEN = re.compile(r'\bIG(?:QV)?[a-zA-Z0-9_\-]{20,}\b')
+_RE_BEARER_TOKEN = re.compile(r'(?i)\b(?:bearer|oauth)\s+([a-zA-Z0-9_\-\.\|]{15,})\b')
+
 def sanitize_log_message(msg):
     """
-    Sanitizes sensitive tokens or credential query parameters from log messages
-    to prevent accidental credential exposure in application logs.
+    Sanitizes sensitive tokens, credential query parameters, Authorization headers,
+    and secret structures from log messages, CLI output, and exception traces
+    to prevent accidental credential exposure.
     """
     if not msg:
         return ""
     if not isinstance(msg, str):
         msg = str(msg)
-    # Redact URL query parameters like access_token=...
-    sanitized = re.sub(r'([?&]access_token=)[^&\s\'"]+', r'\1[REDACTED]', msg)
-    # Redact access_token key-value in string representations (e.g. 'access_token': '...')
-    sanitized = re.sub(r'(["\']access_token["\']\s*:\s*["\'])[^"\']+(["\'])', r'\1[REDACTED]\2', sanitized)
-    # Redact long Meta access tokens starting with EAA (20+ chars)
-    sanitized = re.sub(r'EAA[a-zA-Z0-9]{20,}', '[REDACTED_TOKEN]', sanitized)
+
+    # 1. Redact Authorization headers (plain headers and dict-like representations)
+    sanitized = _RE_AUTH_HEADER.sub(r'\1[REDACTED]', msg)
+    sanitized = _RE_AUTH_DICT.sub(r'\1[REDACTED]\2', sanitized)
+
+    # 2. Redact URL query parameters (standard and URL-encoded keys)
+    sanitized = _RE_QUERY_CREDENTIALS.sub(r'\1[REDACTED]', sanitized)
+
+    # 3. Redact key-value pairs in JSON / dictionary-like text
+    sanitized = _RE_DICT_CREDENTIALS.sub(r'\1[REDACTED]\2', sanitized)
+
+    # 4. Redact Meta and generic token patterns
+    sanitized = _RE_EAA_TOKEN.sub('[REDACTED_TOKEN]', sanitized)
+    sanitized = _RE_APP_TOKEN.sub('[REDACTED_APP_TOKEN]', sanitized)
+    sanitized = _RE_IG_TOKEN.sub('[REDACTED_TOKEN]', sanitized)
+    sanitized = _RE_BEARER_TOKEN.sub(r'Bearer [REDACTED]', sanitized)
+
+    # 5. Redact any known configured environment token values
+    try:
+        for key, val in os.environ.items():
+            if any(term in key for term in ('TOKEN', 'SECRET', 'PASSWORD', 'API_KEY')):
+                if val and len(val) >= 8 and not val.isdigit() and val not in ('True', 'False', 'None'):
+                    sanitized = sanitized.replace(val, '[REDACTED_SECRET]')
+    except Exception:
+        pass
+
     return sanitized
 
 def classify_facebook_error(response_json, status_code=200):
@@ -105,7 +147,7 @@ def get_access_token(channel_key=None):
                         if k.strip() in ('FB_ACCESS_TOKEN', 'FB_TOKEN'):
                             return v.strip().strip('"\'')
         except Exception as e:
-            logger.warning(f"Failed to read token from .env: {e}")
+            logger.warning(f"Failed to read token from .env: {sanitize_log_message(str(e))}")
 
     return None
 
@@ -169,7 +211,7 @@ def get_page_token(user_token=None, page_id=None, channel_key=None):
             logger.info(f"Verified token is already a Page Access Token for '{me_resp.get('name')}' (ID: {page_id_str})")
             return user_token
     except Exception as e:
-        logger.debug(f"Could not verify token via /me: {e}")
+        logger.debug(f"Could not verify token via /me: {sanitize_log_message(str(e))}")
 
     # Step 3: Exchange User Access Token for Page Access Token via /me/accounts
     try:
@@ -303,7 +345,7 @@ def _request_with_retry(method, url, **kwargs):
             try:
                 res_json = resp.json()
             except Exception:
-                res_json = {'error': {'message': resp.text, 'code': resp.status_code}}
+                res_json = {'error': {'message': sanitize_log_message(resp.text), 'code': resp.status_code}}
 
             # Classify response
             err_category = classify_facebook_error(res_json, resp.status_code)
