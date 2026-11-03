@@ -749,5 +749,73 @@ class TestCampaignAPI(unittest.TestCase):
             res = self.client.get(f'/api/drafts/{did}/revisions', headers=headers)
             self.assertEqual(res.status_code, 404)
 
+    def test_archival_lifecycle_and_legacy_backfill(self):
+        headers_admin = self._login(user_id=1, role='admin', org_id=1)
+        headers_user = self._login(user_id=88, role='contributor', org_id=1)
+
+        # 1. Campaign transition to archived
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Archival Camp', 'objective': 'Obj', 'brief': 'Brief'
+        }, headers=headers_admin)
+        camp_id = res.get_json()['id']
+
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={'status': 'archived'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['status'], 'archived')
+
+        # 2. Draft transition to archived
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Archival Draft Camp', 'objective': 'Obj', 'brief': 'Brief'
+        }, headers=headers_admin)
+        camp2_id = res.get_json()['id']
+
+        res = self.client.post(f'/api/campaigns/{camp2_id}/generate', json={
+            'platforms': ['facebook'], 'provider': 'mock'
+        }, headers=headers_admin)
+        draft_id = res.get_json()['drafts'][0]['id']
+
+        # Transition draft to archived
+        res = self.client.post(f'/api/drafts/{draft_id}/transition', json={'status': 'archived'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['draft']['status'], 'archived')
+
+        # 3. Non-manager/contributor cannot reject draft
+        res = self.client.post(f'/api/campaigns/{camp2_id}/generate', json={
+            'platforms': ['instagram'], 'provider': 'mock'
+        }, headers=headers_admin)
+        draft2_id = res.get_json()['drafts'][0]['id']
+        self.client.post(f'/api/drafts/{draft2_id}/transition', json={'status': 'pending_approval'}, headers=headers_admin)
+
+        res = self.client.post(f'/api/drafts/{draft2_id}/reject', json={'reason': 'User rejected'}, headers=headers_user)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Unauthorized', res.get_json()['error'])
+
+        # 4. Legacy database backfill test
+        # Directly insert a draft row without any revision record
+        with database.get_db_connection() as conn:
+            cur = conn.execute(
+                "INSERT INTO content_drafts (organization_id, brand_id, campaign_id, target_platform, "
+                "caption, status, current_revision, created_by) "
+                "VALUES (1, 10, ?, 'whatsapp', 'Legacy draft with no revision record', 'draft', 1, 1)",
+                (camp2_id,)
+            )
+            legacy_id = cur.lastrowid
+            conn.commit()
+
+        # Confirm 0 revisions exist for legacy_id
+        res = self.client.get(f'/api/drafts/{legacy_id}/revisions', headers=headers_admin)
+        self.assertEqual(res.get_json()['count'], 0)
+
+        # Run database.init_db() to trigger backfill
+        database.init_db()
+
+        # Confirm revision 1 was backfilled non-destructively
+        res = self.client.get(f'/api/drafts/{legacy_id}/revisions', headers=headers_admin)
+        self.assertEqual(res.get_json()['count'], 1)
+        rev = res.get_json()['revisions'][0]
+        self.assertEqual(rev['revision_number'], 1)
+        self.assertEqual(rev['caption'], 'Legacy draft with no revision record')
+        self.assertEqual(rev['change_source'], 'manual_creation')
+
 if __name__ == '__main__':
     unittest.main()
