@@ -1656,6 +1656,33 @@ def retry_failed_post(schedule_id, user_id=None, organization_id=1):
 
 # --- AI Marketing Studio: Brand Marketing Profiles, Campaigns & Content Drafts ---
 
+VALID_CAMPAIGN_STATUSES = frozenset({'draft', 'active', 'paused', 'completed', 'archived'})
+INITIAL_CAMPAIGN_STATUSES = frozenset({'draft', 'active'})
+LEGAL_CAMPAIGN_TRANSITIONS = {
+    'draft': frozenset({'active', 'archived'}),
+    'active': frozenset({'paused', 'completed', 'archived'}),
+    'paused': frozenset({'active', 'completed', 'archived'}),
+    'completed': frozenset({'active', 'archived'}),
+    'archived': frozenset({'draft', 'active'})
+}
+
+VALID_DRAFT_STATUSES = frozenset({
+    'draft', 'pending_approval', 'approved', 'scheduled',
+    'published', 'rejected', 'failed', 'archived'
+})
+INITIAL_DRAFT_STATUSES = frozenset({'draft', 'pending_approval'})
+PRIVILEGED_DRAFT_STATUSES = frozenset({'approved', 'scheduled', 'published', 'failed'})
+LEGAL_DRAFT_TRANSITIONS = {
+    'draft': frozenset({'pending_approval', 'archived'}),
+    'pending_approval': frozenset({'approved', 'rejected', 'draft', 'archived'}),
+    'approved': frozenset({'scheduled', 'draft', 'archived'}),
+    'scheduled': frozenset({'published', 'failed', 'draft', 'archived'}),
+    'published': frozenset({'archived'}),
+    'rejected': frozenset({'draft', 'pending_approval', 'archived'}),
+    'failed': frozenset({'draft', 'scheduled', 'archived'}),
+    'archived': frozenset({'draft'})
+}
+
 def get_brand_marketing_profile(brand_id, organization_id=1):
     """Retrieves the marketing profile for a brand, ensuring tenant isolation."""
     validate_brand_ownership(brand_id, organization_id)
@@ -1781,6 +1808,12 @@ def create_campaign(organization_id, brand_id, name, objective, brief,
     clean_brief = str(brief).strip()
     b_id = int(brand_id)
 
+    clean_status = str(status or 'draft').strip().lower()
+    if clean_status not in INITIAL_CAMPAIGN_STATUSES:
+        raise ValueError(
+            f"Invalid initial campaign status: '{status}'. Allowed initial statuses: {', '.join(sorted(INITIAL_CAMPAIGN_STATUSES))}."
+        )
+
     with get_db_connection() as conn:
         if is_postgres():
             cur = conn.execute(
@@ -1790,7 +1823,7 @@ def create_campaign(organization_id, brand_id, name, objective, brief,
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                 (organization_id, b_id, clean_name, clean_obj, campaign_type or 'social',
                  target_audience or '', target_markets or '', languages or '', clean_brief,
-                 start_date, end_date, status or 'draft', budget, created_by)
+                 start_date, end_date, clean_status, budget, created_by)
             )
             cid = cur.fetchone()['id']
         else:
@@ -1801,7 +1834,7 @@ def create_campaign(organization_id, brand_id, name, objective, brief,
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (organization_id, b_id, clean_name, clean_obj, campaign_type or 'social',
                  target_audience or '', target_markets or '', languages or '', clean_brief,
-                 start_date, end_date, status or 'draft', budget, created_by)
+                 start_date, end_date, clean_status, budget, created_by)
             )
             cid = cur.lastrowid
         conn.commit()
@@ -1855,9 +1888,10 @@ def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
                     brief=None, campaign_type=None, target_audience=None,
                     target_markets=None, languages=None, start_date=None,
                     end_date=None, status=None, budget=None):
-    """Updates an existing campaign ensuring tenant isolation."""
-    validate_campaign_ownership(campaign_id, organization_id)
+    """Updates an existing campaign ensuring tenant isolation and lifecycle validity."""
+    existing = validate_campaign_ownership(campaign_id, organization_id)
     c_id = int(campaign_id)
+    current_status = (existing.get('status') or 'draft').lower()
 
     updates = []
     params = []
@@ -1895,8 +1929,17 @@ def update_campaign(campaign_id, organization_id=1, name=None, objective=None,
         updates.append("end_date = ?")
         params.append(str(end_date).strip() if end_date else None)
     if status is not None:
+        clean_status = str(status).strip().lower()
+        if clean_status not in VALID_CAMPAIGN_STATUSES:
+            raise ValueError(
+                f"Invalid campaign status: '{status}'. Allowed statuses: {', '.join(sorted(VALID_CAMPAIGN_STATUSES))}."
+            )
+        if clean_status != current_status and clean_status not in LEGAL_CAMPAIGN_TRANSITIONS.get(current_status, frozenset()):
+            raise ValueError(
+                f"Illegal campaign lifecycle transition from '{current_status}' to '{clean_status}'."
+            )
         updates.append("status = ?")
-        params.append(str(status).strip())
+        params.append(clean_status)
     if budget is not None:
         updates.append("budget = ?")
         params.append(str(budget).strip() if budget else None)
@@ -1943,6 +1986,12 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
         raise ValueError("Draft caption/body is required and cannot be empty.")
 
     clean_caption = str(caption).strip()
+    clean_status = str(status or 'draft').strip().lower()
+    if clean_status not in INITIAL_DRAFT_STATUSES:
+        raise ValueError(
+            f"Invalid initial content draft status: '{status}'. Allowed initial statuses: {', '.join(sorted(INITIAL_DRAFT_STATUSES))}."
+        )
+
     meta_str = json.dumps(metadata) if isinstance(metadata, (dict, list)) else (str(metadata) if metadata else None)
 
     with get_db_connection() as conn:
@@ -1954,7 +2003,7 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
                 (organization_id, int(brand_id), int(campaign_id), clean_platform,
                  language or 'en', content_format or 'post', headline, clean_caption,
-                 hashtags, call_to_action, ai_provider, ai_model, meta_str, status or 'draft', created_by)
+                 hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by)
             )
             did = cur.fetchone()['id']
         else:
@@ -1965,7 +2014,7 @@ def create_content_draft(organization_id, brand_id, campaign_id, target_platform
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (organization_id, int(brand_id), int(campaign_id), clean_platform,
                  language or 'en', content_format or 'post', headline, clean_caption,
-                 hashtags, call_to_action, ai_provider, ai_model, meta_str, status or 'draft', created_by)
+                 hashtags, call_to_action, ai_provider, ai_model, meta_str, clean_status, created_by)
             )
             did = cur.lastrowid
         conn.commit()
@@ -2026,8 +2075,8 @@ def list_content_drafts(organization_id=1, campaign_id=None, brand_id=None,
 
 def update_content_draft(draft_id, organization_id=1, caption=None, headline=None,
                          hashtags=None, call_to_action=None, status=None,
-                         content_format=None, metadata=None):
-    """Updates a content draft ensuring organization ownership."""
+                         content_format=None, metadata=None, allow_privileged_status=False):
+    """Updates a content draft ensuring organization ownership and lifecycle validity."""
     try:
         d_id = int(draft_id)
     except (ValueError, TypeError):
@@ -2041,6 +2090,7 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
         if not existing:
             raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
 
+        current_status = (existing['status'] or 'draft').lower()
         updates = []
         params = []
         if caption is not None:
@@ -2058,8 +2108,21 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
             updates.append("call_to_action = ?")
             params.append(str(call_to_action).strip() if call_to_action else None)
         if status is not None:
+            clean_status = str(status).strip().lower()
+            if clean_status not in VALID_DRAFT_STATUSES:
+                raise ValueError(
+                    f"Invalid draft status: '{status}'. Allowed: {', '.join(sorted(VALID_DRAFT_STATUSES))}."
+                )
+            if not allow_privileged_status and clean_status in PRIVILEGED_DRAFT_STATUSES:
+                raise ValueError(
+                    f"Cannot directly mark content draft as '{clean_status}' via draft edit. Use dedicated approval or scheduling workflow."
+                )
+            if clean_status != current_status and clean_status not in LEGAL_DRAFT_TRANSITIONS.get(current_status, frozenset()):
+                raise ValueError(
+                    f"Illegal draft lifecycle transition from '{current_status}' to '{clean_status}'."
+                )
             updates.append("status = ?")
-            params.append(str(status).strip())
+            params.append(clean_status)
         if content_format is not None:
             updates.append("content_format = ?")
             params.append(str(content_format).strip())
@@ -2080,6 +2143,63 @@ def update_content_draft(draft_id, organization_id=1, caption=None, headline=Non
 
         row = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (d_id,)).fetchone()
         return dict(row) if row else None
+
+def transition_content_draft_status(draft_id, to_status, user_id=None, reason=None,
+                                    organization_id=1, user_role=None):
+    """
+    Safely transitions a content draft's lifecycle state according to business rules.
+    Restricts approval/rejection to authorized users (admin/manager).
+    Direct transitions to 'published' without the publishing worker are forbidden.
+    """
+    try:
+        d_id = int(draft_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid draft ID '{draft_id}'.")
+
+    clean_target = str(to_status).strip().lower()
+    if clean_target not in VALID_DRAFT_STATUSES:
+        raise ValueError(
+            f"Invalid target draft status: '{to_status}'. Allowed: {', '.join(sorted(VALID_DRAFT_STATUSES))}."
+        )
+
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM content_drafts WHERE id = ? AND organization_id = ?",
+            (d_id, organization_id)
+        ).fetchone()
+        if not row:
+            raise TenantIsolationError(f"Content draft #{d_id} does not exist or does not belong to active organization.")
+
+        current_status = (row['status'] or 'draft').lower()
+        if current_status == clean_target:
+            return dict(row)
+
+        if clean_target == 'published':
+            raise ValueError(
+                "Direct transition to 'published' is forbidden; publishing must be executed by the social publishing worker."
+            )
+
+        if clean_target not in LEGAL_DRAFT_TRANSITIONS.get(current_status, frozenset()):
+            raise ValueError(
+                f"Illegal draft lifecycle transition from '{current_status}' to '{clean_target}'."
+            )
+
+        # Authorization checks
+        if clean_target in ('approved', 'rejected'):
+            role = str(user_role or '').strip().lower()
+            if role not in ('admin', 'manager'):
+                raise ValueError(
+                    f"Unauthorized: Only administrators or managers can mark content drafts as '{clean_target}'."
+                )
+
+        conn.execute(
+            "UPDATE content_drafts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?",
+            (clean_target, d_id, organization_id)
+        )
+        conn.commit()
+
+        updated = conn.execute("SELECT * FROM content_drafts WHERE id = ?", (d_id,)).fetchone()
+        return dict(updated) if updated else None
 
 def delete_content_draft(draft_id, organization_id=1):
     """Deletes a content draft strictly scoped to organization."""

@@ -325,5 +325,115 @@ class TestCampaignAPI(unittest.TestCase):
         res = self.client.delete(f'/api/drafts/{draft_id}', headers=headers_org2)
         self.assertEqual(res.status_code, 404)
 
+    def test_campaign_status_validation_and_lifecycle_transitions(self):
+        headers = self._login(org_id=1)
+
+        # 1. Invalid initial status rejected on creation
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Camp Invalid', 'objective': 'Obj', 'brief': 'Brief',
+            'status': 'invalid_status_xyz'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Invalid initial campaign status', res.get_json()['error'])
+
+        # 2. Valid creation with default status 'draft'
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Camp Valid', 'objective': 'Obj', 'brief': 'Brief'
+        }, headers=headers)
+        self.assertEqual(res.status_code, 201)
+        camp_id = res.get_json()['id']
+        self.assertEqual(res.get_json()['status'], 'draft')
+
+        # 3. Invalid status string on update rejected
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={'status': 'bogus_status'}, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Invalid campaign status', res.get_json()['error'])
+
+        # 4. Illegal transition rejected (e.g. draft directly to completed)
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={'status': 'completed'}, headers=headers)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Illegal campaign lifecycle transition', res.get_json()['error'])
+
+        # 5. Legal sequential transitions
+        # draft -> active
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={'status': 'active'}, headers=headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['status'], 'active')
+
+        # active -> paused
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={'status': 'paused'}, headers=headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['status'], 'paused')
+
+        # paused -> completed
+        res = self.client.put(f'/api/campaigns/{camp_id}', json={'status': 'completed'}, headers=headers)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['status'], 'completed')
+
+    def test_draft_status_validation_and_privileged_transitions(self):
+        headers_admin = self._login(user_id=1, role='admin', org_id=1)
+
+        # Create campaign and generate a draft
+        res = self.client.post('/api/campaigns', json={
+            'brand_id': 10, 'name': 'Draft Lifecycle Camp', 'objective': 'Obj', 'brief': 'Brief'
+        }, headers=headers_admin)
+        camp_id = res.get_json()['id']
+
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={'provider': 'mock', 'platforms': ['facebook']}, headers=headers_admin)
+        draft = res.get_json()['drafts'][0]
+        draft_id = draft['id']
+        self.assertEqual(draft['status'], 'draft')
+
+        # 1. Arbitrary status string rejected on edit
+        res = self.client.put(f'/api/drafts/{draft_id}', json={'status': 'random_nonsense'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Invalid draft status', res.get_json()['error'])
+
+        # 2. Direct attempt to mark as 'approved' via PUT /api/drafts/<id> is DENIED
+        res = self.client.put(f'/api/drafts/{draft_id}', json={'status': 'approved'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Cannot directly mark content draft as', res.get_json()['error'])
+
+        # 3. Direct attempt to mark as 'scheduled' via edit is DENIED
+        res = self.client.put(f'/api/drafts/{draft_id}', json={'status': 'scheduled'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 400)
+
+        # 4. Direct attempt to mark as 'published' via transition is DENIED
+        res = self.client.post(f'/api/drafts/{draft_id}/transition', json={'status': 'published'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('publishing worker', res.get_json()['error'])
+
+        # 5. Workflow: Transition from draft to pending_approval
+        res = self.client.post(f'/api/drafts/{draft_id}/transition', json={'status': 'pending_approval'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['draft']['status'], 'pending_approval')
+
+        # 6. Workflow: Non-admin user cannot approve
+        headers_user = self._login(user_id=99, role='contributor', org_id=1)
+        res = self.client.post(f'/api/drafts/{draft_id}/approve', headers=headers_user)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Unauthorized', res.get_json()['error'])
+
+        # 7. Workflow: Admin approves
+        headers_admin = self._login(user_id=1, role='admin', org_id=1)
+        res = self.client.post(f'/api/drafts/{draft_id}/approve', headers=headers_admin)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['draft']['status'], 'approved')
+
+        # 8. Rejection workflow on a new draft
+        res = self.client.post(f'/api/campaigns/{camp_id}/generate', json={'provider': 'mock', 'platforms': ['linkedin']}, headers=headers_admin)
+        draft2_id = res.get_json()['drafts'][0]['id']
+        self.client.post(f'/api/drafts/{draft2_id}/transition', json={'status': 'pending_approval'}, headers=headers_admin)
+
+        # Rejection without reason is rejected
+        res = self.client.post(f'/api/drafts/{draft2_id}/reject', json={}, headers=headers_admin)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('rejection reason is required', res.get_json()['error'])
+
+        # Rejection with reason succeeds
+        res = self.client.post(f'/api/drafts/{draft2_id}/reject', json={'reason': 'Missing price disclaimer'}, headers=headers_admin)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()['draft']['status'], 'rejected')
+
 if __name__ == '__main__':
     unittest.main()

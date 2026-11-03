@@ -1266,17 +1266,107 @@ def update_draft(draft_id):
             hashtags=data.get('hashtags'),
             call_to_action=data.get('call_to_action'),
             content_format=data.get('content_format'),
-            status=data.get('status')
+            status=data.get('status'),
+            allow_privileged_status=False
         )
         if not updated:
             return jsonify({'error': 'Draft not found'}), 404
         return jsonify(updated)
     except (database.TenantIsolationError, ValueError) as e:
         status_code = 404 if 'Tenant' in type(e).__name__ or 'ownership' in str(e).lower() else 400
-        return jsonify({'error': str(e)}), status_code
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), status_code
     except Exception as e:
         logger.error(f"Error updating draft: {e}")
         return jsonify({'error': 'Failed to update draft'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/transition', methods=['POST'])
+@login_required
+@csrf_protect
+def transition_draft(draft_id):
+    """Explicitly transitions a content draft lifecycle status."""
+    data = request.get_json(silent=True) or {}
+    to_status = data.get('status')
+    reason = data.get('reason')
+    if not to_status:
+        return jsonify({'error': 'status is required', 'code': 'MISSING_STATUS'}), 400
+
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    user_role = session.get('role', 'user')
+    try:
+        updated = database.transition_content_draft_status(
+            draft_id=draft_id,
+            to_status=to_status,
+            user_id=user_id,
+            reason=reason,
+            organization_id=org_id,
+            user_role=user_role
+        )
+        return jsonify({'success': True, 'draft': updated})
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error transitioning draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to transition draft status'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/approve', methods=['POST'])
+@login_required
+@csrf_protect
+def approve_draft(draft_id):
+    """Workflow action: Approves a draft in pending_approval status."""
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    user_role = session.get('role', 'user')
+    try:
+        updated = database.transition_content_draft_status(
+            draft_id=draft_id,
+            to_status='approved',
+            user_id=user_id,
+            reason='Content draft approved by reviewer',
+            organization_id=org_id,
+            user_role=user_role
+        )
+        return jsonify({'success': True, 'draft': updated})
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error approving draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to approve draft'}), 500
+
+@app.route('/api/drafts/<int:draft_id>/reject', methods=['POST'])
+@login_required
+@csrf_protect
+def reject_draft(draft_id):
+    """Workflow action: Rejects a draft in pending_approval status with mandatory reason."""
+    data = request.get_json(silent=True) or {}
+    reason = str(data.get('reason') or '').strip()
+    if not reason:
+        return jsonify({'error': 'A specific rejection reason is required', 'code': 'REASON_REQUIRED'}), 400
+
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    user_role = session.get('role', 'user')
+    try:
+        updated = database.transition_content_draft_status(
+            draft_id=draft_id,
+            to_status='rejected',
+            user_id=user_id,
+            reason=reason,
+            organization_id=org_id,
+            user_role=user_role
+        )
+        return jsonify({'success': True, 'draft': updated})
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error rejecting draft #{draft_id}: {e}")
+        return jsonify({'error': 'Failed to reject draft'}), 500
 
 @app.route('/api/drafts/<int:draft_id>', methods=['DELETE'])
 @login_required
