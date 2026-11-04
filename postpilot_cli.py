@@ -286,6 +286,13 @@ def cmd_health(args: Optional[argparse.Namespace] = None) -> int:
     print("=" * 55)
     return 0
 
+def cmd_rotate_password(args: Optional[argparse.Namespace] = None) -> int:
+    """Interactively and securely rotates an existing user's password."""
+    import rotate_password
+    username = getattr(args, 'username', None)
+    success = rotate_password.rotate_user_password(username)
+    return 0 if success else 1
+
 def main():
     parser = argparse.ArgumentParser(description="PostPilot Unified Management & Inspection CLI")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -303,6 +310,10 @@ def main():
     # health
     subparsers.add_parser("health", help="Run comprehensive system diagnostics and readiness audit")
 
+    # rotate-password
+    rp = subparsers.add_parser("rotate-password", help="Securely rotate an administrator or user password")
+    rp.add_argument("--username", "-u", help="Username of the account to rotate")
+
     parsed_args = parser.parse_args()
     if not parsed_args.command:
         parser.print_help()
@@ -313,6 +324,7 @@ def main():
         'list-pages': cmd_list_pages,
         'inspect-account': cmd_inspect_account,
         'health': cmd_health,
+        'rotate-password': cmd_rotate_password,
     }
 
     cmd_func = dispatch.get(parsed_args.command)

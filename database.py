@@ -902,6 +902,23 @@ def verify_user_password(username, password):
         return user
     return None
 
+def update_user_password(username, new_password):
+    """
+    Securely updates an existing user's password hash using the project's secure hashing.
+    Enforces that the user account must exist in the database.
+    Never prints or logs the plain password or the hash.
+    """
+    clean_user = str(username).strip()
+    user = get_user_by_username(clean_user)
+    if not user:
+        raise ValueError(f"User '{clean_user}' does not exist.")
+
+    pw_hash = generate_password_hash(new_password)
+    with get_db_connection() as conn:
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (pw_hash, user['id']))
+        conn.commit()
+    return True
+
 # --- Posts CRUD (Channel-Scoped & Organization-Scoped) ---
 def load_posts_by_type(post_type, organization_id=None):
     with get_db_connection() as conn:
