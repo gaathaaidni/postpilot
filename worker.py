@@ -114,6 +114,9 @@ def sync_tasks_with_db():
 
 def process_due_scheduled_posts(worker_id):
     """Claims and executes due scheduled posts using atomic distributed locks."""
+    if not config.is_publishing_enabled():
+        logger.info("🛡️ [SAFETY] Scheduled post claiming paused: POSTPILOT_PUBLISHING_ENABLED=0.")
+        return []
     try:
         due_posts = database.claim_due_scheduled_posts(worker_id, limit=5)
         for sp in due_posts:

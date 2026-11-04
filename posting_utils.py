@@ -45,6 +45,11 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
         logger.error("❌ Cannot publish text post: message content is empty.")
         return False
 
+    # Publishing Safety Guardrail: Block direct Facebook publishing when disabled
+    if not config.is_publishing_enabled():
+        logger.warning(f"🛡️ [SAFETY] Facebook direct publishing is blocked (POSTPILOT_PUBLISHING_ENABLED=0) for page {page_id}.")
+        return False
+
     try:
         page_token = facebook_api.get_page_token(access_token, page_id, channel_key=channel_key)
         if not page_token:
@@ -138,6 +143,16 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
     post_count = 0
     resolved_channel = channel_key or callback_key
     while not stop_event.is_set():
+        if not config.is_publishing_enabled():
+            logger.info(f"🛡️ [SAFETY] Posting loop for {callback_key} paused: POSTPILOT_PUBLISHING_ENABLED=0.")
+            if status_callback:
+                status_callback(callback_key, True, "Paused (Publishing disabled)", None)
+            else:
+                database.set_task_state(callback_key, is_running=True, status="Paused (Publishing disabled)")
+            interval_val = get_interval_func() or 1800
+            if stop_event.wait(timeout=min(interval_val, 5)):
+                break
+            continue
         try:
             posts = load_posts(post_type)
             if not posts:

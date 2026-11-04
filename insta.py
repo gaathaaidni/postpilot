@@ -2,6 +2,7 @@
 import time
 import os
 import threading
+import config
 import facebook_api
 import database
 
@@ -26,6 +27,10 @@ def mark_post_as_synced(post_id):
 
 def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
     """Top-level function for Instagram posting, used by modules."""
+    if not config.is_publishing_enabled():
+        logger.warning(f"🛡️ [SAFETY] Instagram direct publishing is blocked (POSTPILOT_PUBLISHING_ENABLED=0) for user {ig_user_id}.")
+        return False
+
     if not ig_user_id:
         ig_user_id = os.getenv('INSTA_ID_SUITE') or os.getenv('INSTA_ID_PHOENIX')
     if not access_token:
@@ -86,6 +91,13 @@ class InstaSync:
         """Background loop to fetch new Facebook posts and cross-post to Instagram."""
         post_count = 0
         while not self.stop_event.is_set():
+            if not config.is_publishing_enabled():
+                logger.info(f"🛡️ [SAFETY] Instagram background sync for {self.name} paused: POSTPILOT_PUBLISHING_ENABLED=0.")
+                if status_callback:
+                    status_callback(self.name, True, "Paused (Publishing disabled)", None)
+                if self.stop_event.wait(timeout=self.interval):
+                    break
+                continue
             try:
                 posts = self.get_recent_facebook_posts()
 

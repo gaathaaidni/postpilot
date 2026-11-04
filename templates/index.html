@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <meta name="csrf-token" content="{{ csrf_token }}">
-    <title>PostPilot - Universal Social Media Automation</title>
+    <title>PostPilot — BY GAATHA &middot; Universal Social Media Management</title>
     
     <!-- Preconnect & Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,8 +46,8 @@
                         <i class="fa-solid fa-paper-plane"></i>
                     </div>
                     <div>
-                        <div style="line-height: 1.1;">PostPilot</div>
-                        <span class="brand-tag">Universal v2.5</span>
+                        <div style="line-height: 1.1; font-weight: 700; font-size: 1.05rem;">PostPilot</div>
+                        <span class="brand-tag" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">BY GAATHA &middot; v2.5</span>
                     </div>
                 </div>
                 <button id="sidebar-close-btn" class="sidebar-close-btn" aria-label="Close Navigation">
@@ -56,13 +56,61 @@
             </div>
 
             <nav class="nav-menu">
-                <div class="nav-section-title">Core Platform</div>
+                <div class="nav-section-title">Primary Navigation</div>
                 <button class="nav-item active" data-tab="dashboard">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-chart-pie"></i>
                         <span>Dashboard</span>
                     </div>
                 </button>
+                <button class="nav-item" data-tab="composer">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-pen-to-square" style="color: var(--primary);"></i>
+                        <span>Create Post</span>
+                    </div>
+                    <span class="nav-badge" style="background: var(--primary-light); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">Guided</span>
+                </button>
+                <button class="nav-item" data-tab="calendar">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-calendar-days" style="color: #60a5fa;"></i>
+                        <span>Content Calendar</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="drafts">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-file-pen" style="color: #f59e0b;"></i>
+                        <span>Drafts</span>
+                    </div>
+                    <span class="nav-badge" id="nav-drafts-count" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">18</span>
+                </button>
+                <button class="nav-item" data-tab="history">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-clock-rotate-left" style="color: #94a3b8;"></i>
+                        <span>Publishing History</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="accounts">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-share-nodes" style="color: #38bdf8;"></i>
+                        <span>Social Accounts</span>
+                    </div>
+                    <span class="nav-badge" id="nav-accounts-count" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Connected</span>
+                </button>
+                <button class="nav-item" data-tab="whatsapp">
+                    <div class="nav-item-content">
+                        <i class="fa-brands fa-whatsapp" style="color: #25d366;"></i>
+                        <span>WhatsApp</span>
+                    </div>
+                    <span class="nav-badge" style="background: rgba(37, 211, 102, 0.15); color: #4ade80; border: 1px solid rgba(37, 211, 102, 0.3);">Cloud API</span>
+                </button>
+                <button class="nav-item" data-tab="settings">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-gear" style="color: #64748b;"></i>
+                        <span>Settings</span>
+                    </div>
+                </button>
+
+                <div class="nav-section-title">Marketing Studio &amp; Intelligence</div>
                 <button class="nav-item" data-tab="brands">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-building-flag" style="color: #6366f1;"></i>
@@ -82,69 +130,27 @@
                         <span>Campaigns</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="calendar">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-calendar-days" style="color: #60a5fa;"></i>
-                        <span>Content Calendar</span>
-                    </div>
-                </button>
                 <button class="nav-item" data-tab="media">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-photo-film" style="color: #ec4899;"></i>
                         <span>Media Library</span>
                     </div>
                 </button>
-
-                <div class="nav-section-title">Publishing & Workflow</div>
-                <button class="nav-item" data-tab="composer">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-pen-to-square"></i>
-                        <span>Create Post</span>
-                    </div>
-                    <span class="nav-badge" style="background: var(--primary-glow); color: #a5b4fc;">Live</span>
-                </button>
                 <button class="nav-item" data-tab="approvals">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-clipboard-check" style="color: #fbbf24;"></i>
                         <span>Approvals</span>
                     </div>
-                    <span id="nav-approvals-count" class="nav-badge" style="display: none; background: #fef3c7; color: #92400e;">0</span>
+                    <span id="nav-approvals-count" class="nav-badge" style="display: none; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">0</span>
                 </button>
-                <button class="nav-item" data-tab="queue">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-list-check" style="color: #34d399;"></i>
-                        <span>Publishing Queue</span>
-                    </div>
-                </button>
-                <button class="nav-item" data-tab="history">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-clock-rotate-left" style="color: #94a3b8;"></i>
-                        <span>Publishing History</span>
-                    </div>
-                </button>
-
-                <div class="nav-section-title">Intelligence & SaaS</div>
                 <button class="nav-item" data-tab="analytics">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-chart-line" style="color: #10b981;"></i>
                         <span>Analytics</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="accounts">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-share-nodes"></i>
-                        <span>Social Accounts</span>
-                    </div>
-                    <span class="nav-badge" id="nav-accounts-count">4 Assets</span>
-                </button>
-                <button class="nav-item" data-tab="settings">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-gear" style="color: #64748b;"></i>
-                        <span>Organization Settings</span>
-                    </div>
-                </button>
 
-                <div class="nav-section-title">Automation Channels</div>
+                <div class="nav-section-title">Automation Pipelines</div>
                 <button class="nav-item" data-tab="tour">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-earth-americas" style="color: #38bdf8;"></i>
@@ -182,6 +188,11 @@
                         <span id="global-status-indicator">Engine Active</span>
                     </div>
                     <small id="worker-lease-indicator" style="color: #64748b; font-size: 0.72rem;">Standby</small>
+                </div>
+                <div style="padding: 0.5rem 0.25rem 0; font-size: 0.72rem; color: #64748b; display: flex; gap: 0.4rem; justify-content: center; flex-wrap: wrap; border-top: 1px solid rgba(255, 255, 255, 0.05); margin-top: 0.6rem;">
+                    <a href="/about" target="_blank" style="color: #94a3b8; text-decoration: none;">About</a> &middot;
+                    <a href="/privacy" target="_blank" style="color: #94a3b8; text-decoration: none;">Privacy</a> &middot;
+                    <a href="/terms" target="_blank" style="color: #94a3b8; text-decoration: none;">Terms</a>
                 </div>
             </div>
         </aside>

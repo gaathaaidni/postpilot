@@ -27,6 +27,7 @@ import nexora_suite as tour
 import nexora_by_phoenix_international as visa
 import gaatha_loop as gaatha
 import insta
+import linkedin_api
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] (App) %(message)s")
 logger = logging.getLogger(__name__)
@@ -278,6 +279,33 @@ def login_page():
         return redirect(url_for('index'))
     return render_template('login.html', csrf_token=get_or_create_csrf_token())
 
+@app.route('/about')
+def about_page():
+    """Renders the public About Us page."""
+    return render_template(
+        'about.html',
+        csrf_token=get_or_create_csrf_token(),
+        is_authenticated=bool(session.get('user_id'))
+    )
+
+@app.route('/privacy')
+def privacy_page():
+    """Renders the public Privacy Policy page."""
+    return render_template(
+        'privacy.html',
+        csrf_token=get_or_create_csrf_token(),
+        is_authenticated=bool(session.get('user_id'))
+    )
+
+@app.route('/terms')
+def terms_page():
+    """Renders the public Terms of Service & User Agreement page."""
+    return render_template(
+        'terms.html',
+        csrf_token=get_or_create_csrf_token(),
+        is_authenticated=bool(session.get('user_id'))
+    )
+
 # --- Authentication API Endpoints ---
 
 @app.after_request
@@ -345,6 +373,16 @@ def register_organization_route():
     if not org_name or not username or not password:
         return jsonify({'error': 'org_name, username, and password are required', 'code': 'VALIDATION_ERROR'}), 400
 
+    terms_accepted = data.get('terms_accepted')
+    privacy_accepted = data.get('privacy_accepted')
+    policy_version = str(data.get('policy_version') or '1.0')
+
+    # If submitted from registration UI, validate consent
+    if 'terms_accepted' in data and not (terms_accepted is True or str(terms_accepted).lower() in ('true', '1')):
+        return jsonify({'error': 'You must agree to the Terms of Service & User Agreement.', 'code': 'TERMS_NOT_ACCEPTED'}), 400
+    if 'privacy_accepted' in data and not (privacy_accepted is True or str(privacy_accepted).lower() in ('true', '1')):
+        return jsonify({'error': 'You must acknowledge the Privacy Policy.', 'code': 'PRIVACY_NOT_ACKNOWLEDGED'}), 400
+
     try:
         res = database.register_organization_with_owner(
             org_name=org_name,
@@ -363,10 +401,14 @@ def register_organization_route():
         session['organization_id'] = org['id']
         session['csrf_token'] = secrets.token_hex(16)
 
+        if terms_accepted and privacy_accepted:
+            logger.info(f"User '{username}' registered org '{org_name}' with Terms & Privacy Policy v{policy_version} acceptance recorded at {datetime.now(timezone.utc).isoformat()}")
+
         return jsonify({
             'status': 'success',
             'organization': org,
             'user': user,
+            'policy_version_accepted': policy_version if (terms_accepted and privacy_accepted) else None,
             'csrf_token': session['csrf_token']
         }), 201
     except ValueError as e:
@@ -380,6 +422,195 @@ def api_logout():
     """Terminates the user session."""
     session.clear()
     return jsonify({'success': True, 'message': 'Logged out successfully'})
+
+# --- LinkedIn OAuth & Integration Endpoints ---
+
+@app.route('/api/auth/linkedin/connect', methods=['GET'])
+@app.route('/api/auth/linkedin/connect/<app_name>', methods=['GET'])
+@login_required
+def linkedin_connect(app_name=None):
+    """
+    Generates a secure LinkedIn OAuth authorization URL with CSRF state token
+    for the requested LinkedIn application ('aidni_global' or 'gaatha_ventures').
+    """
+    app_key = app_name or request.args.get('app') or linkedin_api.APP_GAATHA_VENTURES
+    try:
+        norm_key = linkedin_api.normalize_app_key(app_key)
+        auth_url, state, csrf = linkedin_api.get_authorization_url(app_key=norm_key)
+
+        # Save CSRF state per app in session
+        if 'linkedin_oauth_states' not in session:
+            session['linkedin_oauth_states'] = {}
+        session['linkedin_oauth_states'][norm_key] = csrf
+        session['linkedin_oauth_state'] = state  # backward compatibility
+        session['linkedin_oauth_last_app'] = norm_key
+        session.modified = True
+
+        # If browser direct navigation or redirect requested
+        if request.args.get('format') != 'json' and 'application/json' not in request.headers.get('Accept', ''):
+            return redirect(auth_url)
+
+        return jsonify({
+            'success': True,
+            'app_key': norm_key,
+            'authorization_url': auth_url,
+            'state': state
+        })
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'CONFIG_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error generating LinkedIn authorization URL for {app_key}: {e}")
+        return jsonify({'error': 'Failed to initiate LinkedIn authorization'}), 500
+
+
+@app.route('/api/auth/linkedin/callback', methods=['GET'])
+def linkedin_callback():
+    """
+    Handles LinkedIn OAuth 2.0 redirect callback.
+    Validates CSRF state token and exchanges authorization code for an access token
+    for the specific LinkedIn application.
+    """
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_desc = request.args.get('error_description')
+
+    if error:
+        logger.warning(f"LinkedIn OAuth authorization denied: {error} - {error_desc}")
+        if 'application/json' in request.headers.get('Accept', '') or request.args.get('format') == 'json':
+            return jsonify({'error': error, 'description': error_desc, 'code': 'OAUTH_DENIED'}), 400
+        return redirect('/?tab=accounts&linkedin_error=' + urllib.parse.quote(str(error)))
+
+    if not state:
+        return jsonify({'error': 'Missing OAuth state parameter.', 'code': 'INVALID_STATE'}), 400
+
+    # Parse app and csrf from state: '<app_key>:<csrf>' or legacy '<csrf>'
+    parts = state.split(':', 1)
+    if len(parts) == 2:
+        app_key = linkedin_api.normalize_app_key(parts[0])
+        csrf = parts[1]
+    else:
+        app_key = session.get('linkedin_oauth_last_app') or linkedin_api.APP_GAATHA_VENTURES
+        csrf = state
+
+    # Validate CSRF against session
+    saved_states = session.get('linkedin_oauth_states', {})
+    expected_csrf = saved_states.get(app_key) or session.get('linkedin_oauth_state')
+
+    valid_csrf = False
+    if expected_csrf:
+        if expected_csrf == state or expected_csrf == csrf:
+            valid_csrf = True
+        elif ":" in str(expected_csrf) and str(expected_csrf).split(":", 1)[1] == csrf:
+            valid_csrf = True
+
+    if not valid_csrf:
+        logger.warning(f"LinkedIn OAuth callback rejected: CSRF state mismatch for app '{app_key}'.")
+        return jsonify({'error': 'Invalid OAuth state. Potential CSRF detected.', 'code': 'INVALID_STATE'}), 400
+
+    # Clean state after use
+    if 'linkedin_oauth_states' in session and app_key in session['linkedin_oauth_states']:
+        session['linkedin_oauth_states'].pop(app_key, None)
+    session.pop('linkedin_oauth_state', None)
+    session.modified = True
+
+    if not code:
+        return jsonify({'error': 'Missing authorization code in LinkedIn callback.', 'code': 'MISSING_CODE'}), 400
+
+    # Exchange code for access token using specific app credentials
+    token_res = linkedin_api.exchange_code_for_token(code=code, app_key=app_key)
+    if not token_res.get('success'):
+        return jsonify({'error': token_res.get('error', 'Token exchange failed'), 'code': 'EXCHANGE_FAILED'}), 400
+
+    token = token_res['access_token']
+    session[f'linkedin_access_token_{app_key}'] = token
+    session['linkedin_access_token'] = token
+
+    eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=token)
+    member = token_res.get('member') or linkedin_api.get_authenticated_member(token)
+
+    if 'application/json' in request.headers.get('Accept', '') or request.args.get('format') == 'json':
+        return jsonify({
+            'success': True,
+            'message': f"LinkedIn authentication successful for {token_res.get('display_name')}.",
+            'app_key': app_key,
+            'display_name': token_res.get('display_name'),
+            'member': member.get('name') if member and member.get('success') else None,
+            'eligibility': eligibility
+        })
+
+    return redirect(f"/?tab=accounts&linkedin_connected={app_key}")
+
+
+@app.route('/api/linkedin/status', methods=['GET'])
+@login_required
+def linkedin_status():
+    """Returns LinkedIn integration readiness and target company discovery for both apps."""
+    req_app = request.args.get('app')
+    audit = linkedin_api.audit_linkedin_status()
+    if req_app:
+        norm_key = linkedin_api.normalize_app_key(req_app)
+        app_data = audit.get('apps', {}).get(norm_key)
+        if app_data:
+            return jsonify({
+                'success': True,
+                'app': app_data,
+                'publishing_enabled': audit.get('publishing_enabled', False)
+            })
+    return jsonify(audit)
+
+
+@app.route('/api/linkedin/organizations', methods=['GET'])
+@login_required
+def linkedin_organizations():
+    """Returns configuration and permission status for both target LinkedIn organizations."""
+    audit = linkedin_api.audit_linkedin_status()
+    return jsonify({
+        'success': True,
+        'apps': audit.get('apps', {}),
+        'targets': audit.get('targets', {})
+    })
+
+
+@app.route('/api/linkedin/publish', methods=['POST'])
+@login_required
+@csrf_protect
+def linkedin_publish_post():
+    """Publishes or simulates a post to a LinkedIn organization page."""
+    data = request.get_json(silent=True) or {}
+    org_id = data.get('organization_id')
+    app_key = data.get('app') or data.get('app_key')
+    text = data.get('text') or data.get('message') or data.get('caption')
+    if not org_id:
+        if app_key:
+            try:
+                cfg = linkedin_api.get_app_config(app_key)
+                org_id = cfg.get('org_id')
+            except Exception:
+                pass
+    if not org_id:
+        return jsonify({'error': 'organization_id is required', 'code': 'MISSING_ORG'}), 400
+    if not text:
+        return jsonify({'error': 'Post text is required', 'code': 'MISSING_TEXT'}), 400
+
+    token = (
+        session.get(f'linkedin_access_token_{app_key}')
+        or session.get('linkedin_access_token')
+        or (linkedin_api.get_active_token(app_key) if app_key else None)
+        or config.LINKEDIN_ACCESS_TOKEN
+    )
+
+    try:
+        result = linkedin_api.create_organization_post(
+            organization_id=org_id,
+            text=text,
+            app_key=app_key,
+            access_token=token
+        )
+        return jsonify(result), (200 if result.get('success') else 400)
+    except Exception as e:
+        logger.error(f"Error publishing LinkedIn post: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # --- Posts Management Endpoints ---
 

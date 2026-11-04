@@ -4,6 +4,7 @@ import requests
 import time
 import json
 import logging
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +337,21 @@ def _request_with_retry(method, url, **kwargs):
     Helper to perform requests with exponential backoff on transient errors.
     Bails out immediately on permanent auth/permission errors without wasteful retries.
     """
+    # Publishing Safety Guardrail: Intercept mutating publish calls when disabled
+    if method.upper() in ('POST', 'PUT', 'DELETE'):
+        if not config.is_publishing_enabled():
+            is_publish_endpoint = any(ep in url for ep in ('/feed', '/photos', '/videos', '/media', '/media_publish'))
+            if is_publish_endpoint:
+                logger.info(f"🛡️ [SAFETY] External Meta publishing intercepted (POSTPILOT_PUBLISHING_ENABLED=0): {method} {url}")
+                simulated_id = f"simulated_meta_{int(time.time() * 1000)}"
+                return {
+                    'id': simulated_id,
+                    'post_id': simulated_id,
+                    'simulated': True,
+                    'success': True,
+                    'message': 'Simulated publishing: POSTPILOT_PUBLISHING_ENABLED is 0'
+                }
+
     backoff = INITIAL_BACKOFF
     kwargs.setdefault('timeout', DEFAULT_TIMEOUT)
 

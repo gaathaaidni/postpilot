@@ -41,6 +41,7 @@ temp_*
 
 # Backups & Archives
 backups/
+safety-backup*/
 *.zip
 *.tar.gz
 

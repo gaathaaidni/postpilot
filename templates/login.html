@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,14 +12,15 @@
     <link rel="stylesheet" href="/static/style.css">
     <style>
         :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --primary-glow: rgba(79, 70, 229, 0.25);
-            --bg-dark: #0b0f19;
-            --card-bg: rgba(17, 24, 39, 0.75);
-            --border-glow: rgba(99, 102, 241, 0.2);
-            --text-light: #f9fafb;
-            --text-subtle: #9ca3af;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --primary-glow: rgba(59, 130, 246, 0.3);
+            --bg-dark: #080c14;
+            --card-bg: rgba(17, 25, 43, 0.9);
+            --border-glow: rgba(59, 130, 246, 0.2);
+            --text-light: #f8fafc;
+            --text-subtle: #94a3b8;
+            --accent-gold: #f59e0b;
         }
 
         * {
@@ -29,7 +31,7 @@
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: radial-gradient(circle at 20% 20%, #1e1b4b 0%, #0f172a 45%, #050811 100%);
+            background: radial-gradient(circle at 50% 20%, #0e1526 0%, #080c14 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -46,7 +48,7 @@
             width: 450px;
             height: 450px;
             border-radius: 50%;
-            background: radial-gradient(circle, rgba(79, 70, 229, 0.18) 0%, rgba(79, 70, 229, 0) 70%);
+            background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, rgba(59, 130, 246, 0) 70%);
             top: 10%;
             left: 15%;
             filter: blur(40px);
@@ -58,7 +60,7 @@
             width: 400px;
             height: 400px;
             border-radius: 50%;
-            background: radial-gradient(circle, rgba(14, 165, 233, 0.15) 0%, rgba(14, 165, 233, 0) 70%);
+            background: radial-gradient(circle, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0) 70%);
             bottom: 10%;
             right: 15%;
             filter: blur(40px);
@@ -68,13 +70,13 @@
         .login-card {
             width: 100%;
             max-width: 440px;
-            background: rgba(17, 24, 39, 0.85);
+            background: var(--card-bg);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 20px;
             padding: 2.75rem 2.25rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.05);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
             position: relative;
             z-index: 10;
             animation: fadeInCard 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -85,6 +87,7 @@
                 opacity: 0;
                 transform: translateY(12px) scale(0.98);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0) scale(1);
@@ -100,14 +103,14 @@
             width: 58px;
             height: 58px;
             margin: 0 auto 1.25rem;
-            background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
+            background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
             border-radius: 16px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: #ffffff;
             font-size: 1.6rem;
-            box-shadow: 0 10px 20px -5px var(--primary-glow);
+            box-shadow: 0 10px 20px -5px rgba(59, 130, 246, 0.4);
         }
 
         .brand-name {
@@ -198,9 +201,9 @@
 
         .login-input:focus {
             outline: none;
-            border-color: #6366f1;
+            border-color: #3b82f6;
             background: rgba(15, 23, 42, 0.85);
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
         }
 
         .toggle-password-btn {
@@ -223,7 +226,7 @@
             width: 100%;
             padding: 0.9rem 1.25rem;
             margin-top: 1.5rem;
-            background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
             border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             color: #ffffff;
@@ -235,15 +238,15 @@
             align-items: center;
             justify-content: center;
             gap: 0.6rem;
-            box-shadow: 0 10px 20px -5px rgba(79, 70, 229, 0.4);
+            box-shadow: 0 10px 20px -5px rgba(59, 130, 246, 0.4);
             transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
             min-height: 48px;
         }
 
         .submit-btn:hover {
             transform: translateY(-1px);
-            box-shadow: 0 14px 24px -5px rgba(79, 70, 229, 0.5);
-            background: linear-gradient(135deg, #5b52f0 0%, #483bd6 100%);
+            box-shadow: 0 14px 24px -5px rgba(59, 130, 246, 0.5);
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
         }
 
         .submit-btn:active {
@@ -265,20 +268,43 @@
             color: #64748b;
         }
 
+        .checkbox-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.65rem;
+            margin-bottom: 0.85rem;
+            font-size: 0.82rem;
+            color: var(--text-subtle);
+            line-height: 1.45;
+            text-align: left;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--primary);
+            cursor: pointer;
+            margin-top: 0.15rem;
+            flex-shrink: 0;
+        }
+
         @media (max-width: 480px) {
             .login-card {
                 padding: 2rem 1.5rem;
                 border-radius: 16px;
             }
+
             .brand-name {
                 font-size: 1.5rem;
             }
+
             .channel-pill-row {
                 flex-wrap: wrap;
             }
         }
     </style>
 </head>
+
 <body>
     <div class="ambient-glow"></div>
     <div class="ambient-glow-2"></div>
@@ -289,13 +315,26 @@
                 <i class="fa-solid fa-paper-plane"></i>
             </div>
             <h1 class="brand-name">PostPilot</h1>
-            <p class="brand-tagline">Social media control without complexity</p>
+            <p class="brand-tagline" style="display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
+                <span>BY GAATHA</span> &middot; <span style="color: #60a5fa;">Universal SaaS v2.5</span>
+            </p>
             <div class="channel-pill-row">
                 <span class="channel-mini-pill"><i class="fa-brands fa-meta"></i> Meta Verified</span>
                 <span class="channel-mini-pill"><i class="fa-brands fa-instagram"></i> Instagram Sync</span>
-                <span class="channel-mini-pill"><i class="fa-solid fa-shield-halved"></i> Universal</span>
+                <span class="channel-mini-pill"><i class="fa-brands fa-linkedin"></i> LinkedIn Apps</span>
+                <span class="channel-mini-pill"><i class="fa-brands fa-whatsapp"></i> WhatsApp Cloud</span>
             </div>
         </header>
+
+        <!-- Auth Mode Switcher -->
+        <div class="auth-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; background: rgba(15, 23, 42, 0.6); padding: 0.25rem; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06);">
+            <button type="button" id="tab-login-btn" onclick="switchAuthTab('login')" style="flex: 1; padding: 0.5rem 0.75rem; border-radius: 8px; border: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: var(--primary); color: #fff; transition: all 0.2s;">
+                <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
+            </button>
+            <button type="button" id="tab-register-btn" onclick="switchAuthTab('register')" style="flex: 1; padding: 0.5rem 0.75rem; border-radius: 8px; border: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--text-subtle); transition: all 0.2s;">
+                <i class="fa-solid fa-building-circle-check"></i> Register Org
+            </button>
+        </div>
 
         <div id="login-alert" class="alert-box" role="alert" aria-live="polite">
             <i class="fa-solid fa-circle-exclamation"></i>
@@ -309,16 +348,8 @@
                 <label for="username" class="form-label">Username</label>
                 <div class="input-wrapper">
                     <i class="fa-solid fa-user input-icon" aria-hidden="true"></i>
-                    <input 
-                        type="text" 
-                        id="username" 
-                        class="login-input" 
-                        placeholder="Enter your username" 
-                        required 
-                        autofocus 
-                        autocomplete="username"
-                        spellcheck="false"
-                    >
+                    <input type="text" id="username" class="login-input" placeholder="Enter your username" required
+                        autofocus autocomplete="username" spellcheck="false">
                 </div>
             </div>
 
@@ -326,21 +357,10 @@
                 <label for="password" class="form-label">Password</label>
                 <div class="input-wrapper">
                     <i class="fa-solid fa-lock input-icon" aria-hidden="true"></i>
-                    <input 
-                        type="password" 
-                        id="password" 
-                        class="login-input" 
-                        placeholder="••••••••••••" 
-                        required 
-                        autocomplete="current-password"
-                    >
-                    <button 
-                        type="button" 
-                        class="toggle-password-btn" 
-                        onclick="togglePasswordVisibility()" 
-                        title="Show or hide password"
-                        aria-label="Toggle password visibility"
-                    >
+                    <input type="password" id="password" class="login-input" placeholder="••••••••••••" required
+                        autocomplete="current-password">
+                    <button type="button" class="toggle-password-btn" onclick="togglePasswordVisibility()"
+                        title="Show or hide password" aria-label="Toggle password visibility">
                         <i id="password-toggle-icon" class="fa-regular fa-eye"></i>
                     </button>
                 </div>
@@ -352,12 +372,117 @@
             </button>
         </form>
 
+        <!-- 2. Self-Service Register Organization Form -->
+        <form id="register-form" onsubmit="handleRegister(event)" style="display: none;" novalidate>
+            <div class="form-group">
+                <label for="reg_org_name" class="form-label">Organization Name</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-building input-icon" aria-hidden="true"></i>
+                    <input type="text" id="reg_org_name" class="login-input" placeholder="e.g. Acme Digital Media" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg_username" class="form-label">Owner Username</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-user input-icon" aria-hidden="true"></i>
+                    <input type="text" id="reg_username" class="login-input" placeholder="e.g. admin" required autocomplete="username">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg_email" class="form-label">Business Email</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-envelope input-icon" aria-hidden="true"></i>
+                    <input type="email" id="reg_email" class="login-input" placeholder="admin@example.com" autocomplete="email">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg_password" class="form-label">Password (Min 8 Characters)</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-lock input-icon" aria-hidden="true"></i>
+                    <input type="password" id="reg_password" class="login-input" placeholder="••••••••" required minlength="8" autocomplete="new-password">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="reg_timezone" class="form-label">Workspace Timezone</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-globe input-icon" aria-hidden="true"></i>
+                    <select id="reg_timezone" class="login-input" style="color: #fff; background: rgba(15, 23, 42, 0.85);">
+                        <option value="Asia/Kolkata" selected>Asia/Kolkata (IST, UTC+05:30)</option>
+                        <option value="UTC">UTC (Coordinated Universal Time)</option>
+                        <option value="America/New_York">America/New_York (EST/EDT)</option>
+                        <option value="Europe/London">Europe/London (GMT/BST)</option>
+                        <option value="Europe/Tirane">Europe/Tirane (CET/CEST)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Mandatory Legal Policy Acknowledgements (Unselected by default) -->
+            <div style="margin: 1.25rem 0 0.5rem 0;">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="reg_terms" name="terms_accepted">
+                    <label for="reg_terms">
+                        I agree to the <a href="/terms" target="_blank" style="color: #60a5fa; text-decoration: underline;">Terms of Service &amp; User Agreement</a> (Draft v1.0).
+                    </label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="reg_privacy" name="privacy_accepted">
+                    <label for="reg_privacy">
+                        I acknowledge and accept the <a href="/privacy" target="_blank" style="color: #60a5fa; text-decoration: underline;">Privacy Policy</a> (Draft v1.0).
+                    </label>
+                </div>
+            </div>
+
+            <button type="submit" id="register-btn" class="submit-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                <span>Create Organization Account</span>
+            </button>
+        </form>
+
+        <!-- Public Footer with Legal & Information Links -->
         <footer class="login-footer">
-            <span>PostPilot Universal Suite &middot; Android / Termux / Server</span>
+            <div style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; font-size: 0.82rem;">
+                <a href="/about" style="color: #94a3b8; text-decoration: none;">About Us</a>
+                <span style="color: #475569;">&middot;</span>
+                <a href="/privacy" style="color: #94a3b8; text-decoration: none;">Privacy Policy</a>
+                <span style="color: #475569;">&middot;</span>
+                <a href="/terms" style="color: #94a3b8; text-decoration: none;">Terms of Service</a>
+            </div>
+            <span>PostPilot — BY GAATHA &middot; Universal SaaS Suite &middot; Android / Termux / Server</span>
         </footer>
     </main>
 
     <script>
+        function switchAuthTab(mode) {
+            const loginForm = document.getElementById('login-form');
+            const registerForm = document.getElementById('register-form');
+            const loginTabBtn = document.getElementById('tab-login-btn');
+            const regTabBtn = document.getElementById('tab-register-btn');
+            const alertBox = document.getElementById('login-alert');
+
+            alertBox.style.display = 'none';
+
+            if (mode === 'register') {
+                loginForm.style.display = 'none';
+                registerForm.style.display = 'block';
+                regTabBtn.style.background = 'var(--primary)';
+                regTabBtn.style.color = '#fff';
+                loginTabBtn.style.background = 'transparent';
+                loginTabBtn.style.color = 'var(--text-subtle)';
+            } else {
+                registerForm.style.display = 'none';
+                loginForm.style.display = 'block';
+                loginTabBtn.style.background = 'var(--primary)';
+                loginTabBtn.style.color = '#fff';
+                regTabBtn.style.background = 'transparent';
+                regTabBtn.style.color = 'var(--text-subtle)';
+            }
+        }
+
         function togglePasswordVisibility() {
             const passInput = document.getElementById('password');
             const icon = document.getElementById('password-toggle-icon');
@@ -424,6 +549,90 @@
                 submitBtn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> <span>Sign In to PostPilot</span>';
             }
         }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const alertBox = document.getElementById('login-alert');
+            const alertText = document.getElementById('alert-text');
+            const submitBtn = document.getElementById('register-btn');
+            const csrfToken = document.getElementById('csrf_token').value;
+
+            const orgName = document.getElementById('reg_org_name').value.trim();
+            const username = document.getElementById('reg_username').value.trim();
+            const email = document.getElementById('reg_email').value.trim();
+            const password = document.getElementById('reg_password').value;
+            const timezone = document.getElementById('reg_timezone').value;
+            const termsAccepted = document.getElementById('reg_terms').checked;
+            const privacyAccepted = document.getElementById('reg_privacy').checked;
+
+            if (!orgName || !username || !password) {
+                alertText.textContent = 'Organization name, username, and password are required.';
+                alertBox.style.display = 'flex';
+                return;
+            }
+
+            if (password.length < 8) {
+                alertText.textContent = 'Password must be at least 8 characters long.';
+                alertBox.style.display = 'flex';
+                return;
+            }
+
+            if (!termsAccepted) {
+                alertText.textContent = 'You must agree to the Terms of Service & User Agreement.';
+                alertBox.style.display = 'flex';
+                return;
+            }
+
+            if (!privacyAccepted) {
+                alertText.textContent = 'You must acknowledge the Privacy Policy.';
+                alertBox.style.display = 'flex';
+                return;
+            }
+
+            alertBox.style.display = 'none';
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Creating account...</span>';
+
+            try {
+                const res = await fetch('/api/auth/register-org', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                    body: JSON.stringify({
+                        org_name: orgName,
+                        username: username,
+                        email: email || null,
+                        password: password,
+                        timezone: timezone,
+                        terms_accepted: true,
+                        privacy_accepted: true,
+                        policy_version: '1.0'
+                    })
+                });
+
+                const data = await res.json();
+
+                if (res.ok && data.status === 'success') {
+                    submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Organization Created! Redirecting...</span>';
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 250);
+                } else {
+                    alertText.textContent = data.error || 'Registration failed. Please review inputs.';
+                    alertBox.style.display = 'flex';
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Create Organization Account</span>';
+                }
+            } catch (err) {
+                alertText.textContent = 'Network or server error during registration.';
+                alertBox.style.display = 'flex';
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Create Organization Account</span>';
+            }
+        }
     </script>
 </body>
+
 </html>
