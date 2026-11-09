@@ -1389,6 +1389,11 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
             )
         return created_rec
 
+VALID_SCHEDULED_POST_TYPES = {
+    'tour', 'nz', 'gaatha', 'insta',
+    'facebook', 'instagram', 'linkedin', 'whatsapp', 'x', 'twitter'
+}
+
 def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id=None,
                         start_date=None, end_date=None, limit=100, offset=0, target_timezone=None):
     """
@@ -1417,8 +1422,12 @@ def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id
         offset = 0
 
     if post_type:
-        if post_type not in ('tour', 'nz', 'gaatha', 'insta'):
-            raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of tour, nz, gaatha, insta.")
+        clean_post_type = str(post_type).strip().lower()
+        if clean_post_type == 'twitter':
+            clean_post_type = 'x'
+        if clean_post_type not in VALID_SCHEDULED_POST_TYPES:
+            raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of: {', '.join(sorted(VALID_SCHEDULED_POST_TYPES))}.")
+        post_type = clean_post_type
 
     if status:
         if status not in VALID_POST_STATUSES:

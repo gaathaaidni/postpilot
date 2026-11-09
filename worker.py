@@ -19,6 +19,7 @@ import channel_runner
 import insta
 import facebook_api
 import posting_utils
+from platform_adapters.registry import PlatformRegistry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] (Worker) %(message)s")
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def sync_tasks_with_db():
                 if th2 and th2.is_alive(): th2.join(timeout=1.0)
 
 def process_due_scheduled_posts(worker_id):
-    """Claims and executes due scheduled posts using atomic distributed locks."""
+    """Claims and executes due scheduled posts using atomic distributed locks via PlatformRegistry."""
     if not config.is_publishing_enabled():
         logger.info("🛡️ [SAFETY] Scheduled post claiming paused: POSTPILOT_PUBLISHING_ENABLED=0.")
         return []
@@ -121,39 +122,17 @@ def process_due_scheduled_posts(worker_id):
         due_posts = database.claim_due_scheduled_posts(worker_id, limit=5)
         for sp in due_posts:
             p_type = sp['post_type']
-            msg = sp.get('message') or ''
-            img = sp.get('image_filename') or ''
-            ch = channel_runner.CHANNELS.get(p_type)
-            if not ch:
-                logger.error(f"Cannot publish scheduled post {sp['id']}: channel '{p_type}' is not configured.")
-                database.complete_scheduled_post(sp['id'], worker_id, success=False, error_message=f"Channel {p_type} not configured")
-                continue
-
-            logger.info(f"Executing scheduled post #{sp['id']} on channel '{p_type}'...")
+            logger.info(f"Executing scheduled post #{sp['id']} on platform/channel '{p_type}'...")
             try:
-                page_id = ch.get_page_id()
-                token = facebook_api.get_access_token(channel_key=p_type)
-
-                if not token:
-                    logger.warning(f"Publishing simulated/skipped for scheduled post #{sp['id']}: Meta token not configured.")
-                    database.complete_scheduled_post(sp['id'], worker_id, success=False, error_message="Meta Access Token not configured")
-                    continue
-
-                res = posting_utils.post_on_facebook(
-                    message=msg,
-                    image_filename=img,
-                    page_id=page_id,
-                    access_token=token,
-                    ig_user_id=ch.ig_user_id,
-                    channel_key=p_type
-                )
-                success = bool(res)
+                res = PlatformRegistry.dispatch(sp, worker_id=worker_id)
+                success = bool(res.get('success', False))
+                err = res.get('error')
                 if success:
                     database.complete_scheduled_post(sp['id'], worker_id, success=True)
-                    logger.info(f"Successfully published scheduled post #{sp['id']} on channel '{p_type}'.")
+                    logger.info(f"Successfully published scheduled post #{sp['id']} on platform '{p_type}'.")
                 else:
-                    database.complete_scheduled_post(sp['id'], worker_id, success=False, error_message="Facebook publishing returned failure")
-                    logger.warning(f"Failed to publish scheduled post #{sp['id']} on channel '{p_type}'.")
+                    database.complete_scheduled_post(sp['id'], worker_id, success=False, error_message=err or "Publishing failed")
+                    logger.warning(f"Failed to publish scheduled post #{sp['id']} on platform '{p_type}': {err}")
             except Exception as e:
                 safe_e = facebook_api.sanitize_log_message(str(e))
                 logger.error(f"Exception publishing scheduled post #{sp['id']}: {safe_e}")

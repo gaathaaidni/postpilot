@@ -41,7 +41,10 @@ app.config['SESSION_COOKIE_HTTPONLY'] = config.SESSION_COOKIE_HTTPONLY
 app.config['SESSION_COOKIE_SAMESITE'] = config.SESSION_COOKIE_SAMESITE
 app.config['SESSION_COOKIE_SECURE'] = config.SESSION_COOKIE_SECURE
 
-VALID_POST_TYPES = {'tour', 'nz', 'gaatha', 'insta'}
+VALID_POST_TYPES = {
+    'tour', 'nz', 'gaatha', 'insta',
+    'facebook', 'instagram', 'linkedin', 'whatsapp', 'x', 'twitter'
+}
 
 def validate_file(file):
     """Validates file extension, MIME type, and image integrity."""
