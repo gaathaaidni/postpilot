@@ -269,7 +269,7 @@ class InstagramAdapter(BasePlatformAdapter):
         if not image_url:
             # Fall back to public host URL using filename if configured
             filename = payload.get('image_filename') or payload.get('media_filename')
-            base_url = getattr(config, 'PUBLIC_MEDIA_BASE_URL', None) or 'https://postpilot.gaatha.com/uploads'
+            base_url = getattr(config, 'PUBLIC_MEDIA_BASE_URL', None) or 'https://postpilot.gaatha.tech/images'
             image_url = f"{base_url}/{filename}" if filename else None
 
         # Safety Guardrail: Intercept when publishing is disabled

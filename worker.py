@@ -46,9 +46,10 @@ def sync_tasks_with_db():
         else:
             stop_module_thread(key, None)
 
-def process_due_scheduled_posts(worker_id):
+def process_due_scheduled_posts(worker_id, allow_simulation=False):
     """Claims and executes due scheduled posts using atomic distributed locks via PlatformRegistry."""
-    if not config.is_publishing_enabled():
+    allow_sim = allow_simulation or bool(os.getenv('POSTPILOT_SIMULATE_SCHEDULER') in ('1', 'true', 'True'))
+    if not config.is_publishing_enabled() and not allow_sim:
         logger.info("🛡️ [SAFETY] Scheduled post claiming paused: POSTPILOT_PUBLISHING_ENABLED=0.")
         return []
     try:
@@ -60,9 +61,10 @@ def process_due_scheduled_posts(worker_id):
                 res = PlatformRegistry.dispatch(sp, worker_id=worker_id)
                 success = bool(res.get('success', False))
                 err = res.get('error')
+                ext_id = res.get('external_post_id') or res.get('post_id') or res.get('media_id')
                 if success:
-                    database.complete_scheduled_post(sp['id'], worker_id, success=True)
-                    logger.info(f"Successfully published scheduled post #{sp['id']} on platform '{p_type}'.")
+                    database.complete_scheduled_post(sp['id'], worker_id, success=True, external_post_id=ext_id)
+                    logger.info(f"Successfully published scheduled post #{sp['id']} on platform '{p_type}'. External ID: {ext_id}")
                 else:
                     database.complete_scheduled_post(sp['id'], worker_id, success=False, error_message=err or "Publishing failed")
                     logger.warning(f"Failed to publish scheduled post #{sp['id']} on platform '{p_type}': {err}")
