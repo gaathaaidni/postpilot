@@ -114,9 +114,11 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
         can_post = bool(p.get('can_post', True))
 
         # Check publishing permissions
+        # In Meta Graph API, administrative publishing as the Page requires CREATE_CONTENT or MANAGE task
+        # and pages_manage_posts scope on the token (can_post field only refers to visitor wall posting).
         has_manage = 'MANAGE' in tasks or 'CREATE_CONTENT' in tasks
         has_scope = 'pages_manage_posts' in token_scopes or len(token_scopes) == 0
-        can_publish = has_manage and can_post
+        can_publish = has_manage and has_scope
 
         # Mapping status
         mapping = fb_mappings.get(pid)
