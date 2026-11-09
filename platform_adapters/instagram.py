@@ -65,6 +65,9 @@ class InstagramAdapter(BasePlatformAdapter):
                 return str(config.INSTA_ID_PHOENIX)
             elif brand_id == 1:
                 return str(config.INSTA_ID_SUITE)
+            # Specific brand requested but no Instagram account mapped: strictly block cross-brand inheritance
+            logger.warning(f"No Instagram account mapped for brand #{brand_id}. Cross-brand inheritance blocked.")
+            return None
 
         # 2. Key or numeric identifier lookup
         if target_identifier:

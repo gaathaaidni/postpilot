@@ -66,6 +66,9 @@ class FacebookAdapter(BasePlatformAdapter):
                 return str(config.FB_PAGE_ID_SUITE)
             elif brand_id == 6 and getattr(config, 'FB_PAGE_ID_GAATHA_AI', None):
                 return str(config.FB_PAGE_ID_GAATHA_AI)
+            # Specific brand requested but no page mapped: strictly block cross-brand inheritance
+            logger.warning(f"No Facebook Page mapped for brand #{brand_id}. Cross-brand inheritance blocked.")
+            return None
 
         # 2. Key or explicit identifier lookup
         if target_identifier:

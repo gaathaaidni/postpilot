@@ -110,6 +110,11 @@ class LinkedInAdapter(BasePlatformAdapter):
                 )
                 if acct and acct.get('app_identifier'):
                     app_key = acct['app_identifier']
+                elif payload['brand_id'] == 1:
+                    app_key = linkedin_api.APP_GAATHA_VENTURES
+                else:
+                    logger.warning(f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked.")
+                    return {'success': False, 'platform': self.platform_key, 'error': f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked."}
             except Exception:
                 pass
 
