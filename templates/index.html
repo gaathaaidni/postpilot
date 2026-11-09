@@ -267,15 +267,28 @@
                 <form id="post-form" onsubmit="event.preventDefault(); savePost();">
                     <input type="hidden" id="post-id">
                     
-                    <!-- Destination Channel Selector -->
-                    <div class="form-group">
-                        <label for="post-type" class="form-label">Destination Channel</label>
-                        <select id="post-type" class="form-control" onchange="handleComposerChannelChange(this.value)">
-                            <option value="facebook">Facebook Pages</option>
-                            <option value="instagram">Instagram Professional</option>
-                            <option value="linkedin">LinkedIn Pages</option>
-                            <option value="whatsapp">WhatsApp Business Cloud</option>
-                        </select>
+                    <!-- Destination Channel & Brand Selector Grid -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="post-brand" class="form-label">Brand Workspace</label>
+                            <select id="post-brand" class="form-control" onchange="handleComposerBrandChange(this.value)">
+                                <option value="1">GAATHA Suite</option>
+                                <option value="5">Phoenix — BY GAATHA</option>
+                                <option value="6">GAATHA AI</option>
+                                <option value="4">GAATHA Terra</option>
+                                <option value="2">GAATHA POS</option>
+                                <option value="3">Sentira AI</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="post-type" class="form-label">Destination Platform</label>
+                            <select id="post-type" class="form-control" onchange="handleComposerChannelChange(this.value)">
+                                <option value="facebook">Facebook Pages</option>
+                                <option value="instagram">Instagram Professional</option>
+                                <option value="linkedin">LinkedIn Pages</option>
+                                <option value="whatsapp">WhatsApp Business Cloud</option>
+                            </select>
+                        </div>
                     </div>
 
                     <!-- Caption Editor -->
@@ -344,6 +357,12 @@
                                 <button type="button" id="tab-btn-ig" class="preview-tab-btn" onclick="switchPreviewPlatform('ig')">
                                     <i class="fa-brands fa-instagram" style="color: var(--ig-pink);"></i> Instagram
                                 </button>
+                                <button type="button" id="tab-btn-li" class="preview-tab-btn" onclick="switchPreviewPlatform('li')">
+                                    <i class="fa-brands fa-linkedin" style="color: #38bdf8;"></i> LinkedIn
+                                </button>
+                                <button type="button" id="tab-btn-wa" class="preview-tab-btn" onclick="switchPreviewPlatform('wa')">
+                                    <i class="fa-brands fa-whatsapp" style="color: #25d366;"></i> WhatsApp
+                                </button>
                             </div>
                         </div>
 
@@ -403,14 +422,61 @@
                                 <span id="ig-preview-caption">Your caption will appear here...</span>
                             </div>
                         </div>
+
+                        <!-- LinkedIn Live Mockup -->
+                        <div id="mockup-container-li" class="li-post-mockup" style="display: none;">
+                            <div class="li-mockup-header">
+                                <div class="li-mockup-avatar" style="background: #0a66c2; color: #fff; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;"><i class="fa-brands fa-linkedin-in"></i></div>
+                                <div>
+                                    <div class="li-mockup-name" style="font-weight: 700; font-size: 0.9rem;">
+                                        <span id="li-preview-name">Aidni Global LLP</span> &middot; <span style="font-weight: 400; color: #8c9094; font-size: 0.8rem;">1st</span>
+                                    </div>
+                                    <div class="li-mockup-meta" style="font-size: 0.75rem; color: var(--text-muted);">Verified Company &middot; Just now &middot; <i class="fa-solid fa-earth-americas"></i></div>
+                                </div>
+                            </div>
+                            <div class="li-mockup-caption" id="li-preview-caption" style="margin: 0.75rem 0; font-size: 0.88rem; line-height: 1.45;">Your LinkedIn copy will render here...</div>
+                            <div class="li-mockup-media-container" id="li-preview-media">
+                                <div class="fb-mockup-media-placeholder">
+                                    <i class="fa-brands fa-linkedin"></i>
+                                    <div>Attach media to preview LinkedIn high-res card</div>
+                                </div>
+                            </div>
+                            <div class="li-mockup-footer" style="display: flex; justify-content: space-around; padding-top: 0.5rem; border-top: 1px solid var(--border); font-size: 0.82rem; color: var(--text-secondary);">
+                                <div class="li-footer-action"><i class="fa-regular fa-thumbs-up"></i> Like</div>
+                                <div class="li-footer-action"><i class="fa-regular fa-comment"></i> Comment</div>
+                                <div class="li-footer-action"><i class="fa-solid fa-repeat"></i> Repost</div>
+                                <div class="li-footer-action"><i class="fa-regular fa-paper-plane"></i> Send</div>
+                            </div>
+                        </div>
+
+                        <!-- WhatsApp Live Mockup -->
+                        <div id="mockup-container-wa" class="wa-post-mockup" style="display: none; background: #0b141a; border-radius: 8px; padding: 1rem; color: #e9edef;">
+                            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                                <div style="width: 36px; height: 36px; border-radius: 50%; background: #25d366; color: #fff; display: flex; align-items: center; justify-content: center;"><i class="fa-brands fa-whatsapp"></i></div>
+                                <div>
+                                    <div style="font-weight: 700; font-size: 0.9rem;" id="wa-preview-name">Gaatha Ventures</div>
+                                    <div style="font-size: 0.72rem; color: #8696a0;">Official Business Account &middot; +91 90990 28291</div>
+                                </div>
+                            </div>
+                            <div style="background: #202c33; border-radius: 8px; padding: 0.85rem; max-width: 90%;">
+                                <div id="wa-preview-media" style="margin-bottom: 0.5rem;"></div>
+                                <div id="wa-preview-caption" style="font-size: 0.88rem; line-height: 1.45; white-space: pre-wrap;">Your WhatsApp broadcast message will render here...</div>
+                                <div style="text-align: right; font-size: 0.7rem; color: #8696a0; margin-top: 0.35rem;">Just now <i class="fa-solid fa-check-double" style="color: #53bdeb;"></i></div>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                <button type="button" id="save-post-btn" class="btn btn-primary" onclick="savePost()">
-                    <i class="fa-solid fa-floppy-disk"></i> Save Post
-                </button>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="savePostAsDraft()">
+                        <i class="fa-solid fa-file-pen"></i> Save as Draft
+                    </button>
+                    <button type="button" id="save-post-btn" class="btn btn-primary" onclick="savePost()">
+                        <i class="fa-solid fa-calendar-check"></i> Schedule / Save Post
+                    </button>
+                </div>
             </div>
         </div>
     </div>

@@ -401,35 +401,43 @@ class TestSocialAccountsManagement(unittest.TestCase):
         self.assertTrue(len(accounts) > 0)
         target_id = accounts[0]['id']
 
+        csrf_val = 'test_csrf_token_acc'
         with self.client.session_transaction() as sess:
             sess['user_id'] = 1
             sess['organization_id'] = 1
             sess['username'] = 'admin'
             sess['role'] = 'admin'
+            sess['csrf_token'] = csrf_val
+
+        headers = {'X-CSRFToken': csrf_val}
 
         # 1. Verify account
-        v_resp = self.client.post(f'/api/accounts/verify/{target_id}')
+        v_resp = self.client.post(f'/api/accounts/verify/{target_id}', headers=headers)
         self.assertEqual(v_resp.status_code, 200)
         v_data = v_resp.get_json()
         self.assertTrue(v_data.get('success'))
         self.assertIn('verified_at', v_data)
 
         # 2. Delete account
-        d_resp = self.client.delete(f'/api/accounts/{target_id}')
+        d_resp = self.client.delete(f'/api/accounts/{target_id}', headers=headers)
         self.assertEqual(d_resp.status_code, 200)
         d_data = d_resp.get_json()
         self.assertTrue(d_data.get('success'))
 
     def test_multi_tenant_isolation(self):
         """Org 2 cannot view or delete Org 1 accounts."""
+        csrf_val = 'test_csrf_token_org2'
         with self.client.session_transaction() as sess:
             sess['user_id'] = 2
             sess['organization_id'] = 2  # Different Org!
             sess['username'] = 'org2_user'
             sess['role'] = 'editor'
+            sess['csrf_token'] = csrf_val
+
+        headers = {'X-CSRFToken': csrf_val}
 
         # Try deleting Org 1's account #2
-        d_resp = self.client.delete('/api/accounts/2')
+        d_resp = self.client.delete('/api/accounts/2', headers=headers)
         self.assertEqual(d_resp.status_code, 404)
         d_data = d_resp.get_json()
         self.assertFalse(d_data.get('success'))

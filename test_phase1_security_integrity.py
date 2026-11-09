@@ -56,12 +56,16 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         os.makedirs(UPLOAD_DIR, exist_ok=True)
+        cls._orig_local_mode = getattr(config, 'LOCAL_MODE', True)
+        cls._orig_admin_user = getattr(config, 'ADMIN_USERNAME', 'admin')
+        cls._orig_admin_pass = getattr(config, 'ADMIN_PASSWORD', 'admin123')
+        cls._orig_db_url = getattr(config, 'DATABASE_URL', None)
+        cls._orig_upload = getattr(config, 'UPLOAD_FOLDER', None)
+
         config.LOCAL_MODE = False
         config.ADMIN_USERNAME = 'secadmin'
         config.ADMIN_PASSWORD = 'Phase1_SecTest_Pass!'
         config.DATABASE_URL = f"sqlite:///{DB_PATH}"
-        config.POSTPILOT_DATA_DIR = TEMP_DIR
-        config.POSTPILOT_UPLOAD_FOLDER = UPLOAD_DIR
         config.UPLOAD_FOLDER = Path(UPLOAD_DIR)
         application_module.app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
         database.init_db()
@@ -71,6 +75,14 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
     def tearDownClass(cls):
         import shutil
         shutil.rmtree(TEMP_DIR, ignore_errors=True)
+        config.LOCAL_MODE = cls._orig_local_mode
+        config.ADMIN_USERNAME = cls._orig_admin_user
+        config.ADMIN_PASSWORD = cls._orig_admin_pass
+        if cls._orig_db_url:
+            config.DATABASE_URL = cls._orig_db_url
+        if cls._orig_upload:
+            config.UPLOAD_FOLDER = cls._orig_upload
+            application_module.app.config['UPLOAD_FOLDER'] = str(cls._orig_upload)
 
     def _login(self, username='secadmin', password='Phase1_SecTest_Pass!'):
         """Logs in and returns the CSRF token and response data."""

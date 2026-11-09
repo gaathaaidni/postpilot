@@ -172,6 +172,7 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
                 'success': True,
                 'platform': self.platform_key,
                 'external_message_id': sim_msg_id,
+                'external_post_id': sim_msg_id,
                 'recipient_phone': normalized_phone,
                 'template_name': template_name,
                 'simulated': True,

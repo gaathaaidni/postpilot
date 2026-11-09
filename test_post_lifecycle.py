@@ -15,15 +15,22 @@ os.environ['ENV'] = 'testing'
 os.environ['TESTING'] = 'true'
 os.environ['SECRET_KEY'] = 'test-secret-key-unit-b-lifecycle-32bytes'
 _tmp_dir = tempfile.TemporaryDirectory()
-os.environ['POSTPILOT_DATA_DIR'] = _tmp_dir.name
-os.environ['DATABASE_URL'] = f"sqlite:///{Path(_tmp_dir.name) / 'unit_b_test.db'}"
+_lifecycle_db_path = Path(_tmp_dir.name) / 'unit_b_test.db'
+_lifecycle_db_url = f"sqlite:///{_lifecycle_db_path}"
 
+import config
 import app
 import database
 
 class TestPostLifecycle(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._orig_config_db_url = getattr(config, 'DATABASE_URL', None)
+        cls._orig_env_db_url = os.environ.get('DATABASE_URL')
+        cls._orig_env_data_dir = os.environ.get('POSTPILOT_DATA_DIR')
+        os.environ['POSTPILOT_DATA_DIR'] = _tmp_dir.name
+        os.environ['DATABASE_URL'] = _lifecycle_db_url
+        config.DATABASE_URL = _lifecycle_db_url
         database.init_db()
         cls.app = app.app
         cls.app.config['TESTING'] = True
@@ -35,6 +42,16 @@ class TestPostLifecycle(unittest.TestCase):
             _tmp_dir.cleanup()
         except Exception:
             pass
+        if cls._orig_env_db_url:
+            os.environ['DATABASE_URL'] = cls._orig_env_db_url
+        else:
+            os.environ.pop('DATABASE_URL', None)
+        if cls._orig_env_data_dir:
+            os.environ['POSTPILOT_DATA_DIR'] = cls._orig_env_data_dir
+        else:
+            os.environ.pop('POSTPILOT_DATA_DIR', None)
+        if cls._orig_config_db_url:
+            config.DATABASE_URL = cls._orig_config_db_url
 
     def setUp(self):
         self.client = self.app.test_client()

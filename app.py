@@ -2351,7 +2351,7 @@ def create_draft_endpoint():
                     campaign_id = row['id']
                 else:
                     cur = conn.execute(
-                        "INSERT INTO campaigns (organization_id, brand_id, name, description, status) VALUES (?, ?, ?, ?, 'active')",
+                        "INSERT INTO campaigns (organization_id, brand_id, name, brief, status) VALUES (?, ?, ?, ?, 'active')",
                         (org_id, brand_id, f"{brand['name']} General Content", "Default campaign for publishing drafts")
                     )
                     campaign_id = cur.lastrowid

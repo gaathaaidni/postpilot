@@ -28,6 +28,7 @@ import app
 class TestStandaloneWorkerLifecycle(unittest.TestCase):
 
     def setUp(self):
+        self._orig_db_url = getattr(config, 'DATABASE_URL', None)
         self.temp_dir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.temp_dir, "test_worker_lifecycle.db")
         config.DATABASE_URL = f"sqlite:///{self.db_path}"
@@ -41,6 +42,8 @@ class TestStandaloneWorkerLifecycle(unittest.TestCase):
                 os.rmdir(self.temp_dir)
         except Exception:
             pass
+        if hasattr(self, '_orig_db_url') and self._orig_db_url:
+            config.DATABASE_URL = self._orig_db_url
 
     def test_worker_lease_acquisition_and_standby(self):
         """Worker 1 acquires lease; Worker 2 enters standby; Worker 1 shutdown frees lease."""
