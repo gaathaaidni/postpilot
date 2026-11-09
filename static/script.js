@@ -974,13 +974,13 @@ function renderAccounts(container) {
         <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); color: #ffffff; border: none;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                 <div>
-                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">Meta Social Ecosystem Assets</h2>
-                    <p style="color: #94a3b8; font-size: 0.9rem;">Verified Facebook Pages and linked Instagram accounts currently configured in PostPilot</p>
+                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">Connected Social Accounts</h2>
+                    <p style="color: #94a3b8; font-size: 0.9rem;">Multi-platform social accounts and brand integrations managed under current organization</p>
                 </div>
-                <div style="display: flex; gap: 0.5rem;">
-                    <span class="platform-pill meta" style="background: rgba(255,255,255,0.12); color: #ffffff; border-color: rgba(255,255,255,0.2);">
-                        <i class="fa-brands fa-meta"></i> Graph API v19.0
-                    </span>
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                    <button class="btn btn-sm btn-secondary" onclick="refreshAccountsList()" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: #fff;">
+                        <i class="fa-solid fa-rotate"></i> Refresh Accounts
+                    </button>
                     <span class="platform-pill" style="background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3);">
                         <i class="fa-solid fa-shield-halved"></i> Secrets Protected
                     </span>
@@ -988,263 +988,9 @@ function renderAccounts(container) {
             </div>
         </div>
 
-        <div class="accounts-grid">
-            <!-- Account 1: Nexora Suite -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: linear-gradient(135deg, #0284c7 0%, #38bdf8 100%);">
-                            <i class="fa-solid fa-earth-americas"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Nexora Suite</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem;">
-                                <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> Facebook Page</span>
-                                <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Instagram</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-check"></i> Linked</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Facebook Page ID</span>
-                        <code class="account-detail-value">967550829768297</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Instagram Profile</span>
-                        <code class="account-detail-value">@nexora_suite</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Focus / Niche</span>
-                        <span class="account-detail-value">Tour & Destination Packages</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Automation Pipeline</span>
-                        <span class="account-detail-value">Channel <code>tour</code></span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('tour')" style="flex: 1;">
-                        <i class="fa-solid fa-list-check"></i> View Post Queue
-                    </button>
-                    <button class="btn btn-sm btn-secondary" onclick="openModal('add', null, 'tour')" title="Compose for Nexora Suite">
-                        <i class="fa-solid fa-pen"></i> Compose
-                    </button>
-                </div>
-            </div>
-
-            <!-- Account 2: Phoenix International -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: linear-gradient(135deg, #16a34a 0%, #4ade80 100%);">
-                            <i class="fa-solid fa-passport"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Phoenix International</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> Facebook Page</span>
-                                <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Instagram</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-check"></i> Linked</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Facebook Page ID</span>
-                        <code class="account-detail-value">954901604381882</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Instagram Profile</span>
-                        <code class="account-detail-value">@phoenixbygaatha</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Instagram ID</span>
-                        <code class="account-detail-value">17841471822022390</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Focus / Niche</span>
-                        <span class="account-detail-value">Immigration &amp; Visa Consulting</span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('nz')" style="flex: 1;">
-                        <i class="fa-solid fa-list-check"></i> View Post Queue
-                    </button>
-                    <button class="btn btn-sm btn-secondary" onclick="openModal('add', null, 'nz')" title="Compose for Phoenix">
-                        <i class="fa-solid fa-pen"></i> Compose
-                    </button>
-                </div>
-            </div>
-
-            <!-- Account 3: Gaatha AI -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: linear-gradient(135deg, #9333ea 0%, #c084fc 100%);">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Gaatha AI</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem;">
-                                <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> Facebook Page</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-check"></i> Linked</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Facebook Page ID</span>
-                        <code class="account-detail-value">1028368893692590</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Focus / Niche</span>
-                        <span class="account-detail-value">AI Narratives &amp; Cultural Heritage</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Automation Pipeline</span>
-                        <span class="account-detail-value">Channel <code>gaatha</code></span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('gaatha')" style="flex: 1;">
-                        <i class="fa-solid fa-list-check"></i> View Post Queue
-                    </button>
-                    <button class="btn btn-sm btn-secondary" onclick="openModal('add', null, 'gaatha')" title="Compose for Gaatha AI">
-                        <i class="fa-solid fa-pen"></i> Compose
-                    </button>
-                </div>
-            </div>
-
-            <!-- Account 4: GAATHA Suite -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%);">
-                            <i class="fa-solid fa-building-flag"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>GAATHA Suite</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> Facebook Page</span>
-                                <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Instagram</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-check"></i> Linked</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Facebook Page ID</span>
-                        <code class="account-detail-value">104690782333066</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Instagram Handle</span>
-                        <code class="account-detail-value">@gaathasuite</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Focus / Niche</span>
-                        <span class="account-detail-value">Brand Marketing &amp; Automation</span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('composer')" style="flex: 1;">
-                        <i class="fa-solid fa-pen-to-square"></i> Compose Post
-                    </button>
-                </div>
-            </div>
-
-            <!-- Account 5: Grahak Chetna -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);">
-                            <i class="fa-solid fa-scale-balanced"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Grahak Chetna</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> Facebook Page</span>
-                                <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Instagram</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-check"></i> Linked</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Facebook Page ID</span>
-                        <code class="account-detail-value">61571408331302</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Instagram Handle</span>
-                        <code class="account-detail-value">@grahak.chetna</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Focus / Niche</span>
-                        <span class="account-detail-value">Consumer Rights &amp; Advocacy</span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('composer')" style="flex: 1;">
-                        <i class="fa-solid fa-pen-to-square"></i> Compose Post
-                    </button>
-                </div>
-            </div>
-
-            <!-- Account 6: Instagram Dual Sync -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: var(--ig-gradient);">
-                            <i class="fa-brands fa-instagram"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Instagram Sync Hub</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem;">
-                                <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Graph API Sync</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-sync"></i> Synchronized</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Accounts Synced</span>
-                        <span class="account-detail-value">@phoenixbygaatha, @gaathasuite, @grahak.chetna</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Sync Mechanism</span>
-                        <span class="account-detail-value">Bidirectional Graph API Sync</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Automation Pipeline</span>
-                        <span class="account-detail-value">Channel <code>insta</code></span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('insta')" style="flex: 1;">
-                        <i class="fa-solid fa-list-check"></i> View Sync Queue
-                    </button>
-                    <button class="btn btn-sm btn-secondary" onclick="openModal('add', null, 'insta')" title="Compose for Instagram">
-                        <i class="fa-solid fa-pen"></i> Compose
-                    </button>
-                </div>
+        <div class="accounts-grid" id="dynamic-accounts-grid">
+            <div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: #94a3b8;">
+                <i class="fa-solid fa-spinner fa-spin"></i> Loading connected accounts...
             </div>
         </div>
 
@@ -1464,7 +1210,153 @@ function renderAccounts(container) {
         </div>
     `;
 
+    setTimeout(refreshAccountsList, 20);
     setTimeout(loadLinkedInStatus, 50);
+}
+
+// ==========================================================================
+// DYNAMIC SOCIAL ACCOUNTS MANAGEMENT (Phase 2)
+// ==========================================================================
+async function refreshAccountsList() {
+    const grid = document.getElementById('dynamic-accounts-grid');
+    if (!grid) return;
+    grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: #64748b;"><i class="fa-solid fa-spinner fa-spin"></i> Loading connected accounts...</div>';
+    
+    try {
+        const res = await fetch('/api/accounts');
+        if (!res.ok) throw new Error('Failed to fetch accounts from server');
+        const data = await res.json();
+        const accounts = data.accounts || [];
+
+        if (accounts.length === 0) {
+            grid.innerHTML = `
+                <div class="card" style="grid-column: 1/-1; text-align: center; padding: 2.5rem;">
+                    <i class="fa-solid fa-circle-nodes" style="font-size: 2.5rem; color: #94a3b8; margin-bottom: 0.75rem;"></i>
+                    <h3 style="margin-bottom: 0.5rem;">No Social Accounts Configured</h3>
+                    <p style="color: #64748b;">Connect your Facebook, Instagram, LinkedIn, or WhatsApp accounts to start managing and scheduling posts.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const platformIcons = {
+            'facebook': { icon: 'fa-brands fa-facebook', class: 'facebook', bg: '#1877f2', label: 'Facebook Page' },
+            'instagram': { icon: 'fa-brands fa-instagram', class: 'instagram', bg: 'var(--ig-gradient)', label: 'Instagram Professional' },
+            'linkedin': { icon: 'fa-brands fa-linkedin', class: 'linkedin', bg: '#0a66c2', label: 'LinkedIn Company' },
+            'whatsapp': { icon: 'fa-brands fa-whatsapp', class: 'whatsapp', bg: '#25d366', label: 'WhatsApp Business Cloud' }
+        };
+
+        grid.innerHTML = accounts.map(acc => {
+            const pInfo = platformIcons[acc.platform] || { icon: 'fa-solid fa-share-nodes', class: 'other', bg: '#475569', label: acc.platform };
+            const isConnected = acc.status === 'connected';
+            const statusClass = isConnected ? 'status-running' : (acc.status === 'expired' ? 'status-warning' : 'status-stopped');
+            const statusIcon = isConnected ? 'fa-check' : (acc.status === 'expired' ? 'fa-triangle-exclamation' : 'fa-circle-xmark');
+            const lastVerified = acc.last_verified_at ? new Date(acc.last_verified_at).toLocaleString() : 'Never verified';
+            
+            return `
+                <div class="account-card" id="account-card-${acc.id}">
+                    <div class="account-card-header">
+                        <div class="account-identity">
+                            <div class="account-avatar" style="background: ${pInfo.bg}; color: #ffffff;">
+                                <i class="${pInfo.icon}"></i>
+                            </div>
+                            <div class="account-meta">
+                                <h3>${escapeHtml(acc.account_name || 'Account')}</h3>
+                                <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
+                                    <span class="platform-pill ${pInfo.class}">
+                                        <i class="${pInfo.icon}"></i> ${pInfo.label}
+                                    </span>
+                                    ${acc.app_identifier ? `<span class="platform-pill" style="background: #f1f5f9; color: #475569;"><i class="fa-solid fa-cube"></i> ${escapeHtml(acc.app_identifier)}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        <span class="status-badge ${statusClass}"><i class="fa-solid ${statusIcon}"></i> ${acc.status.toUpperCase()}</span>
+                    </div>
+
+                    <div class="account-details-list">
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Identifier / ID</span>
+                            <code class="account-detail-value">${escapeHtml(acc.account_identifier || 'N/A')}</code>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Token Status</span>
+                            <span class="badge ${acc.token_status === 'valid' ? 'badge-success' : 'badge-warning'}">${escapeHtml(acc.token_status)}</span>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Permissions</span>
+                            <span class="account-detail-value" style="font-size: 0.8rem;">${escapeHtml(acc.permissions_scope || 'Standard publish')}</span>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Last Verified</span>
+                            <span class="account-detail-value" style="font-size: 0.8rem;">${lastVerified}</span>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem; flex-wrap: wrap;">
+                        <button class="btn btn-sm btn-secondary" onclick="verifySocialAccount(${acc.id})" id="btn-verify-${acc.id}" style="flex: 1;" title="Test and verify connection">
+                            <i class="fa-solid fa-circle-check"></i> Verify
+                        </button>
+                        ${acc.reconnect_url ? `
+                            <a class="btn btn-sm btn-primary" href="${acc.reconnect_url}" style="flex: 1; text-align: center; text-decoration: none;">
+                                <i class="fa-solid fa-arrow-rotate-right"></i> Reconnect
+                            </a>
+                        ` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="disconnectSocialAccount(${acc.id}, '${escapeHtml(acc.account_name)}')" title="Disconnect account">
+                            <i class="fa-solid fa-link-slash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (err) {
+        grid.innerHTML = `<div class="card" style="grid-column: 1/-1; color: #ef4444; padding: 1.5rem;"><i class="fa-solid fa-triangle-exclamation"></i> Error loading accounts: ${escapeHtml(err.message)}</div>`;
+    }
+}
+
+async function verifySocialAccount(accountId) {
+    const btn = document.getElementById(`btn-verify-${accountId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Verifying...';
+    }
+    try {
+        const res = await fetch(`/api/accounts/verify/${accountId}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Account connection verified successfully', 'success');
+            refreshAccountsList();
+        } else {
+            showToast(`Verification failed: ${data.error || 'Unknown error'}`, 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Verify';
+            }
+        }
+    } catch (err) {
+        showToast(`Verification request error: ${err.message}`, 'error');
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Verify';
+        }
+    }
+}
+
+async function disconnectSocialAccount(accountId, accountName) {
+    if (!confirm(`Are you sure you want to disconnect ${accountName || 'this account'}? Scheduled posts for this account will need reconnection.`)) {
+        return;
+    }
+    try {
+        const res = await fetch(`/api/accounts/${accountId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('Account disconnected successfully', 'success');
+            refreshAccountsList();
+        } else {
+            showToast(`Failed to disconnect: ${data.error || 'Unknown error'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`Disconnect request error: ${err.message}`, 'error');
+    }
 }
 
 // Helper to query and update LinkedIn integration status in the UI

@@ -49,18 +49,34 @@ class FacebookAdapter(BasePlatformAdapter):
             }
         return pages
 
-    def resolve_page_id(self, target_identifier: Optional[str] = None) -> Optional[str]:
-        """Resolves target page ID from key (suite/phoenix/gaatha_ai) or direct numeric ID."""
-        if not target_identifier:
-            return config.FB_PAGE_ID_SUITE or config.FB_PAGE_ID_PHOENIX
+    def resolve_page_id(self, target_identifier: Optional[str] = None, brand_id: Optional[int] = None, organization_id: int = 1) -> Optional[str]:
+        """Resolves target page ID based on brand assignment or explicit identifier."""
+        # 1. Brand-specific resolution from database or config mapping
+        if brand_id:
+            try:
+                import database
+                acct = database.get_social_account_for_brand(organization_id, brand_id, 'facebook')
+                if acct and acct.get('account_identifier'):
+                    return str(acct['account_identifier'])
+            except Exception:
+                pass
+            if brand_id == 5:
+                return str(config.FB_PAGE_ID_PHOENIX)
+            elif brand_id == 1:
+                return str(config.FB_PAGE_ID_SUITE)
+            elif brand_id == 6 and getattr(config, 'FB_PAGE_ID_GAATHA_AI', None):
+                return str(config.FB_PAGE_ID_GAATHA_AI)
 
-        clean = str(target_identifier).strip()
-        pages = self.get_configured_pages()
-        if clean in pages:
-            return pages[clean]['page_id']
-        if clean.isdigit():
-            return clean
-        return config.FB_PAGE_ID_SUITE
+        # 2. Key or explicit identifier lookup
+        if target_identifier:
+            clean = str(target_identifier).strip()
+            pages = self.get_configured_pages()
+            if clean in pages:
+                return pages[clean]['page_id']
+            if clean:
+                return clean
+
+        return str(config.FB_PAGE_ID_SUITE or config.FB_PAGE_ID_PHOENIX)
 
     def validate_connection(self, page_id: Optional[str] = None) -> Dict[str, Any]:
         """Validates configuration and token presence without making external requests."""
@@ -115,9 +131,13 @@ class FacebookAdapter(BasePlatformAdapter):
         if not valid:
             return {'success': False, 'platform': self.platform_key, 'error': err}
 
-        page_id = self.resolve_page_id(payload.get('page_id') or payload.get('channel_key'))
+        page_id = self.resolve_page_id(
+            target_identifier=payload.get('page_id') or payload.get('channel_key'),
+            brand_id=payload.get('brand_id'),
+            organization_id=payload.get('organization_id', 1)
+        )
         if not page_id:
-            return {'success': False, 'platform': self.platform_key, 'error': 'No Facebook Page ID resolved.'}
+            return {'success': False, 'platform': self.platform_key, 'error': 'No Facebook Page ID resolved for target brand.'}
 
         message = payload.get('message') or payload.get('caption') or ''
         image_filename = payload.get('image_filename') or payload.get('media_filename')
@@ -158,6 +178,30 @@ class FacebookAdapter(BasePlatformAdapter):
             'page_id': page_id,
             'simulated': False,
             'response': res
+        }
+
+    def classify_error(self, error: Any) -> Dict[str, Any]:
+        """Classifies Meta Graph API errors into standardized categories."""
+        err_str = str(error)
+        err_code = 'PLATFORM_ERROR'
+        is_retryable = False
+
+        if '190' in err_str or 'token' in err_str.lower() or 'expired' in err_str.lower():
+            err_code = 'TOKEN_EXPIRED'
+        elif '100' in err_str or 'param' in err_str.lower() or 'invalid' in err_str.lower():
+            err_code = 'INVALID_PARAMETER'
+        elif '200' in err_str or 'permission' in err_str.lower():
+            err_code = 'PERMISSION_DENIED'
+        elif 'transient' in err_str.lower() or 'timeout' in err_str.lower() or '500' in err_str:
+            err_code = 'TRANSIENT_ERROR'
+            is_retryable = True
+
+        return {
+            'success': False,
+            'platform': self.platform_key,
+            'error_code': err_code,
+            'error_message': err_str,
+            'retryable': is_retryable
         }
 
     def get_status(self) -> Dict[str, Any]:

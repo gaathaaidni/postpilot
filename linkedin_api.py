@@ -680,7 +680,8 @@ def audit_linkedin_status() -> Dict[str, Any]:
 def create_organization_post(organization_id: str,
                              text: str,
                              app_key: Optional[str] = None,
-                             access_token: Optional[str] = None) -> Dict[str, Any]:
+                             access_token: Optional[str] = None,
+                             image_urn: Optional[str] = None) -> Dict[str, Any]:
     """
     Creates a post on LinkedIn for an organization using the modern REST Posts API.
     Endpoint: POST https://api.linkedin.com/rest/posts
@@ -719,6 +720,7 @@ def create_organization_post(organization_id: str,
             'app_key': resolved_app,
             'simulated': True,
             'success': True,
+            'image_urn': image_urn,
             'message': 'Simulated publishing: POSTPILOT_PUBLISHING_ENABLED is 0'
         }
 
@@ -747,6 +749,13 @@ def create_organization_post(organization_id: str,
         "lifecycleState": "PUBLISHED",
         "isReshareDisabledByAuthor": False
     }
+
+    if image_urn:
+        payload["content"] = {
+            "media": {
+                "id": image_urn
+            }
+        }
 
     try:
         resp = requests.post(REST_POSTS_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
@@ -794,3 +803,84 @@ def create_organization_post(organization_id: str,
         safe_e = sanitize_log_message(str(e))
         logger.error(f"Exception publishing to LinkedIn organization {clean_org_id}: {safe_e}")
         return {'success': False, 'error': safe_e}
+
+
+# ==============================================================================
+# LinkedIn REST Media Upload Procedures (Phase 2)
+# ==============================================================================
+
+def initialize_image_upload(organization_id: str,
+                            app_key: Optional[str] = None,
+                            access_token: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Step 1: Initializes an image upload request on LinkedIn modern REST API.
+    POST https://api.linkedin.com/rest/images?action=initializeUpload
+    """
+    clean_org_id = str(organization_id).replace("urn:li:organization:", "").strip()
+    resolved_app = normalize_app_key(app_key) if app_key else APP_GAATHA_VENTURES
+
+    if not config.is_publishing_enabled():
+        return {
+            'success': True,
+            'upload_url': f"https://api.linkedin.com/mediaUpload/simulated_{int(time.time())}",
+            'image_urn': f"urn:li:image:sim_{int(time.time() * 1000)}",
+            'simulated': True
+        }
+
+    token = access_token or get_active_token(resolved_app)
+    if not token:
+        return {'success': False, 'error': f"Missing access token for {resolved_app}."}
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "LinkedIn-Version": REST_API_VERSION,
+        "X-Restli-Protocol-Version": "2.0.0",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "initializeUploadRequest": {
+            "owner": f"urn:li:organization:{clean_org_id}"
+        }
+    }
+    try:
+        resp = requests.post(
+            "https://api.linkedin.com/rest/images?action=initializeUpload",
+            json=payload,
+            headers=headers,
+            timeout=DEFAULT_TIMEOUT
+        )
+        if resp.status_code in (200, 201):
+            val = resp.json().get('value', {})
+            return {
+                'success': True,
+                'upload_url': val.get('uploadUrl'),
+                'image_urn': val.get('image'),
+                'simulated': False
+            }
+        err = sanitize_log_message(resp.text)
+        return {'success': False, 'error': f"LinkedIn image initializeUpload failed: {err}"}
+    except Exception as e:
+        return {'success': False, 'error': sanitize_log_message(str(e))}
+
+
+def upload_image_file(upload_url: str, file_path: str, access_token: Optional[str] = None) -> bool:
+    """
+    Step 2: Uploads raw image binary to the designated LinkedIn uploadUrl.
+    PUT {upload_url}
+    """
+    if not config.is_publishing_enabled() or 'simulated' in upload_url:
+        return True
+
+    if not os.path.isfile(file_path):
+        return False
+
+    try:
+        with open(file_path, 'rb') as f:
+            data = f.read()
+
+        headers = {"Content-Type": "application/octet-stream"}
+        resp = requests.put(upload_url, data=data, headers=headers, timeout=DEFAULT_TIMEOUT)
+        return resp.status_code in (200, 201)
+    except Exception as e:
+        logger.error(f"Error uploading image binary to LinkedIn: {sanitize_log_message(str(e))}")
+        return False

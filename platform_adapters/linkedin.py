@@ -91,7 +91,7 @@ class LinkedInAdapter(BasePlatformAdapter):
 
     def publish(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Publishes an organization update to LinkedIn.
+        Publishes an organization update to LinkedIn supporting both text and images.
         When POSTPILOT_PUBLISHING_ENABLED=0, intercepts and returns simulated result.
         """
         valid, err = self.validate_content(payload)
@@ -99,25 +99,77 @@ class LinkedInAdapter(BasePlatformAdapter):
             return {'success': False, 'platform': self.platform_key, 'error': err}
 
         text = payload.get('text') or payload.get('message') or payload.get('caption') or ''
-        app_key = self.resolve_app_key(payload.get('organization_id'), payload.get('app_key'))
+        app_key = payload.get('app_key')
+        if not app_key and payload.get('brand_id'):
+            try:
+                import database
+                acct = database.get_social_account_for_brand(
+                    payload.get('organization_id', 1),
+                    payload['brand_id'],
+                    'linkedin'
+                )
+                if acct and acct.get('app_identifier'):
+                    app_key = acct['app_identifier']
+            except Exception:
+                pass
+
+        app_key = self.resolve_app_key(payload.get('organization_id'), app_key)
         app_cfg = linkedin_api.get_app_config(app_key)
         org_id = payload.get('organization_id') or app_cfg['org_id']
 
-        # Delegate to linkedin_api.create_organization_post (handles safe mode internally)
+        image_filename = payload.get('image_filename') or payload.get('media_filename')
+        image_urn = None
+
+        if image_filename:
+            # 3-Step Modern REST Image Upload procedure
+            init_res = linkedin_api.initialize_image_upload(org_id, app_key=app_key)
+            if init_res.get('success'):
+                upload_url = init_res.get('upload_url')
+                image_urn = init_res.get('image_urn')
+                if upload_url and os.path.isfile(image_filename):
+                    linkedin_api.upload_image_file(upload_url, image_filename)
+
+        # Create organization post referencing uploaded media if available
         res = linkedin_api.create_organization_post(
             organization_id=org_id,
             text=text,
-            app_key=app_key
+            app_key=app_key,
+            image_urn=image_urn
         )
 
         return {
             'success': res.get('success', True),
             'platform': self.platform_key,
             'external_post_id': res.get('id') or res.get('share_urn'),
+            'image_urn': image_urn,
             'app_key': app_key,
             'organization_id': org_id,
             'simulated': res.get('simulated', False),
             'error': res.get('error')
+        }
+
+    def classify_error(self, error: Any) -> Dict[str, Any]:
+        """Classifies LinkedIn API errors into standardized categories."""
+        err_str = str(error)
+        err_code = 'PLATFORM_ERROR'
+        is_retryable = False
+
+        if '401' in err_str or 'token' in err_str.lower() or 'expired' in err_str.lower():
+            err_code = 'TOKEN_EXPIRED'
+        elif '403' in err_str or 'w_organization_social' in err_str.lower():
+            err_code = 'CM_API_REQUIRED'
+        elif '3000' in err_str or 'validation' in err_str.lower():
+            err_code = 'INVALID_PAYLOAD'
+        elif 'timeout' in err_str.lower() or '500' in err_str:
+            err_code = 'TRANSIENT_ERROR'
+            is_retryable = True
+
+        return {
+            'success': False,
+            'platform': self.platform_key,
+            'error_code': err_code,
+            'error_message': err_str,
+            'retryable': is_retryable
         }
 
     def get_status(self) -> Dict[str, Any]:

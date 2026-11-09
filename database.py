@@ -266,6 +266,7 @@ def _ensure_indexes(conn):
         ("idx_media_assets_org_created", "CREATE INDEX IF NOT EXISTS idx_media_assets_org_created ON media_assets(organization_id, created_at)"),
         ("idx_sub_plans_code", "CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_plans_code ON subscription_plans(code)"),
         ("idx_org_subs_org", "CREATE UNIQUE INDEX IF NOT EXISTS idx_org_subs_org ON organization_subscriptions(organization_id)"),
+        ("idx_social_accounts_org_brand", "CREATE INDEX IF NOT EXISTS idx_social_accounts_org_brand ON social_accounts(organization_id, brand_id, platform)"),
     ]
     for name, sql in indexes:
         try:
@@ -646,6 +647,28 @@ def init_db():
             )
         ''')
 
+        # 20. Connected social accounts table (Multi-brand & platform credentials)
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS social_accounts (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                brand_id INTEGER NOT NULL,
+                platform TEXT NOT NULL,
+                account_name TEXT NOT NULL,
+                account_identifier TEXT NOT NULL,
+                access_token_encrypted TEXT,
+                refresh_token_encrypted TEXT,
+                token_expires_at TIMESTAMP,
+                status TEXT DEFAULT 'connected',
+                permissions_scope TEXT,
+                last_verified_at TIMESTAMP,
+                app_identifier TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, brand_id, platform, account_identifier)
+            )
+        ''')
+
         conn.commit()
 
         # Non-destructive migrations for existing tables
@@ -655,6 +678,7 @@ def init_db():
         _ensure_column_exists(conn, 'users', 'organization_id', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'is_active', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'email', 'TEXT')
+        _ensure_column_exists(conn, 'scheduled_posts', 'external_post_id', 'TEXT')
 
         # Seed default commercial subscription plans
         default_plans = [
@@ -726,6 +750,9 @@ def init_db():
 
     # Seed default organizations & brands
     init_default_organizations_and_brands()
+
+    # Seed default connected social accounts
+    init_default_social_accounts()
 
     # Seed default admin user if none exists
     init_default_admin()
@@ -806,6 +833,145 @@ def init_default_organizations_and_brands():
                     (name, slug, desc)
                 )
         conn.commit()
+
+def init_default_social_accounts():
+    """Initializes connected social accounts mapped to brand workspaces."""
+    with get_db_connection() as conn:
+        b1 = conn.execute("SELECT id FROM brands WHERE organization_id = 1 AND id = 1").fetchone()
+        b5 = conn.execute("SELECT id FROM brands WHERE organization_id = 1 AND (slug = 'phoenix-by-gaatha' OR id = 5)").fetchone()
+        b1_id = b1['id'] if b1 else 1
+        b5_id = b5['id'] if b5 else b1_id
+
+        default_accounts = [
+            (1, b1_id, 'facebook', 'GAATHA Suite', str(config.FB_PAGE_ID_SUITE or '967550829768297'), 'connected', 'pages_manage_posts,pages_read_engagement', None),
+            (1, b1_id, 'instagram', '@nexora_suite', str(config.INSTA_ID_SUITE or '17841471822022390'), 'connected', 'instagram_basic,instagram_content_publish', None),
+            (1, b1_id, 'linkedin', 'Aidni Global LLP', '145240694', 'connected', 'w_member_social,w_organization_social', 'aidni_global'),
+            (1, b1_id, 'linkedin', 'Gaatha Ventures Sh.p.k.', '145250613', 'connected', 'w_member_social,w_organization_social', 'gaatha_ventures'),
+            (1, b1_id, 'whatsapp', 'GAATHA WhatsApp Business', str(getattr(config, 'WHATSAPP_PHONE_NUMBER_ID', None) or '103290292839210'), 'connected', 'whatsapp_business_messaging', None),
+            (1, b5_id, 'facebook', 'Phoenix International', str(config.FB_PAGE_ID_PHOENIX or '100089146197321'), 'connected', 'pages_manage_posts,pages_read_engagement', None),
+            (1, b5_id, 'instagram', '@phoenixbygaatha', str(config.INSTA_ID_PHOENIX or '17841405309211880'), 'connected', 'instagram_basic,instagram_content_publish', None),
+        ]
+
+        for org_id, brand_id, platform, acct_name, acct_id, status, scope, app_id in default_accounts:
+            try:
+                if is_postgres():
+                    conn.execute('''
+                        INSERT INTO social_accounts (
+                            organization_id, brand_id, platform, account_name,
+                            account_identifier, status, permissions_scope, app_identifier
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (organization_id, brand_id, platform, account_identifier) DO UPDATE SET
+                            account_name = EXCLUDED.account_name,
+                            status = EXCLUDED.status,
+                            updated_at = CURRENT_TIMESTAMP
+                    ''', (org_id, brand_id, platform, acct_name, acct_id, status, scope, app_id))
+                else:
+                    conn.execute('''
+                        INSERT INTO social_accounts (
+                            organization_id, brand_id, platform, account_name,
+                            account_identifier, status, permissions_scope, app_identifier
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(organization_id, brand_id, platform, account_identifier) DO UPDATE SET
+                            account_name = excluded.account_name,
+                            status = excluded.status,
+                            updated_at = CURRENT_TIMESTAMP
+                    ''', (org_id, brand_id, platform, acct_name, acct_id, status, scope, app_id))
+            except Exception as e:
+                logger.warning(f"Notice seeding social account {platform}:{acct_id}: {e}")
+        conn.commit()
+
+def get_social_accounts(organization_id=1, brand_id=None, platform=None):
+    """
+    Retrieves connected social accounts scoped to organization and optional brand.
+    Strictly redacts/excludes credentials and secret tokens.
+    """
+    query = '''
+        SELECT sa.id, sa.organization_id, sa.brand_id, b.name as brand_name,
+               sa.platform, sa.account_name, sa.account_identifier,
+               sa.token_expires_at, sa.status, sa.permissions_scope,
+               sa.last_verified_at, sa.app_identifier, sa.created_at, sa.updated_at
+        FROM social_accounts sa
+        LEFT JOIN brands b ON sa.brand_id = b.id
+        WHERE sa.organization_id = ?
+    '''
+    params = [organization_id]
+    if brand_id is not None:
+        query += " AND sa.brand_id = ?"
+        params.append(brand_id)
+    if platform:
+        query += " AND sa.platform = ?"
+        params.append(platform.lower())
+    query += " ORDER BY sa.brand_id, sa.platform, sa.id"
+
+    with get_db_connection() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_social_account_for_brand(organization_id, brand_id, platform, account_identifier=None):
+    """Retrieves specific connected account for backend execution."""
+    query = '''
+        SELECT * FROM social_accounts
+        WHERE organization_id = ? AND brand_id = ? AND platform = ?
+    '''
+    params = [organization_id, brand_id, platform.lower()]
+    if account_identifier:
+        query += " AND account_identifier = ?"
+        params.append(str(account_identifier))
+    query += " LIMIT 1"
+
+    with get_db_connection() as conn:
+        row = conn.execute(query, tuple(params)).fetchone()
+        return dict(row) if row else None
+
+def upsert_social_account(organization_id, brand_id, platform, account_name, account_identifier,
+                          status='connected', permissions_scope=None, app_identifier=None,
+                          token_expires_at=None, access_token=None):
+    """Inserts or updates a connected social account."""
+    with get_db_connection() as conn:
+        if is_postgres():
+            conn.execute('''
+                INSERT INTO social_accounts (
+                    organization_id, brand_id, platform, account_name,
+                    account_identifier, status, permissions_scope, app_identifier,
+                    token_expires_at, access_token_encrypted, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (organization_id, brand_id, platform, account_identifier) DO UPDATE SET
+                    account_name = EXCLUDED.account_name,
+                    status = EXCLUDED.status,
+                    permissions_scope = COALESCE(EXCLUDED.permissions_scope, social_accounts.permissions_scope),
+                    token_expires_at = COALESCE(EXCLUDED.token_expires_at, social_accounts.token_expires_at),
+                    access_token_encrypted = COALESCE(EXCLUDED.access_token_encrypted, social_accounts.access_token_encrypted),
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (organization_id, brand_id, platform.lower(), account_name, str(account_identifier),
+                  status, permissions_scope, app_identifier, token_expires_at, access_token))
+        else:
+            conn.execute('''
+                INSERT INTO social_accounts (
+                    organization_id, brand_id, platform, account_name,
+                    account_identifier, status, permissions_scope, app_identifier,
+                    token_expires_at, access_token_encrypted, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(organization_id, brand_id, platform, account_identifier) DO UPDATE SET
+                    account_name = excluded.account_name,
+                    status = excluded.status,
+                    permissions_scope = COALESCE(excluded.permissions_scope, social_accounts.permissions_scope),
+                    token_expires_at = COALESCE(excluded.token_expires_at, social_accounts.token_expires_at),
+                    access_token_encrypted = COALESCE(excluded.access_token_encrypted, social_accounts.access_token_encrypted),
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (organization_id, brand_id, platform.lower(), account_name, str(account_identifier),
+                  status, permissions_scope, app_identifier, token_expires_at, access_token))
+        conn.commit()
+        return True
+
+def delete_social_account(account_id, organization_id=1):
+    """Disconnects and removes a social account respecting tenant boundaries."""
+    with get_db_connection() as conn:
+        res = conn.execute(
+            "DELETE FROM social_accounts WHERE id = ? AND organization_id = ?",
+            (account_id, organization_id)
+        )
+        conn.commit()
+        return res.rowcount > 0
 
 # --- Organization & Brand Multi-Tenancy Management ---
 def get_organization_by_id(org_id):
@@ -1676,10 +1842,11 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
         conn.commit()
         return claimed
 
-def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=None):
+def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=None, external_post_id=None):
     """
     Marks a claimed scheduled post as published or failed/retried.
     Enforces worker claim ownership, tenant & channel isolation,
+    stores external post IDs upon success,
     and sanitizes any error message before storage.
     """
     now = _utcnow()
@@ -1711,9 +1878,9 @@ def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=
 
         if success:
             res = conn.execute(
-                "UPDATE scheduled_posts SET status = 'published', published_at = ?, locked_by = NULL, locked_at = NULL, "
-                "updated_at = ? WHERE id = ? AND locked_by = ? AND status = 'publishing'",
-                (now_str, now_str, schedule_id, worker_id)
+                "UPDATE scheduled_posts SET status = 'published', published_at = ?, external_post_id = COALESCE(?, external_post_id), "
+                "locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ? AND locked_by = ? AND status = 'publishing'",
+                (now_str, external_post_id, now_str, schedule_id, worker_id)
             )
             if res.rowcount == 0:
                 return False
