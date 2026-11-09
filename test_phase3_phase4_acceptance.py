@@ -83,6 +83,35 @@ class TestPublicLegalPagesAcceptance(unittest.TestCase):
             self.assertIn('Engineered Publishing Safeguards', content)
             self.assertNotIn('[INSERT_', content)
 
+    def test_05_inhouse_branding_and_public_registration_disabled(self):
+        """Public registration disabled and misleading SaaS labels removed from login and public pages."""
+        orig_local = config.LOCAL_MODE
+        orig_env = config.APP_ENV
+        try:
+            config.LOCAL_MODE = False
+            config.APP_ENV = 'production'
+            resp = self.client.get('/login')
+            self.assertEqual(resp.status_code, 200)
+            login_html = resp.data.decode('utf-8')
+            self.assertNotIn('Register Org', login_html)
+            self.assertNotIn('Universal SaaS', login_html)
+            self.assertIn('Sign In to PostPilot', login_html)
+            self.assertIn('Internal Operations', login_html)
+
+            # Public POST /api/auth/register-org must be rejected with 403 Forbidden
+            application_module.app.config['TESTING'] = False
+            reg_resp = self.client.post('/api/auth/register-org', json={
+                'org_name': 'Unauthorized Org',
+                'username': 'hackuser',
+                'password': 'password123'
+            })
+            self.assertEqual(reg_resp.status_code, 403)
+            self.assertEqual(reg_resp.get_json().get('code'), 'REGISTRATION_DISABLED')
+        finally:
+            config.LOCAL_MODE = orig_local
+            config.APP_ENV = orig_env
+            application_module.app.config['TESTING'] = True
+
 
 class TestGlobalDraftsManagementAcceptance(unittest.TestCase):
     """Phase 3 Acceptance: Global Draft Workspace endpoints with multi-tenant isolation."""

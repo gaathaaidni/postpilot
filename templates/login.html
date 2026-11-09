@@ -316,7 +316,7 @@
             </div>
             <h1 class="brand-name">PostPilot</h1>
             <p class="brand-tagline" style="display: flex; align-items: center; justify-content: center; gap: 0.4rem;">
-                <span>BY GAATHA</span> &middot; <span style="color: #60a5fa;">Universal SaaS v2.5</span>
+                <span>BY GAATHA</span> &middot; <span style="color: #60a5fa;">Internal Operations v2.5</span>
             </p>
             <div class="channel-pill-row">
                 <span class="channel-mini-pill"><i class="fa-brands fa-meta"></i> Meta Verified</span>
@@ -325,16 +325,6 @@
                 <span class="channel-mini-pill"><i class="fa-brands fa-whatsapp"></i> WhatsApp Cloud</span>
             </div>
         </header>
-
-        <!-- Auth Mode Switcher -->
-        <div class="auth-tabs" style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; background: rgba(15, 23, 42, 0.6); padding: 0.25rem; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06);">
-            <button type="button" id="tab-login-btn" onclick="switchAuthTab('login')" style="flex: 1; padding: 0.5rem 0.75rem; border-radius: 8px; border: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: var(--primary); color: #fff; transition: all 0.2s;">
-                <i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In
-            </button>
-            <button type="button" id="tab-register-btn" onclick="switchAuthTab('register')" style="flex: 1; padding: 0.5rem 0.75rem; border-radius: 8px; border: none; font-size: 0.85rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--text-subtle); transition: all 0.2s;">
-                <i class="fa-solid fa-building-circle-check"></i> Register Org
-            </button>
-        </div>
 
         <div id="login-alert" class="alert-box" role="alert" aria-live="polite">
             <i class="fa-solid fa-circle-exclamation"></i>
@@ -372,77 +362,6 @@
             </button>
         </form>
 
-        <!-- 2. Self-Service Register Organization Form -->
-        <form id="register-form" onsubmit="handleRegister(event)" style="display: none;" novalidate>
-            <div class="form-group">
-                <label for="reg_org_name" class="form-label">Organization Name</label>
-                <div class="input-wrapper">
-                    <i class="fa-solid fa-building input-icon" aria-hidden="true"></i>
-                    <input type="text" id="reg_org_name" class="login-input" placeholder="e.g. Acme Digital Media" required>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="reg_username" class="form-label">Owner Username</label>
-                <div class="input-wrapper">
-                    <i class="fa-solid fa-user input-icon" aria-hidden="true"></i>
-                    <input type="text" id="reg_username" class="login-input" placeholder="e.g. admin" required autocomplete="username">
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="reg_email" class="form-label">Business Email</label>
-                <div class="input-wrapper">
-                    <i class="fa-solid fa-envelope input-icon" aria-hidden="true"></i>
-                    <input type="email" id="reg_email" class="login-input" placeholder="admin@example.com" autocomplete="email">
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="reg_password" class="form-label">Password (Min 8 Characters)</label>
-                <div class="input-wrapper">
-                    <i class="fa-solid fa-lock input-icon" aria-hidden="true"></i>
-                    <input type="password" id="reg_password" class="login-input" placeholder="••••••••" required minlength="8" autocomplete="new-password">
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label for="reg_timezone" class="form-label">Workspace Timezone</label>
-                <div class="input-wrapper">
-                    <i class="fa-solid fa-globe input-icon" aria-hidden="true"></i>
-                    <select id="reg_timezone" class="login-input" style="color: #fff; background: rgba(15, 23, 42, 0.85);">
-                        <option value="Asia/Kolkata" selected>Asia/Kolkata (IST, UTC+05:30)</option>
-                        <option value="UTC">UTC (Coordinated Universal Time)</option>
-                        <option value="America/New_York">America/New_York (EST/EDT)</option>
-                        <option value="Europe/London">Europe/London (GMT/BST)</option>
-                        <option value="Europe/Tirane">Europe/Tirane (CET/CEST)</option>
-                    </select>
-                </div>
-            </div>
-
-            <!-- Mandatory Legal Policy Acknowledgements (Unselected by default) -->
-            <div style="margin: 1.25rem 0 0.5rem 0;">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="reg_terms" name="terms_accepted">
-                    <label for="reg_terms">
-                        I agree to the <a href="/terms" target="_blank" style="color: #60a5fa; text-decoration: underline;">Terms &amp; Conditions</a> and <a href="/agreement" target="_blank" style="color: #60a5fa; text-decoration: underline;">User Agreement</a>.
-                    </label>
-                </div>
-
-                <div class="checkbox-group">
-                    <input type="checkbox" id="reg_privacy" name="privacy_accepted">
-                    <label for="reg_privacy">
-                        I acknowledge and accept the <a href="/privacy" target="_blank" style="color: #60a5fa; text-decoration: underline;">Privacy Policy</a>.
-                    </label>
-                </div>
-            </div>
-
-            <button type="submit" id="register-btn" class="submit-btn" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
-                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
-                <span>Create Organization Account</span>
-            </button>
-        </form>
-
         <!-- Public Footer with Legal & Information Links -->
         <footer class="login-footer">
             <div style="display: flex; justify-content: center; gap: 1rem; margin-bottom: 0.75rem; flex-wrap: wrap; font-size: 0.82rem;">
@@ -454,37 +373,11 @@
                 <span style="color: #475569;">&middot;</span>
                 <a href="/agreement" style="color: #94a3b8; text-decoration: none;">User Agreement</a>
             </div>
-            <span>PostPilot — BY GAATHA &middot; Universal SaaS Suite &middot; Android / Termux / Server</span>
+            <span>PostPilot — BY GAATHA &middot; Internal Operations &middot; Mobile &amp; Desktop</span>
         </footer>
     </main>
 
     <script>
-        function switchAuthTab(mode) {
-            const loginForm = document.getElementById('login-form');
-            const registerForm = document.getElementById('register-form');
-            const loginTabBtn = document.getElementById('tab-login-btn');
-            const regTabBtn = document.getElementById('tab-register-btn');
-            const alertBox = document.getElementById('login-alert');
-
-            alertBox.style.display = 'none';
-
-            if (mode === 'register') {
-                loginForm.style.display = 'none';
-                registerForm.style.display = 'block';
-                regTabBtn.style.background = 'var(--primary)';
-                regTabBtn.style.color = '#fff';
-                loginTabBtn.style.background = 'transparent';
-                loginTabBtn.style.color = 'var(--text-subtle)';
-            } else {
-                registerForm.style.display = 'none';
-                loginForm.style.display = 'block';
-                loginTabBtn.style.background = 'var(--primary)';
-                loginTabBtn.style.color = '#fff';
-                regTabBtn.style.background = 'transparent';
-                regTabBtn.style.color = 'var(--text-subtle)';
-            }
-        }
-
         function togglePasswordVisibility() {
             const passInput = document.getElementById('password');
             const icon = document.getElementById('password-toggle-icon');
@@ -549,89 +442,6 @@
                 alertBox.style.display = 'flex';
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i> <span>Sign In to PostPilot</span>';
-            }
-        }
-
-        async function handleRegister(e) {
-            e.preventDefault();
-            const alertBox = document.getElementById('login-alert');
-            const alertText = document.getElementById('alert-text');
-            const submitBtn = document.getElementById('register-btn');
-            const csrfToken = document.getElementById('csrf_token').value;
-
-            const orgName = document.getElementById('reg_org_name').value.trim();
-            const username = document.getElementById('reg_username').value.trim();
-            const email = document.getElementById('reg_email').value.trim();
-            const password = document.getElementById('reg_password').value;
-            const timezone = document.getElementById('reg_timezone').value;
-            const termsAccepted = document.getElementById('reg_terms').checked;
-            const privacyAccepted = document.getElementById('reg_privacy').checked;
-
-            if (!orgName || !username || !password) {
-                alertText.textContent = 'Organization name, username, and password are required.';
-                alertBox.style.display = 'flex';
-                return;
-            }
-
-            if (password.length < 8) {
-                alertText.textContent = 'Password must be at least 8 characters long.';
-                alertBox.style.display = 'flex';
-                return;
-            }
-
-            if (!termsAccepted) {
-                alertText.textContent = 'You must agree to the Terms of Service & User Agreement.';
-                alertBox.style.display = 'flex';
-                return;
-            }
-
-            if (!privacyAccepted) {
-                alertText.textContent = 'You must acknowledge the Privacy Policy.';
-                alertBox.style.display = 'flex';
-                return;
-            }
-
-            alertBox.style.display = 'none';
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Creating account...</span>';
-
-            try {
-                const res = await fetch('/api/auth/register-org', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken
-                    },
-                    body: JSON.stringify({
-                        org_name: orgName,
-                        username: username,
-                        email: email || null,
-                        password: password,
-                        timezone: timezone,
-                        terms_accepted: true,
-                        privacy_accepted: true,
-                        policy_version: '1.0'
-                    })
-                });
-
-                const data = await res.json();
-
-                if (res.ok && data.status === 'success') {
-                    submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Organization Created! Redirecting...</span>';
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 250);
-                } else {
-                    alertText.textContent = data.error || 'Registration failed. Please review inputs.';
-                    alertBox.style.display = 'flex';
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Create Organization Account</span>';
-                }
-            } catch (err) {
-                alertText.textContent = 'Network or server error during registration.';
-                alertBox.style.display = 'flex';
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<i class="fa-solid fa-circle-check"></i> <span>Create Organization Account</span>';
             }
         }
     </script>

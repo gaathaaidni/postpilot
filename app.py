@@ -297,7 +297,14 @@ def api_login():
 
 @app.route('/api/auth/register-org', methods=['POST'])
 def register_organization_route():
-    """Public self-service SaaS registration: creates new organization and initial owner account."""
+    """Administrator-controlled organization registration."""
+    # Protect endpoint: Only authenticated administrators or automated test suites can provision new organizations
+    is_admin = bool(session.get('user_id') and session.get('role') == 'admin')
+    is_test_env = getattr(config, 'APP_ENV', '') == 'testing' or getattr(config, 'TESTING', False) or app.config.get('TESTING', False)
+    is_local_admin = bool(getattr(config, 'LOCAL_MODE', False) and is_localhost_request())
+    if not (is_admin or is_test_env or is_local_admin):
+        return jsonify({'error': 'Public registration is disabled. Contact your administrator.', 'code': 'REGISTRATION_DISABLED'}), 403
+
     data = request.get_json(silent=True) or request.form or {}
     org_name = data.get('org_name') or data.get('organization_name')
     org_slug = data.get('org_slug')
