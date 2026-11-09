@@ -21,12 +21,7 @@ import config
 import database
 import timezone_utils
 from validation import validate_platform_creative
-import channel_runner
 import ai_service
-import nexora_suite as tour
-import nexora_by_phoenix_international as visa
-import gaatha_loop as gaatha
-import insta
 import linkedin_api
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] (App) %(message)s")
@@ -41,10 +36,10 @@ app.config['SESSION_COOKIE_HTTPONLY'] = config.SESSION_COOKIE_HTTPONLY
 app.config['SESSION_COOKIE_SAMESITE'] = config.SESSION_COOKIE_SAMESITE
 app.config['SESSION_COOKIE_SECURE'] = config.SESSION_COOKIE_SECURE
 
-VALID_POST_TYPES = {
-    'tour', 'nz', 'gaatha', 'insta',
-    'facebook', 'instagram', 'linkedin', 'whatsapp', 'x', 'twitter'
-}
+RETIRED_LEGACY_CHANNELS = {'tour', 'nz', 'gaatha', 'insta'}
+CANONICAL_CREATION_PLATFORMS = {'facebook', 'instagram', 'linkedin', 'whatsapp', 'x'}
+HISTORICAL_QUERY_PLATFORMS = CANONICAL_CREATION_PLATFORMS | RETIRED_LEGACY_CHANNELS
+VALID_POST_TYPES = HISTORICAL_QUERY_PLATFORMS
 
 def validate_file(file):
     """Validates file extension, MIME type, and image integrity."""
@@ -182,85 +177,13 @@ local_threads_lock = threading.Lock()
 def _local_status_callback(task_name, is_running, message='', current_post=None):
     database.set_task_state(task_name, is_running=is_running, status=message, current_post_summary=current_post)
 
-for ch in channel_runner.CHANNELS.values():
-    ch.set_status_callback(_local_status_callback)
-insta.set_status_callback(_local_status_callback)
-
-insta_suite = insta.InstaSync(config.FB_PAGE_ID_SUITE, config.INSTA_ID_SUITE, 'insta_suite')
-insta_phoenix = insta.InstaSync(config.FB_PAGE_ID_PHOENIX, config.INSTA_ID_PHOENIX, 'insta_phoenix')
-
 def _start_local_task(task_name):
-    """Spawns an in-process daemon thread for local/Termux mode if lease is available."""
-    # Under production, app.py never runs in-process workers. Standalone worker.py handles execution.
-    if config.APP_ENV == 'production':
-        return
-
-    # Check if a standalone worker daemon is already holding the lease
-    app_worker_id = f"app-{os.getpid()}"
-    active_lease = database.get_active_worker_lease('scheduler')
-    if active_lease and active_lease.get('worker_id') != app_worker_id:
-        logger.info(f"Standalone worker ({active_lease.get('worker_id')}) is active; skipping in-process thread for {task_name}")
-        return
-
-    # Acquire/renew lease for in-process application worker
-    database.acquire_worker_lease(app_worker_id, 'scheduler', ttl_seconds=3600)
-
-    with local_threads_lock:
-        if task_name in channel_runner.CHANNELS:
-            if task_name in local_worker_threads and local_worker_threads[task_name].is_alive():
-                logger.info(f"Task thread '{task_name}' already running; ignoring duplicate start.")
-                return
-            ch = channel_runner.get_channel(task_name)
-            state = database.get_task_state(task_name)
-            ch.set_interval(state.get('interval', ch.default_interval))
-            ch.stop_event.clear()
-            th = threading.Thread(target=ch.run, daemon=True, name=f"Local-{task_name}")
-            th.start()
-            local_worker_threads[task_name] = th
-        elif task_name == 'insta':
-            th1 = local_worker_threads.get('insta_suite')
-            th2 = local_worker_threads.get('insta_phoenix')
-            if (th1 and th1.is_alive()) or (th2 and th2.is_alive()):
-                logger.info("Instagram sync threads already running; ignoring duplicate start.")
-                return
-            state = database.get_task_state('insta')
-            interval = state.get('interval', config.INSTA_INTERVAL)
-            insta_suite.set_interval(interval)
-            insta_phoenix.set_interval(interval)
-            insta_suite.stop_event.clear()
-            insta_phoenix.stop_event.clear()
-            th1 = threading.Thread(target=insta_suite.run, daemon=True, name="Local-insta-suite")
-            th2 = threading.Thread(target=insta_phoenix.run, daemon=True, name="Local-insta-phoenix")
-            th1.start()
-            th2.start()
-            local_worker_threads['insta_suite'] = th1
-            local_worker_threads['insta_phoenix'] = th2
+    """Legacy automation threads are retired. Scheduled publishing is handled via worker lease."""
+    pass
 
 def _stop_local_task(task_name):
-    """Halts an in-process thread for local/Termux mode."""
-    with local_threads_lock:
-        if task_name in channel_runner.CHANNELS:
-            ch = channel_runner.get_channel(task_name)
-            ch.stop()
-            th = local_worker_threads.pop(task_name, None)
-            if th and th.is_alive():
-                th.join(timeout=1.0)
-        elif task_name == 'insta':
-            insta_suite.stop()
-            insta_phoenix.stop()
-            th1 = local_worker_threads.pop('insta_suite', None)
-            th2 = local_worker_threads.pop('insta_phoenix', None)
-            if th1 and th1.is_alive():
-                th1.join(timeout=1.0)
-            if th2 and th2.is_alive():
-                th2.join(timeout=1.0)
-
-        # If no active local threads remain, release worker lease
-        if not local_worker_threads:
-            try:
-                database.release_worker_lease(f"app-{os.getpid()}", 'scheduler')
-            except Exception:
-                pass
+    """Legacy automation threads are retired."""
+    pass
 
 # --- Page Routes ---
 
@@ -621,7 +544,7 @@ def linkedin_publish_post():
 @login_required
 def get_posts(post_type):
     """Retrieves all posts for a specific type scoped to the active organization."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type not in HISTORICAL_QUERY_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     org_id = session.get('organization_id', 1)
     posts = database.load_posts_by_type(post_type, organization_id=org_id)
@@ -632,7 +555,9 @@ def get_posts(post_type):
 @csrf_protect
 def add_post(post_type):
     """Creates a new post record scoped to the active organization."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({'error': f"Legacy channel '{post_type}' is permanently retired and cannot be created.", 'code': 'LEGACY_CHANNEL_RETIRED'}), 400
+    if post_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json() or {}
     message = data.get('message', '').strip()
@@ -648,7 +573,9 @@ def add_post(post_type):
 @csrf_protect
 def update_post(post_type, post_id):
     """Updates an existing post ensuring channel-scoped and organization-scoped record access."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({'error': f"Legacy channel '{post_type}' is permanently retired and cannot be created.", 'code': 'LEGACY_CHANNEL_RETIRED'}), 400
+    if post_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json() or {}
     message = data.get('message')
@@ -665,7 +592,9 @@ def update_post(post_type, post_id):
 @csrf_protect
 def delete_post(post_type, post_id):
     """Deletes a post ensuring channel-scoped and organization-scoped record access."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({'error': f"Legacy channel '{post_type}' is permanently retired and cannot be created.", 'code': 'LEGACY_CHANNEL_RETIRED'}), 400
+    if post_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     org_id = session.get('organization_id', 1)
         
@@ -683,7 +612,9 @@ def delete_post(post_type, post_id):
 @csrf_protect
 def delete_all_posts(post_type):
     """Deletes all posts for a type scoped to organization and cleans up orphaned media."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({'error': f"Legacy channel '{post_type}' is permanently retired and cannot be created.", 'code': 'LEGACY_CHANNEL_RETIRED'}), 400
+    if post_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     org_id = session.get('organization_id', 1)
 
@@ -1115,7 +1046,9 @@ def get_status():
 @login_required
 def get_interval(post_type):
     """Retrieves posting interval for a task type."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({'error': f"Legacy channel '{post_type}' is permanently retired and cannot be created.", 'code': 'LEGACY_CHANNEL_RETIRED'}), 400
+    if post_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     state = database.get_task_state(post_type) or {}
     return jsonify({'interval': state.get('interval', 1800)})
@@ -1125,7 +1058,9 @@ def get_interval(post_type):
 @csrf_protect
 def set_interval(post_type):
     """Sets posting interval for a task type in seconds."""
-    if post_type not in VALID_POST_TYPES:
+    if post_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({'error': f"Legacy automation channel '{post_type}' is permanently retired.", 'code': 'LEGACY_CHANNEL_RETIRED'}), 400
+    if post_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type'}), 400
     data = request.get_json() or {}
     interval = data.get('interval')
@@ -1133,14 +1068,7 @@ def set_interval(post_type):
         return jsonify({'error': 'Invalid interval value'}), 400
 
     database.set_task_state(post_type, interval_seconds=interval)
-
-    # Update in-memory module if running locally
-    if post_type == 'tour': tour.set_interval(interval)
-    elif post_type == 'nz': visa.set_interval(interval)
-    elif post_type == 'gaatha': gaatha.set_interval(interval)
-    elif post_type == 'insta':
-        insta_suite.set_interval(interval)
-        insta_phoenix.set_interval(interval)
+    return jsonify({'success': True, 'interval': interval})
 
     return jsonify({'success': True, 'interval': interval})
 
@@ -1292,8 +1220,15 @@ def add_scheduled():
     """Schedules a post with strict validation, persistent date/time, and idempotency."""
     data = request.get_json() or {}
     post_type = data.get('post_type')
-    if not post_type or post_type not in VALID_POST_TYPES:
+    clean_p_type = str(post_type).strip().lower() if post_type else ''
+    if clean_p_type in RETIRED_LEGACY_CHANNELS:
+        return jsonify({
+            'error': f"Legacy channel '{clean_p_type}' is permanently retired and cannot be scheduled.",
+            'code': 'LEGACY_CHANNEL_RETIRED'
+        }), 400
+    if not clean_p_type or clean_p_type not in CANONICAL_CREATION_PLATFORMS:
         return jsonify({'error': 'Invalid post type', 'code': 'INVALID_POST_TYPE'}), 400
+    post_type = clean_p_type
 
     scheduled_for = data.get('scheduled_for')
     if scheduled_for is None or str(scheduled_for).strip() == "":

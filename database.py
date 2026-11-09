@@ -965,7 +965,14 @@ def get_post_by_id(post_id, post_type=None, organization_id=None):
         row = conn.execute(query, tuple(params)).fetchone()
         return dict(row) if row else None
 
+RETIRED_LEGACY_CHANNELS = {'tour', 'nz', 'gaatha', 'insta'}
+CANONICAL_CREATION_PLATFORMS = {'facebook', 'instagram', 'linkedin', 'whatsapp', 'x'}
+HISTORICAL_QUERY_PLATFORMS = CANONICAL_CREATION_PLATFORMS | RETIRED_LEGACY_CHANNELS
+
 def add_post(post_type, message, image_filename, organization_id=1, brand_id=None):
+    clean_type = str(post_type).strip().lower()
+    if clean_type in RETIRED_LEGACY_CHANNELS:
+        raise ValueError(f"Legacy channel '{clean_type}' is permanently retired and cannot be created.")
     with get_db_connection() as conn:
         if is_postgres():
             cur = conn.execute(
@@ -1299,12 +1306,16 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
             f"Invalid initial post status: '{initial_status}'. Must be one of: {', '.join(sorted(ALLOWED_INITIAL_STATUSES))}."
         )
 
-    valid_post_types = {'tour', 'nz', 'gaatha', 'insta', 'facebook', 'instagram', 'linkedin', 'x', 'twitter', 'whatsapp'}
     clean_post_type = str(post_type).strip().lower()
     if clean_post_type == 'twitter':
         clean_post_type = 'x'
-    if clean_post_type not in valid_post_types:
-        raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of: {', '.join(sorted(valid_post_types))}.")
+    if clean_post_type in RETIRED_LEGACY_CHANNELS:
+        raise ValueError(
+            f"Legacy channel '{clean_post_type}' is permanently retired and cannot be scheduled. "
+            f"Please use a canonical platform ({', '.join(sorted(CANONICAL_CREATION_PLATFORMS))})."
+        )
+    if clean_post_type not in CANONICAL_CREATION_PLATFORMS:
+        raise ValueError(f"Invalid post_type: '{post_type}'. Must be one of: {', '.join(sorted(CANONICAL_CREATION_PLATFORMS))}.")
     post_type = clean_post_type
     camp_id_val = kwargs.get('campaign_id')
     draft_id_val = kwargs.get('draft_id')
@@ -1389,10 +1400,7 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
             )
         return created_rec
 
-VALID_SCHEDULED_POST_TYPES = {
-    'tour', 'nz', 'gaatha', 'insta',
-    'facebook', 'instagram', 'linkedin', 'whatsapp', 'x', 'twitter'
-}
+VALID_SCHEDULED_POST_TYPES = HISTORICAL_QUERY_PLATFORMS
 
 def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id=None,
                         start_date=None, end_date=None, limit=100, offset=0, target_timezone=None):

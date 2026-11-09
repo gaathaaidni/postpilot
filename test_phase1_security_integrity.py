@@ -86,18 +86,18 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
     def test_01_cross_channel_update_prevention(self):
         """
         Known Defect Resolution:
-        A post created under 'tour' CANNOT be updated through the 'nz' endpoint or
+        A post created under 'facebook' CANNOT be updated through the 'instagram' endpoint or
         with a mismatched post_type in database operations.
         """
         csrf = self._login()
 
-        # 1. Create a genuine post under channel 'tour'
-        tour_id = database.add_post('tour', 'Original Tour Message', 'tour.png', organization_id=1)
+        # 1. Create a genuine post under channel 'facebook'
+        tour_id = database.add_post('facebook', 'Original Tour Message', 'tour.png', organization_id=1)
         self.assertIsNotNone(tour_id)
 
-        # 2. Attempt to update tour_id through the 'nz' API route -> MUST FAIL (404)
+        # 2. Attempt to update tour_id through the 'instagram' API route -> MUST FAIL (404)
         nz_update_res = self.client.put(
-            f'/api/posts/nz/{tour_id}',
+            f'/api/posts/instagram/{tour_id}',
             json={'message': 'Illegitimate Cross-Channel Mutation'},
             headers={'X-CSRFToken': csrf}
         )
@@ -106,13 +106,13 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         # 3. Verify in database that tour post content was NOT modified
         post = database.get_post_by_id(tour_id)
         self.assertEqual(post['message'], 'Original Tour Message')
-        self.assertEqual(post['post_type'], 'tour')
+        self.assertEqual(post['post_type'], 'facebook')
 
         # 4. Attempt direct database update with mismatched post_type -> MUST return False
         db_update_result = database.update_post_by_id(
             tour_id,
             message='Direct DB Attack',
-            post_type='nz',
+            post_type='instagram',
             organization_id=1
         )
         self.assertFalse(db_update_result, "Database update with mismatched post_type must return False")
@@ -124,17 +124,17 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
     def test_02_cross_channel_delete_prevention(self):
         """
         Known Defect Resolution:
-        A post created under 'tour' CANNOT be deleted through the 'nz' endpoint or
+        A post created under 'facebook' CANNOT be deleted through the 'instagram' endpoint or
         with a mismatched post_type in database operations.
         """
         csrf = self._login()
 
-        # 1. Create a post under 'tour'
-        tour_id = database.add_post('tour', 'Protected Tour Post', 'tour_keep.png', organization_id=1)
+        # 1. Create a post under 'facebook'
+        tour_id = database.add_post('facebook', 'Protected Tour Post', 'tour_keep.png', organization_id=1)
 
-        # 2. Attempt to delete tour_id through the 'nz' API route -> MUST FAIL (404)
+        # 2. Attempt to delete tour_id through the 'instagram' API route -> MUST FAIL (404)
         nz_del_res = self.client.delete(
-            f'/api/posts/nz/{tour_id}',
+            f'/api/posts/instagram/{tour_id}',
             headers={'X-CSRFToken': csrf}
         )
         self.assertEqual(nz_del_res.status_code, 404, "Cross-channel delete must return 404 Not Found")
@@ -143,13 +143,13 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         self.assertIsNotNone(database.get_post_by_id(tour_id))
 
         # 4. Attempt direct database delete with mismatched post_type -> MUST return (None, False)
-        img_fn, success = database.delete_post_by_id(tour_id, post_type='nz', organization_id=1)
+        img_fn, success = database.delete_post_by_id(tour_id, post_type='instagram', organization_id=1)
         self.assertFalse(success, "Database delete with mismatched post_type must return False")
         self.assertIsNone(img_fn)
 
-        # 5. Clean delete through correct channel 'tour' -> MUST succeed
+        # 5. Clean delete through correct channel 'facebook' -> MUST succeed
         tour_del_res = self.client.delete(
-            f'/api/posts/tour/{tour_id}',
+            f'/api/posts/facebook/{tour_id}',
             headers={'X-CSRFToken': csrf}
         )
         self.assertEqual(tour_del_res.status_code, 200)
@@ -169,18 +169,18 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         self.assertIsNotNone(org2_id)
 
         # Create post in Org 1 (GAATHA)
-        p_org1 = database.add_post('gaatha', 'GAATHA Internal Strategy', None, organization_id=1)
+        p_org1 = database.add_post('linkedin', 'GAATHA Internal Strategy', None, organization_id=1)
 
         # Create post in Org 2
-        p_org2 = database.add_post('gaatha', 'Org 2 Private Marketing', None, organization_id=org2_id)
+        p_org2 = database.add_post('linkedin', 'Org 2 Private Marketing', None, organization_id=org2_id)
 
         # 1. Scoped listings
-        org1_posts = database.load_posts_by_type('gaatha', organization_id=1)
+        org1_posts = database.load_posts_by_type('linkedin', organization_id=1)
         org1_ids = [p['id'] for p in org1_posts]
         self.assertIn(p_org1, org1_ids)
         self.assertNotIn(p_org2, org1_ids, "Org 1 listing must NEVER leak Org 2 posts")
 
-        org2_posts = database.load_posts_by_type('gaatha', organization_id=org2_id)
+        org2_posts = database.load_posts_by_type('linkedin', organization_id=org2_id)
         org2_ids = [p['id'] for p in org2_posts]
         self.assertIn(p_org2, org2_ids)
         self.assertNotIn(p_org1, org2_ids, "Org 2 listing must NEVER leak Org 1 posts")
@@ -189,7 +189,7 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         cross_update = database.update_post_by_id(
             p_org1,
             message='Tampered by Org 2',
-            post_type='gaatha',
+            post_type='linkedin',
             organization_id=org2_id
         )
         self.assertFalse(cross_update, "Cross-org post update must return False")
@@ -197,7 +197,7 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         # 3. Cross-org delete attempt in DB
         img_fn, cross_delete = database.delete_post_by_id(
             p_org1,
-            post_type='gaatha',
+            post_type='linkedin',
             organization_id=org2_id
         )
         self.assertFalse(cross_delete, "Cross-org post deletion must return False")
@@ -295,7 +295,7 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         create_res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'tour',
+                'post_type': 'facebook',
                 'scheduled_for': target_time,
                 'message': 'Scheduled Launch Campaign Post',
                 'image_filename': 'launch.png'
@@ -306,11 +306,11 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         sched_data = json.loads(create_res.data)
         sched_id = sched_data['id']
         self.assertEqual(sched_data['status'], 'scheduled')
-        self.assertEqual(sched_data['post_type'], 'tour')
+        self.assertEqual(sched_data['post_type'], 'facebook')
         self.assertIn('scheduled_for', sched_data)
 
         # 2. Retrieve scheduled posts list via API
-        list_res = self.client.get('/api/schedule?post_type=tour')
+        list_res = self.client.get('/api/schedule?post_type=facebook')
         self.assertEqual(list_res.status_code, 200)
         items = json.loads(list_res.data)
         matched = [item for item in items if item['id'] == sched_id]
@@ -341,7 +341,7 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         # Create a post that is already due (scheduled in the past)
         past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
         sp = database.create_scheduled_post(
-            post_type='nz',
+            post_type='instagram',
             scheduled_for=past_time,
             message='Due Post for Concurrency Testing',
             organization_id=1
@@ -395,7 +395,7 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
 
         # Simulate crashed worker that locked a post 400 seconds ago
         sp = database.create_scheduled_post(
-            post_type='tour',
+            post_type='facebook',
             scheduled_for=past_time,
             message='Crashed Worker Post',
             organization_id=1
@@ -424,14 +424,14 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         """
         idem_key = "test-idempotency-key-uuid-98765"
         sp1 = database.create_scheduled_post(
-            post_type='gaatha',
+            post_type='linkedin',
             scheduled_for="2026-11-04 10:00:00",
             message='Idempotent Post Attempt 1',
             idempotency_key=idem_key,
             organization_id=1
         )
         sp2 = database.create_scheduled_post(
-            post_type='gaatha',
+            post_type='linkedin',
             scheduled_for="2026-11-04 10:00:00",
             message='Idempotent Post Attempt 2 (Duplicate)',
             idempotency_key=idem_key,
@@ -487,7 +487,7 @@ class TestPhase1SecurityAndIntegrity(unittest.TestCase):
         Verify init_db() executes safely on existing tables without data corruption or loss.
         """
         # Create a post
-        p_id = database.add_post('tour', 'Pre-Migration Post', 'pre.png', organization_id=1)
+        p_id = database.add_post('facebook', 'Pre-Migration Post', 'pre.png', organization_id=1)
         self.assertIsNotNone(p_id)
 
         # Re-run init_db()

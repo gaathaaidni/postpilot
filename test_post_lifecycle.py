@@ -59,7 +59,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'tour',
+                'post_type': 'facebook',
                 'scheduled_for': past_due,
                 'message': 'Draft Campaign Post',
                 'status': 'draft',
@@ -86,7 +86,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'nz',
+                'post_type': 'instagram',
                 'scheduled_for': past_due,
                 'message': 'Visa Campaign Needing Approval',
                 'status': 'pending_approval',
@@ -114,7 +114,7 @@ class TestPostLifecycle(unittest.TestCase):
         res1 = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'gaatha',
+                'post_type': 'linkedin',
                 'scheduled_for': future_time,
                 'message': 'Gaatha Approval Post',
                 'status': 'pending_approval'
@@ -137,7 +137,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'tour',
+                'post_type': 'facebook',
                 'scheduled_for': future_time,
                 'message': 'Ready for review',
                 'status': 'pending_approval'
@@ -161,7 +161,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'nz',
+                'post_type': 'instagram',
                 'scheduled_for': future_time,
                 'message': 'Pending Post for Rejection',
                 'status': 'pending_approval'
@@ -197,7 +197,7 @@ class TestPostLifecycle(unittest.TestCase):
         res1 = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'gaatha',
+                'post_type': 'linkedin',
                 'scheduled_for': past_time,
                 'message': 'Audit Trail Lifecycle Post',
                 'status': 'draft',
@@ -242,7 +242,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'tour',
+                'post_type': 'facebook',
                 'scheduled_for': past_time,
                 'message': 'Post destined to fail',
                 'allow_past': True
@@ -284,7 +284,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'tour',
+                'post_type': 'facebook',
                 'scheduled_for': future_time,
                 'message': 'Org 1 Secret Campaign',
                 'status': 'pending_approval'
@@ -353,7 +353,7 @@ class TestPostLifecycle(unittest.TestCase):
                 res = self.client.post(
                     '/api/schedule',
                     json={
-                        'post_type': 'tour',
+                        'post_type': 'facebook',
                         'scheduled_for': future_time,
                         'message': f'Post with illegal status {inv_status}',
                         'status': inv_status
@@ -370,7 +370,7 @@ class TestPostLifecycle(unittest.TestCase):
                 # 2. Database function level test
                 with self.assertRaises(ValueError):
                     database.create_scheduled_post(
-                        post_type='tour',
+                        post_type='facebook',
                         scheduled_for=future_time,
                         message='Direct DB insertion illegal status',
                         initial_status=inv_status
@@ -394,7 +394,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'nz',
+                'post_type': 'instagram',
                 'scheduled_for': future_time,
                 'message': 'Contributor direct schedule attempt',
                 'status': 'scheduled'
@@ -408,7 +408,7 @@ class TestPostLifecycle(unittest.TestCase):
         res_ok = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'nz',
+                'post_type': 'instagram',
                 'scheduled_for': future_time,
                 'message': 'Contributor draft submission',
                 'status': 'pending_approval'
@@ -429,7 +429,7 @@ class TestPostLifecycle(unittest.TestCase):
         res = self.client.post(
             '/api/schedule',
             json={
-                'post_type': 'tour',
+                'post_type': 'facebook',
                 'scheduled_for': future_time,
                 'message': 'Race Condition Test Post',
                 'status': 'pending_approval'
@@ -507,22 +507,22 @@ class TestPostLifecycle(unittest.TestCase):
         and channel matching when updating last_posted_at on base posts.
         """
         with database.get_db_connection() as conn:
-            # 1. Base post in Org 1, channel 'tour'
+            # 1. Base post in Org 1, channel 'facebook'
             conn.execute(
                 "INSERT INTO posts (id, post_type, message, organization_id, last_posted_at) "
-                "VALUES (1001, 'tour', 'Org 1 Tour Post', 1, NULL) "
+                "VALUES (1001, 'facebook', 'Org 1 Tour Post', 1, NULL) "
                 "ON CONFLICT(id) DO UPDATE SET last_posted_at = NULL"
             )
-            # 2. Base post in Org 2, channel 'tour'
+            # 2. Base post in Org 2, channel 'facebook'
             conn.execute(
                 "INSERT INTO posts (id, post_type, message, organization_id, last_posted_at) "
-                "VALUES (1002, 'tour', 'Org 2 Tour Post', 2, NULL) "
+                "VALUES (1002, 'facebook', 'Org 2 Tour Post', 2, NULL) "
                 "ON CONFLICT(id) DO UPDATE SET last_posted_at = NULL"
             )
-            # 3. Base post in Org 1, channel 'nz'
+            # 3. Base post in Org 1, channel 'instagram'
             conn.execute(
                 "INSERT INTO posts (id, post_type, message, organization_id, last_posted_at) "
-                "VALUES (1003, 'nz', 'Org 1 NZ Post', 1, NULL) "
+                "VALUES (1003, 'instagram', 'Org 1 NZ Post', 1, NULL) "
                 "ON CONFLICT(id) DO UPDATE SET last_posted_at = NULL"
             )
             conn.commit()
@@ -531,7 +531,7 @@ class TestPostLifecycle(unittest.TestCase):
 
         # Schedule post in Org 1 referencing post 1001
         sched_rec = database.create_scheduled_post(
-            post_type='tour',
+            post_type='facebook',
             scheduled_for=past_time,
             post_id=1001,
             organization_id=1,
@@ -556,7 +556,7 @@ class TestPostLifecycle(unittest.TestCase):
         valid_res = database.complete_scheduled_post(sched_id, "worker-proc-alpha", success=True)
         self.assertTrue(valid_res)
 
-        # Post 1001 (matching Org 1 and channel 'tour') MUST have updated last_posted_at
+        # Post 1001 (matching Org 1 and channel 'facebook') MUST have updated last_posted_at
         with database.get_db_connection() as conn:
             p1001 = conn.execute("SELECT last_posted_at FROM posts WHERE id = 1001").fetchone()
             self.assertIsNotNone(p1001['last_posted_at'])

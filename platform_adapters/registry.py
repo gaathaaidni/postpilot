@@ -21,8 +21,9 @@ from platform_adapters.whatsapp import WhatsAppCloudAdapter
 logger = logging.getLogger(__name__)
 
 CANONICAL_PLATFORMS = {'facebook', 'instagram', 'linkedin', 'whatsapp'}
-LEGACY_CHANNELS = {'tour', 'nz', 'gaatha', 'insta'}
-ALL_PLATFORMS = CANONICAL_PLATFORMS | LEGACY_CHANNELS
+RETIRED_LEGACY_CHANNELS = {'tour', 'nz', 'gaatha', 'insta'}
+LEGACY_CHANNELS = RETIRED_LEGACY_CHANNELS
+ALL_PLATFORMS = CANONICAL_PLATFORMS | RETIRED_LEGACY_CHANNELS
 
 
 class PlatformRegistry:
@@ -46,8 +47,8 @@ class PlatformRegistry:
     @classmethod
     def get_adapter(cls, platform_key: str) -> Optional[BasePlatformAdapter]:
         """
-        Retrieves the platform adapter for a canonical platform key or legacy channel.
-        Normalizes keys and maps legacy channels to Facebook or Instagram adapters.
+        Retrieves the platform adapter for a canonical platform key.
+        Legacy channels ('tour', 'nz', 'gaatha', 'insta') return None because they are retired.
         """
         cls._initialize()
         if not platform_key:
@@ -61,13 +62,7 @@ class PlatformRegistry:
         if normalized in cls._adapters:
             return cls._adapters[normalized]
 
-        # Legacy channel mapping
-        if normalized in ('tour', 'nz', 'gaatha'):
-            # Legacy channels published to specific Facebook pages
-            return cls._adapters['facebook']
-        elif normalized == 'insta':
-            return cls._adapters['instagram']
-
+        # Retired legacy channels have no active adapter
         return None
 
     @classmethod
@@ -82,7 +77,7 @@ class PlatformRegistry:
         """Returns True if channel_key is a retired legacy channel."""
         if not channel_key:
             return False
-        return str(channel_key).strip().lower() in LEGACY_CHANNELS
+        return str(channel_key).strip().lower() in RETIRED_LEGACY_CHANNELS
 
     @classmethod
     def list_supported_platforms(cls) -> List[Dict[str, Any]]:
@@ -141,9 +136,21 @@ class PlatformRegistry:
     def dispatch(cls, scheduled_post: Dict[str, Any], worker_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Dispatches a scheduled post record through its designated platform adapter.
+        Legacy channels are blocked from dispatch.
         Enforces content validation and returns a standardized dispatch result.
         """
         p_type = scheduled_post.get('post_type', '')
+        if cls.is_legacy_channel(p_type):
+            err = f"Legacy channel '{p_type}' is permanently retired and cannot be dispatched."
+            logger.warning(err)
+            return {
+                'success': False,
+                'platform': p_type,
+                'error': err,
+                'simulated': False,
+                'is_retired_legacy': True
+            }
+
         adapter = cls.get_adapter(p_type)
         if not adapter:
             err = f"No adapter registered for platform '{p_type}'"
@@ -161,7 +168,8 @@ class PlatformRegistry:
             'brand_id': scheduled_post.get('brand_id'),
             'organization_id': scheduled_post.get('organization_id'),
             'scheduled_post_id': scheduled_post.get('id'),
-            'channel_key': p_type if cls.is_legacy_channel(p_type) else None
+            'recipient_phone': scheduled_post.get('recipient_phone') or scheduled_post.get('phone'),
+            'template_name': scheduled_post.get('template_name')
         }
 
         # Content validation before execution

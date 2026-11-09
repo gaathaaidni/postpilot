@@ -55,25 +55,26 @@ class TestPlatformAdapters(unittest.TestCase):
         self.assertIsInstance(wa, WhatsAppCloudAdapter)
         self.assertEqual(wa.platform_key, 'whatsapp')
 
-    def test_02_registry_legacy_channel_mapping(self):
-        """Verifies legacy channels ('tour', 'nz', 'gaatha', 'insta') map to appropriate adapters."""
-        tour = PlatformRegistry.get_adapter('tour')
-        self.assertIsInstance(tour, FacebookAdapter)
-
-        nz = PlatformRegistry.get_adapter('nz')
-        self.assertIsInstance(nz, FacebookAdapter)
-
-        gaatha = PlatformRegistry.get_adapter('gaatha')
-        self.assertIsInstance(gaatha, FacebookAdapter)
-
-        insta = PlatformRegistry.get_adapter('insta')
-        self.assertIsInstance(insta, InstagramAdapter)
+    def test_02_registry_legacy_channel_retirement(self):
+        """Verifies legacy channels ('tour', 'nz', 'gaatha', 'insta') are retired from active dispatch."""
+        # Retired legacy channels do not resolve to active adapters
+        self.assertIsNone(PlatformRegistry.get_adapter('tour'))
+        self.assertIsNone(PlatformRegistry.get_adapter('nz'))
+        self.assertIsNone(PlatformRegistry.get_adapter('gaatha'))
+        self.assertIsNone(PlatformRegistry.get_adapter('insta'))
 
         self.assertTrue(PlatformRegistry.is_legacy_channel('tour'))
         self.assertTrue(PlatformRegistry.is_legacy_channel('nz'))
         self.assertTrue(PlatformRegistry.is_legacy_channel('gaatha'))
         self.assertTrue(PlatformRegistry.is_legacy_channel('insta'))
         self.assertFalse(PlatformRegistry.is_legacy_channel('facebook'))
+
+        # Dispatching legacy channels is explicitly blocked
+        for leg in ('tour', 'nz', 'gaatha', 'insta'):
+            res = PlatformRegistry.dispatch({'post_type': leg, 'message': 'Test legacy dispatch'})
+            self.assertFalse(res['success'])
+            self.assertIn('permanently retired', res['error'])
+            self.assertTrue(res.get('is_retired_legacy'))
 
     def test_03_metadata_listing(self):
         """Verifies platform registry metadata returns structured info for all platforms."""
