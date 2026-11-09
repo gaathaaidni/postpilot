@@ -225,9 +225,19 @@ def privacy_page():
 
 @app.route('/terms')
 def terms_page():
-    """Renders the public Terms of Service & User Agreement page."""
+    """Renders the public Terms & Conditions page."""
     return render_template(
         'terms.html',
+        csrf_token=get_or_create_csrf_token(),
+        is_authenticated=bool(session.get('user_id'))
+    )
+
+@app.route('/agreement')
+@app.route('/user-agreement')
+def user_agreement_page():
+    """Renders the public User Agreement page."""
+    return render_template(
+        'user-agreement.html',
         csrf_token=get_or_create_csrf_token(),
         is_authenticated=bool(session.get('user_id'))
     )
@@ -2274,6 +2284,98 @@ def generate_campaign_content_route(campaign_id):
     }
     _store_deduplicated_generation(idem_key, status_code, resp_body)
     return jsonify(resp_body), status_code
+
+@app.route('/api/drafts', methods=['GET'])
+@login_required
+def get_all_drafts():
+    """Retrieves all drafts for the active organization with optional filtering by brand, platform, status."""
+    org_id = session.get('organization_id', 1)
+    brand_id = request.args.get('brand_id', type=int)
+    campaign_id = request.args.get('campaign_id', type=int)
+    target_platform = request.args.get('platform') or request.args.get('target_platform')
+    status = request.args.get('status')
+    limit = max(1, min(request.args.get('limit', default=100, type=int), 100))
+    offset = max(request.args.get('offset', default=0, type=int), 0)
+    drafts = database.list_content_drafts(
+        organization_id=org_id,
+        campaign_id=campaign_id,
+        brand_id=brand_id,
+        target_platform=target_platform,
+        status=status,
+        limit=limit,
+        offset=offset
+    )
+    return jsonify({
+        'success': True,
+        'drafts': drafts,
+        'count': len(drafts),
+        'limit': limit,
+        'offset': offset
+    })
+
+@app.route('/api/drafts', methods=['POST'])
+@login_required
+@csrf_protect
+def create_draft_endpoint():
+    """Creates a new draft post with brand, platform, and optional media association."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+
+    brand_id = data.get('brand_id') or 1
+    platform = str(data.get('platform') or data.get('target_platform') or 'facebook').strip().lower()
+    caption = data.get('caption') or data.get('content') or data.get('message') or ''
+    headline = data.get('headline')
+    hashtags = data.get('hashtags')
+    cta = data.get('call_to_action') or data.get('cta')
+    media_asset_id = data.get('media_asset_id')
+    status = data.get('status') or 'draft'
+    user_id = session.get('user_id')
+
+    if not caption.strip():
+        return jsonify({'error': 'Draft caption cannot be empty', 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        brand_id = int(brand_id)
+        brand = database.get_brand_by_id(brand_id, organization_id=org_id)
+        if not brand:
+            return jsonify({'error': f'Brand #{brand_id} not found in active organization', 'code': 'NOT_FOUND'}), 404
+
+        campaign_id = data.get('campaign_id')
+        if not campaign_id:
+            with database.get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT id FROM campaigns WHERE organization_id = ? AND brand_id = ? ORDER BY id ASC LIMIT 1",
+                    (org_id, brand_id)
+                ).fetchone()
+                if row:
+                    campaign_id = row['id']
+                else:
+                    cur = conn.execute(
+                        "INSERT INTO campaigns (organization_id, brand_id, name, description, status) VALUES (?, ?, ?, ?, 'active')",
+                        (org_id, brand_id, f"{brand['name']} General Content", "Default campaign for publishing drafts")
+                    )
+                    campaign_id = cur.lastrowid
+                    conn.commit()
+
+        draft = database.create_content_draft(
+            organization_id=org_id,
+            brand_id=brand_id,
+            campaign_id=campaign_id,
+            target_platform=platform,
+            caption=caption,
+            headline=headline,
+            hashtags=hashtags,
+            call_to_action=cta,
+            status=status,
+            created_by=user_id,
+            media_asset_id=media_asset_id
+        )
+        return jsonify({'success': True, 'draft': draft}), 201
+    except ValueError as e:
+        return jsonify({'error': str(e), 'code': 'VALIDATION_ERROR'}), 400
+    except Exception as e:
+        logger.error(f"Error creating draft: {e}")
+        return jsonify({'error': 'Failed to create draft', 'code': 'SERVER_ERROR'}), 500
 
 @app.route('/api/campaigns/<int:campaign_id>/drafts', methods=['GET'])
 @login_required

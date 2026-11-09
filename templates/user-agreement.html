@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Agreement — PostPilot · BY GAATHA</title>
+    <meta name="description" content="User Agreement for PostPilot — BY GAATHA. Defines user roles, organization access, social account authorization, publishing rights, and acceptable usage.">
+    <meta property="og:title" content="User Agreement — PostPilot · BY GAATHA">
+    <meta property="og:description" content="Comprehensive agreement on authorized account access, multi-tenant organization boundaries, publishing permissions, and data security.">
+    <meta property="og:type" content="website">
+
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="/static/style.css">
+
+    <style>
+        :root {
+            --bg-canvas: #080c14;
+            --bg-surface: #11192b;
+            --bg-surface-elevated: #162035;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-highlight: rgba(59, 130, 246, 0.3);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --accent-gold: #f59e0b;
+            --accent-green: #10b981;
+            --danger: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-subtle: #64748b;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-canvas);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.65;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .public-navbar {
+            background: rgba(11, 17, 32, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-subtle);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            padding: 0.85rem 1.5rem;
+        }
+
+        .public-navbar-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand-block {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .brand-icon-box {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 1.15rem;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+        }
+
+        .brand-text-wrap {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand-title {
+            font-size: 1.12rem;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+            color: #ffffff;
+            line-height: 1.2;
+        }
+
+        .brand-byline {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: var(--accent-gold);
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }
+
+        .nav-links-wrap {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .nav-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.88rem;
+            font-weight: 500;
+            transition: color 0.15s ease;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            color: #ffffff;
+        }
+
+        .nav-action-btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: #ffffff;
+            text-decoration: none;
+            padding: 0.45rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .nav-action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Hero Banner */
+        .legal-header {
+            padding: 3.5rem 1.5rem 2.5rem;
+            background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.12) 0%, transparent 60%),
+                        radial-gradient(circle at top left, rgba(245, 158, 11, 0.08) 0%, transparent 50%),
+                        var(--bg-canvas);
+            border-bottom: 1px solid var(--border-subtle);
+            text-align: center;
+        }
+
+        .badge-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 1rem;
+        }
+
+        .legal-header h1 {
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin: 0 0 0.75rem 0;
+            color: #ffffff;
+        }
+
+        .legal-header p {
+            color: var(--text-muted);
+            font-size: 1rem;
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        .meta-strip {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-top: 1.25rem;
+            font-size: 0.82rem;
+            color: var(--text-subtle);
+            flex-wrap: wrap;
+        }
+
+        /* Layout */
+        .legal-layout {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 2.5rem 1.5rem;
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            gap: 2.5rem;
+        }
+
+        @media (max-width: 860px) {
+            .legal-layout {
+                grid-template-columns: 1fr;
+            }
+            .sidebar-toc {
+                display: none;
+            }
+        }
+
+        /* Sidebar Navigation */
+        .sidebar-toc {
+            position: sticky;
+            top: 5rem;
+            height: fit-content;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+
+        .sidebar-toc h4 {
+            margin: 0 0 0.85rem 0;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-subtle);
+            font-weight: 700;
+        }
+
+        .toc-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .toc-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.35rem 0.5rem;
+            border-radius: 6px;
+            transition: all 0.15s ease;
+        }
+
+        .toc-link:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Content Sections */
+        .prose-section {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 1.75rem 2rem;
+            margin-bottom: 1.75rem;
+        }
+
+        .section-heading {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin: 0 0 1rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+        .section-heading i {
+            color: var(--primary);
+            font-size: 1.15rem;
+        }
+
+        .prose-section p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.7;
+            margin: 0 0 1rem 0;
+        }
+
+        .prose-section p:last-child {
+            margin-bottom: 0;
+        }
+
+        .prose-section ul {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            line-height: 1.7;
+            padding-left: 1.25rem;
+            margin: 0 0 1rem 0;
+        }
+
+        .prose-section li {
+            margin-bottom: 0.4rem;
+        }
+
+        .callout-box {
+            background: rgba(59, 130, 246, 0.08);
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin: 1.25rem 0;
+            color: #bfdbfe;
+        }
+
+        .callout-box.info {
+            background: rgba(16, 185, 129, 0.08);
+            border-color: rgba(16, 185, 129, 0.25);
+            color: #a7f3d0;
+        }
+
+        /* Footer */
+        .public-footer {
+            border-top: 1px solid var(--border-subtle);
+            background: #060910;
+            padding: 3rem 1.5rem 2rem;
+            margin-top: 3rem;
+        }
+
+        .footer-inner {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .footer-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .footer-link {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.88rem;
+            transition: color 0.15s ease;
+        }
+
+        .footer-link:hover, .footer-link.active {
+            color: #ffffff;
+        }
+
+        .footer-bottom {
+            padding-top: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            font-size: 0.82rem;
+            color: var(--text-subtle);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Public Navigation Bar -->
+    <header class="public-navbar">
+        <div class="public-navbar-inner">
+            <a href="/" class="brand-block">
+                <div class="brand-icon-box">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </div>
+                <div class="brand-text-wrap">
+                    <span class="brand-title">PostPilot</span>
+                    <span class="brand-byline">BY GAATHA</span>
+                </div>
+            </a>
+
+            <nav class="nav-links-wrap" aria-label="Main Navigation">
+                <a href="/about" class="nav-link">About Us</a>
+                <a href="/privacy" class="nav-link">Privacy Policy</a>
+                <a href="/terms" class="nav-link">Terms &amp; Conditions</a>
+                <a href="/agreement" class="nav-link active">User Agreement</a>
+                {% if is_authenticated %}
+                <a href="/" class="nav-action-btn"><i class="fa-solid fa-gauge-high"></i> Dashboard</a>
+                {% else %}
+                <a href="/login" class="nav-action-btn"><i class="fa-solid fa-arrow-right-to-bracket"></i> Sign In</a>
+                {% endif %}
+            </nav>
+        </div>
+    </header>
+
+    <!-- Header Banner -->
+    <div class="legal-header">
+        <div class="badge-pill">
+            <i class="fa-solid fa-file-contract"></i> Master User Agreement
+        </div>
+        <h1>PostPilot User Agreement</h1>
+        <p>
+            Governing user registration, organizational access, role permissions, content ownership, and authorized social platform publishing.
+        </p>
+        <div class="meta-strip">
+            <span><i class="fa-solid fa-calendar-check"></i> Effective: November 9, 2026</span>
+            <span><i class="fa-solid fa-shield-halved"></i> Version: 2.1 (Active Baseline)</span>
+            <span><i class="fa-solid fa-building"></i> Gaatha Ventures Sh.p.k. &middot; Aidni Global LLP</span>
+        </div>
+    </div>
+
+    <!-- Layout -->
+    <div class="legal-layout">
+        <aside class="sidebar-toc" aria-label="Table of Contents">
+            <h4>Agreement Sections</h4>
+            <ul class="toc-list">
+                <li><a href="#sec-1" class="toc-link"><i class="fa-solid fa-angle-right"></i> 1. Scope &amp; Eligibility</a></li>
+                <li><a href="#sec-2" class="toc-link"><i class="fa-solid fa-angle-right"></i> 2. Organizations &amp; Roles</a></li>
+                <li><a href="#sec-3" class="toc-link"><i class="fa-solid fa-angle-right"></i> 3. Social Authorization</a></li>
+                <li><a href="#sec-4" class="toc-link"><i class="fa-solid fa-angle-right"></i> 4. Content &amp; Ownership</a></li>
+                <li><a href="#sec-5" class="toc-link"><i class="fa-solid fa-angle-right"></i> 5. Publishing Safety</a></li>
+                <li><a href="#sec-6" class="toc-link"><i class="fa-solid fa-angle-right"></i> 6. Account Security</a></li>
+                <li><a href="#sec-7" class="toc-link"><i class="fa-solid fa-angle-right"></i> 7. Prohibited Misuse</a></li>
+                <li><a href="#sec-8" class="toc-link"><i class="fa-solid fa-angle-right"></i> 8. Revocation &amp; Contact</a></li>
+            </ul>
+        </aside>
+
+        <main>
+            <!-- Section 1 -->
+            <section id="sec-1" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-user-check"></i> 1. Scope &amp; User Registration
+                </h2>
+                <p>
+                    This User Agreement ("Agreement") establishes the terms under which authorized users access and operate <strong>PostPilot — BY GAATHA</strong> ("PostPilot", "the Platform"). Operated collaboratively by <strong>Gaatha Ventures Sh.p.k.</strong> (Albania, Europe) and <strong>Aidni Global LLP</strong> (India) within the <strong>GAATHA technology ecosystem</strong>, PostPilot provides enterprise multi-brand social media scheduling and communication services.
+                </p>
+                <p>
+                    By creating an account, authenticating a session, or performing actions within PostPilot, you agree to comply with this Agreement, our Terms &amp; Conditions, and our Privacy Policy. If you do not possess the authority to represent your organization or agree to these terms, you must not access the platform.
+                </p>
+            </section>
+
+            <!-- Section 2 -->
+            <section id="sec-2" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-sitemap"></i> 2. Organization Membership &amp; Role Hierarchy
+                </h2>
+                <p>
+                    PostPilot enforces strict multi-tenant organization boundaries. Users belong to designated organization workspaces and are assigned discrete role permissions:
+                </p>
+                <ul>
+                    <li><strong>Administrator (Admin):</strong> Complete administrative control over organization settings, member invitations, brand configurations, connected social accounts, and publishing schedules.</li>
+                    <li><strong>Editor:</strong> Authorized to create, edit, and organize content drafts, upload creative assets, and propose scheduled posts for assigned brands.</li>
+                    <li><strong>Reviewer / Viewer:</strong> Read-only access to inspect calendars, audit timelines, drafts, and historical analytics without scheduling or publishing privileges.</li>
+                </ul>
+                <p>
+                    Users must not attempt to circumvent organizational barriers, access data belonging to other tenants, or elevate permissions beyond their authorized role.
+                </p>
+            </section>
+
+            <!-- Section 3 -->
+            <section id="sec-3" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-key"></i> 3. Social Account Authorization &amp; OAuth Delegation
+                </h2>
+                <p>
+                    When connecting third-party platforms (Facebook Pages, Instagram Professional Accounts, LinkedIn Company Pages, or WhatsApp Business Cloud API), you warrant that:
+                </p>
+                <ul>
+                    <li>You are an authorized administrator or account holder of the designated social asset with legal authority to bind that entity.</li>
+                    <li>You grant PostPilot permission to request, securely store, and utilize OAuth access tokens solely to inspect status, validate containers, and dispatch approved social broadcasts on your behalf.</li>
+                    <li>You understand that PostPilot never stores account passwords; authorization is managed exclusively through standard OAuth 2.0 cryptographic tokens.</li>
+                    <li>You retain the right to revoke PostPilot's authorization at any time directly through the platform or via third-party provider security settings (Meta Business Integrations or LinkedIn Permitted Services).</li>
+                </ul>
+            </section>
+
+            <!-- Section 4 -->
+            <section id="sec-4" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-file-lines"></i> 4. Content Ownership &amp; Intellectual Property
+                </h2>
+                <p>
+                    You retain 100% ownership of all creative content, copy, graphics, images, video assets, and branding materials uploaded to or scheduled through PostPilot ("User Content").
+                </p>
+                <p>
+                    By uploading User Content, you grant PostPilot a limited, non-exclusive license strictly to host, cache, format, and transmit the content to designated social endpoints as instructed by your publishing schedule. You represent and warrant that your content does not infringe on third-party intellectual property, privacy, or publicity rights.
+                </p>
+            </section>
+
+            <!-- Section 5 -->
+            <section id="sec-5" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-shield-halved"></i> 5. Engineered Publishing Safeguards
+                </h2>
+                <p>
+                    PostPilot is built with a defense-in-depth safety engine. Users acknowledge and agree that:
+                </p>
+                <ul>
+                    <li>Publishing is gated by an active environment variable control (<code>POSTPILOT_PUBLISHING_ENABLED</code>). When set to <code>0</code>, all scheduled releases execute in simulation mode.</li>
+                    <li>Simulated dispatches generate diagnostic records with distinct simulation identifiers (e.g. <code>fb_post_sim_...</code> or <code>ig_container_sim_...</code>) and are visibly distinguished from actual live destination dispatches.</li>
+                    <li>Activation of live publishing requires explicit owner authorization. PostPilot is not liable for delayed publishing if the safety gate is intentionally kept in simulated mode.</li>
+                </ul>
+            </section>
+
+            <!-- Section 6 -->
+            <section id="sec-6" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-lock"></i> 6. Account Security &amp; Session Hygiene
+                </h2>
+                <p>
+                    Each user is responsible for safeguarding their login credentials and session integrity:
+                </p>
+                <ul>
+                    <li>Do not share passwords, session cookies, or CSRF tokens across individuals or external tools.</li>
+                    <li>Immediately notify the platform administration at <code>office@gaatha.tech</code> if you suspect unauthorized access or compromised credentials.</li>
+                    <li>Session cookies are defensively configured with <code>SameSite=Lax</code> and <code>HttpOnly</code> flags to prevent cross-site interception.</li>
+                </ul>
+            </section>
+
+            <!-- Section 7 -->
+            <section id="sec-7" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-ban"></i> 7. Prohibited Misuse &amp; Acceptable Behavior
+                </h2>
+                <p>
+                    Users agree not to engage in any of the following prohibited activities:
+                </p>
+                <ul>
+                    <li>Automated scraping, reverse engineering, or exploiting platform APIs beyond documented usage.</li>
+                    <li>Dispatching unsolicited commercial messages, spam, or misleading marketing in violation of Meta WhatsApp Cloud or platform policies.</li>
+                    <li>Scheduling or distributing malicious software, phishing links, unlawful content, or hate speech.</li>
+                    <li>Attempting to probe, scan, or compromise PostPilot's server infrastructure or multi-tenant database.</li>
+                </ul>
+                <p>
+                    Violation of these provisions may result in immediate suspension or termination of your organization account without prior notice.
+                </p>
+            </section>
+
+            <!-- Section 8 -->
+            <section id="sec-8" class="prose-section">
+                <h2 class="section-heading">
+                    <i class="fa-solid fa-address-book"></i> 8. Revocation, Termination &amp; Contact
+                </h2>
+                <p>
+                    You may terminate this Agreement at any time by requesting deletion of your organization account and revoking connected social platform authorizations.
+                </p>
+                <div class="callout-box info" style="font-size: 0.9rem;">
+                    <div><strong>Operating Entities:</strong> Gaatha Ventures Sh.p.k. (Albania, Europe) &amp; Aidni Global LLP (India) — GAATHA Technology Ecosystem</div>
+                    <div style="margin-top: 0.35rem;"><strong>Support &amp; Legal Inquiries:</strong> <a href="mailto:office@gaatha.tech" style="color: var(--primary); text-decoration: none; font-weight: 600;">office@gaatha.tech</a></div>
+                    <div style="margin-top: 0.35rem;"><strong>Governing Law:</strong> Republic of Albania &middot; Republic of India</div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Public Footer -->
+    <footer class="public-footer">
+        <div class="footer-inner">
+            <div class="footer-top">
+                <div class="brand-block">
+                    <div class="brand-icon-box" style="width: 32px; height: 32px; font-size: 0.95rem;">
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </div>
+                    <div class="brand-text-wrap">
+                        <span class="brand-title" style="font-size: 0.95rem;">PostPilot</span>
+                        <span class="brand-byline" style="font-size: 0.62rem;">BY GAATHA</span>
+                    </div>
+                </div>
+
+                <nav class="footer-links" aria-label="Footer Navigation">
+                    <a href="/about" class="footer-link">About Us</a>
+                    <a href="/privacy" class="footer-link">Privacy Policy</a>
+                    <a href="/terms" class="footer-link">Terms &amp; Conditions</a>
+                    <a href="/agreement" class="footer-link active">User Agreement</a>
+                    <a href="/login" class="footer-link">Sign In</a>
+                </nav>
+            </div>
+
+            <div class="footer-bottom">
+                <span>&copy; 2026 PostPilot — BY GAATHA. All rights reserved.</span>
+                <span>Universal SaaS Suite &middot; Meta &middot; LinkedIn &middot; WhatsApp</span>
+            </div>
+        </div>
+    </footer>
+
+</body>
+
+</html>
+
