@@ -23,6 +23,7 @@ import timezone_utils
 from validation import validate_platform_creative
 import ai_service
 import linkedin_api
+import integrations_service
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] (App) %(message)s")
 logger = logging.getLogger(__name__)
@@ -379,7 +380,8 @@ def linkedin_connect(app_name=None):
     app_key = app_name or request.args.get('app') or linkedin_api.APP_GAATHA_VENTURES
     try:
         norm_key = linkedin_api.normalize_app_key(app_key)
-        auth_url, state, csrf = linkedin_api.get_authorization_url(app_key=norm_key)
+        red_uri = getattr(config, 'LINKEDIN_REDIRECT_URI', None) or 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'
+        auth_url, state, csrf = linkedin_api.get_authorization_url(app_key=norm_key, redirect_uri=red_uri)
 
         # Save CSRF state per app in session
         if 'linkedin_oauth_states' not in session:
@@ -460,8 +462,9 @@ def linkedin_callback():
     if not code:
         return jsonify({'error': 'Missing authorization code in LinkedIn callback.', 'code': 'MISSING_CODE'}), 400
 
-    # Exchange code for access token using specific app credentials
-    token_res = linkedin_api.exchange_code_for_token(code=code, app_key=app_key)
+    # Exchange code for access token using specific app credentials and exact redirect URI
+    red_uri = getattr(config, 'LINKEDIN_REDIRECT_URI', None) or 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'
+    token_res = linkedin_api.exchange_code_for_token(code=code, app_key=app_key, redirect_uri=red_uri)
     if not token_res.get('success'):
         return jsonify({'error': token_res.get('error', 'Token exchange failed'), 'code': 'EXCHANGE_FAILED'}), 400
 
@@ -471,6 +474,25 @@ def linkedin_callback():
 
     eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=token)
     member = token_res.get('member') or linkedin_api.get_authenticated_member(token)
+
+    # Persist verified token and status to database social_accounts
+    try:
+        cfg = linkedin_api.get_app_config(app_key)
+        target_org = cfg.get('org_id')
+        database.upsert_social_account(
+            organization_id=session.get('organization_id', 1),
+            brand_id=1,
+            platform='linkedin',
+            account_name=token_res.get('display_name', cfg['display_name']),
+            account_identifier=str(target_org),
+            status='connected',
+            permissions_scope=token_res.get('scope'),
+            app_identifier=app_key,
+            access_token=token,
+            token_expires_at=token_res.get('expires_at')
+        )
+    except Exception as e:
+        logger.warning(f"Could not persist LinkedIn account to database: {e}")
 
     if 'application/json' in request.headers.get('Accept', '') or request.args.get('format') == 'json':
         return jsonify({
@@ -647,6 +669,101 @@ def disconnect_account(account_id):
     if not success:
         return jsonify({'error': 'Social account not found or access denied', 'code': 'NOT_FOUND'}), 404
     return jsonify({'success': True, 'message': 'Account disconnected successfully.'})
+
+
+# --- Unified Social Platform Integration & Discovery Endpoints ---
+
+@app.route('/api/integrations/status', methods=['GET'])
+@login_required
+def get_integrations_status_route():
+    """
+    Returns verified live status for all platforms:
+    - Meta Facebook Pages & Instagram Accounts
+    - LinkedIn Enterprise Applications
+    - WhatsApp Business Cloud API & Phone Verification
+    """
+    org_id = session.get('organization_id', 1)
+    meta_data = integrations_service.discover_meta_properties(organization_id=org_id)
+    linkedin_data = integrations_service.get_linkedin_integration_status(organization_id=org_id)
+    whatsapp_data = integrations_service.get_whatsapp_integration_status(organization_id=org_id)
+
+    return jsonify({
+        'success': True,
+        'organization_id': org_id,
+        'publishing_enabled': config.is_publishing_enabled(),
+        'meta': meta_data,
+        'linkedin': linkedin_data,
+        'whatsapp': whatsapp_data
+    })
+
+
+@app.route('/api/integrations/meta/discover', methods=['GET'])
+@login_required
+def discover_meta_route():
+    """Discovers all accessible Facebook Pages and linked Instagram accounts via Meta Graph API."""
+    org_id = session.get('organization_id', 1)
+    result = integrations_service.discover_meta_properties(organization_id=org_id)
+    return jsonify(result)
+
+
+@app.route('/api/integrations/whatsapp/status', methods=['GET'])
+@login_required
+def whatsapp_status_route():
+    """Returns actual WhatsApp Business phone verification, platform type, and template status."""
+    org_id = session.get('organization_id', 1)
+    result = integrations_service.get_whatsapp_integration_status(organization_id=org_id)
+    return jsonify(result)
+
+
+@app.route('/api/integrations/map', methods=['POST'])
+@login_required
+@csrf_protect
+def map_social_property_route():
+    """
+    Safely assigns an accessible social property (Facebook Page, IG account, etc.) to a brand workspace.
+    Guarantees brand isolation.
+    """
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    platform = data.get('platform')
+    account_identifier = data.get('account_identifier')
+    account_name = data.get('account_name')
+    brand_id = data.get('brand_id')
+    permissions_scope = data.get('permissions_scope')
+    app_identifier = data.get('app_identifier')
+
+    if not platform or not account_identifier or not account_name or not brand_id:
+        return jsonify({'error': 'Missing required fields: platform, account_identifier, account_name, brand_id', 'code': 'VALIDATION_ERROR'}), 400
+
+    try:
+        brand_id_int = int(brand_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'brand_id must be an integer', 'code': 'VALIDATION_ERROR'}), 400
+
+    res = integrations_service.map_property_to_brand(
+        organization_id=org_id,
+        platform=platform,
+        account_identifier=str(account_identifier),
+        account_name=str(account_name),
+        brand_id=brand_id_int,
+        permissions_scope=permissions_scope,
+        app_identifier=app_identifier
+    )
+    if not res.get('success'):
+        return jsonify(res), 400
+    return jsonify(res), 200
+
+
+@app.route('/api/integrations/map/<int:account_id>', methods=['DELETE'])
+@login_required
+@csrf_protect
+def unmap_social_property_route(account_id):
+    """Disconnects and unmaps a social account from a brand workspace."""
+    org_id = session.get('organization_id', 1)
+    res = integrations_service.unmap_property(organization_id=org_id, account_id=account_id)
+    if not res.get('success'):
+        return jsonify(res), 400
+    return jsonify(res), 200
 
 # --- Posts Management Endpoints ---
 

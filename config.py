@@ -89,7 +89,7 @@ INSTA_ID_SUITE = os.getenv('INSTA_ID_SUITE', '17841449080283492')
 INSTA_ID_PHOENIX = os.getenv('INSTA_ID_PHOENIX', '17841472248438802')
 
 # LinkedIn Dual-Application OAuth 2.0 & API Configuration
-LINKEDIN_REDIRECT_URI = os.getenv('LINKEDIN_REDIRECT_URI', 'http://127.0.0.1:5000/api/auth/linkedin/callback')
+LINKEDIN_REDIRECT_URI = os.getenv('LINKEDIN_REDIRECT_URI', 'https://postpilot.gaatha.tech/api/auth/linkedin/callback')
 
 # Aidni Global LLP
 LINKEDIN_CLIENT_ID_AIDNI_GLOBAL_LLP = os.getenv('LINKEDIN_CLIENT_ID_AIDNI_GLOBAL_LLP') or os.getenv('LINKEDIN_CLIENT_ID_AIDNI_GLOBAL')

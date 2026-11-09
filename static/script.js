@@ -1047,498 +1047,648 @@ function refreshDashboard() {
 }
 
 // ==========================================================================
-// VIEW: Connected Social Accounts
+// VIEW: Connected Social Accounts & Integrations Hub
 // ==========================================================================
 function renderAccounts(container) {
     container.innerHTML = `
         <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); color: #ffffff; border: none;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                 <div>
-                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">Connected Social Accounts</h2>
-                    <p style="color: #94a3b8; font-size: 0.9rem;">Multi-platform social accounts and brand integrations managed under current organization</p>
+                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
+                        <i class="fa-solid fa-share-nodes" style="color: #38bdf8;"></i> Social Accounts &amp; Integrations Hub
+                    </h2>
+                    <p style="color: #94a3b8; font-size: 0.9rem;">
+                        Live verified connectivity, Meta property discovery, LinkedIn enterprise OAuth, and WhatsApp Business Cloud API.
+                    </p>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                    <button class="btn btn-sm btn-secondary" onclick="refreshAccountsList()" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: #fff;">
-                        <i class="fa-solid fa-rotate"></i> Refresh Accounts
+                    <button class="btn btn-sm btn-secondary" onclick="loadIntegrationsDashboard()" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: #fff;">
+                        <i class="fa-solid fa-rotate"></i> Refresh Integrations
                     </button>
                     <span class="platform-pill" style="background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3);">
                         <i class="fa-solid fa-shield-halved"></i> Secrets Protected
                     </span>
-                </div>
-            </div>
-        </div>
-
-        <div class="accounts-grid" id="dynamic-accounts-grid">
-            <div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: #94a3b8;">
-                <i class="fa-solid fa-spinner fa-spin"></i> Loading connected accounts...
-            </div>
-        </div>
-
-        <!-- LinkedIn Professional Ecosystem (Dual Applications) -->
-        <div class="card" style="margin-top: 2rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, #0a66c2 0%, #004182 100%); color: #ffffff; border: none;">
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-                <div>
-                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
-                        <i class="fa-brands fa-linkedin"></i> LinkedIn Enterprise Ecosystem (Dual Applications)
-                    </h2>
-                    <p style="color: #bfdbfe; font-size: 0.9rem;">
-                        Independent OAuth 2.0 company integrations for Aidni Global LLP and Gaatha Ventures Sh.p.k.
-                    </p>
-                </div>
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <span class="platform-pill" style="background: rgba(255,255,255,0.15); color: #ffffff; border-color: rgba(255,255,255,0.25);">
-                        <i class="fa-solid fa-code-branch"></i> REST Posts API 202401
-                    </span>
-                    <button class="btn btn-sm btn-secondary" onclick="loadLinkedInStatus()" style="background: rgba(255,255,255,0.2); border: none; color: #fff;">
-                        <i class="fa-solid fa-rotate"></i> Refresh Status
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div class="accounts-grid" id="linkedin-accounts-grid">
-            <!-- LinkedIn App 1: Aidni Global LLP -->
-            <div class="account-card" id="card-linkedin-aidni">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: #0a66c2; color: #fff;">
-                            <i class="fa-brands fa-linkedin-in"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Aidni Global LLP</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem;">
-                                <span class="platform-pill linkedin" style="background: #0a66c2; color: #fff;"><i class="fa-brands fa-linkedin"></i> Company Page</span>
-                                <span class="platform-pill" id="pill-aidni-auth" style="background: #f1f5f9; color: #475569;">Checking...</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-stopped" id="badge-aidni-status">Standby</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Organization ID</span>
-                        <code class="account-detail-value" id="val-aidni-org-id">145240694</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Authenticated Member</span>
-                        <span class="account-detail-value" id="val-aidni-member">--</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Confirmed Scopes</span>
-                        <code class="account-detail-value" id="val-aidni-scopes">openid, profile, email, w_member_social</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Token Expiry</span>
-                        <span class="account-detail-value" id="val-aidni-expiry">--</span>
-                    </div>
-                    <div class="account-detail-item" style="flex-direction: column; align-items: flex-start; gap: 0.35rem;">
-                        <span class="account-detail-label">Company Publishing Eligibility</span>
-                        <div id="val-aidni-eligibility" style="font-size: 0.85rem; line-height: 1.4; padding: 0.45rem 0.65rem; border-radius: 6px; background: #fffbeb; color: #b45309; border: 1px solid #fde68a;">
-                            Checking eligibility...
-                        </div>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <a class="btn btn-sm btn-primary" id="btn-aidni-connect" href="/api/auth/linkedin/connect?app=aidni_global" style="flex: 1; text-align: center; text-decoration: none;">
-                        <i class="fa-solid fa-link"></i> Connect Aidni Global
-                    </a>
-                    <a class="btn btn-sm btn-secondary" href="/api/auth/linkedin/connect?app=aidni_global" title="Reconnect with new authorization code">
-                        <i class="fa-solid fa-arrow-rotate-right"></i> Reconnect
-                    </a>
-                </div>
-            </div>
-
-            <!-- LinkedIn App 2: Gaatha Ventures Sh.p.k. -->
-            <div class="account-card" id="card-linkedin-gaatha">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: #004182; color: #fff;">
-                            <i class="fa-brands fa-linkedin-in"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Gaatha Ventures Sh.p.k.</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem;">
-                                <span class="platform-pill linkedin" style="background: #0a66c2; color: #fff;"><i class="fa-brands fa-linkedin"></i> Company Page</span>
-                                <span class="platform-pill" id="pill-gaatha-auth" style="background: #f1f5f9; color: #475569;">Checking...</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-stopped" id="badge-gaatha-status">Standby</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Organization ID</span>
-                        <code class="account-detail-value" id="val-gaatha-org-id">145250613</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Authenticated Member</span>
-                        <span class="account-detail-value" id="val-gaatha-member">--</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Confirmed Scopes</span>
-                        <code class="account-detail-value" id="val-gaatha-scopes">openid, profile, email, w_member_social</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Token Expiry</span>
-                        <span class="account-detail-value" id="val-gaatha-expiry">--</span>
-                    </div>
-                    <div class="account-detail-item" style="flex-direction: column; align-items: flex-start; gap: 0.35rem;">
-                        <span class="account-detail-label">Company Publishing Eligibility</span>
-                        <div id="val-gaatha-eligibility" style="font-size: 0.85rem; line-height: 1.4; padding: 0.45rem 0.65rem; border-radius: 6px; background: #fffbeb; color: #b45309; border: 1px solid #fde68a;">
-                            Checking eligibility...
-                        </div>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <a class="btn btn-sm btn-primary" id="btn-gaatha-connect" href="/api/auth/linkedin/connect?app=gaatha_ventures" style="flex: 1; text-align: center; text-decoration: none;">
-                        <i class="fa-solid fa-link"></i> Connect Gaatha Ventures
-                    </a>
-                    <a class="btn btn-sm btn-secondary" href="/api/auth/linkedin/connect?app=gaatha_ventures" title="Reconnect with new authorization code">
-                        <i class="fa-solid fa-arrow-rotate-right"></i> Reconnect
-                    </a>
-                </div>
-            </div>
-        </div>
-
-        <!-- WhatsApp Business Cloud API (Meta Ecosystem) -->
-        <div class="card" style="margin-top: 2rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, #075e54 0%, #128c7e 100%); color: #ffffff; border: none;">
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-                <div>
-                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
-                        <i class="fa-brands fa-whatsapp"></i> WhatsApp Business Cloud API (Meta Ecosystem)
-                    </h2>
-                    <p style="color: #d1fae5; font-size: 0.9rem;">
-                        Direct enterprise messaging gateway for Gaatha Ventures verified business line
-                    </p>
-                </div>
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border-color: rgba(255,255,255,0.25);">
-                        <i class="fa-solid fa-bolt"></i> Cloud API v19.0
-                    </span>
-                    <span class="platform-pill" style="background: rgba(16,185,129,0.3); color: #a7f3d0; border: 1px solid rgba(16,185,129,0.4);">
-                        <i class="fa-solid fa-circle-check"></i> Quality: High (Green)
+                    <span class="platform-pill" id="badge-publishing-guardrail" style="background: rgba(245,158,11,0.2); color: #fde68a; border: 1px solid rgba(245,158,11,0.4);">
+                        <i class="fa-solid fa-lock"></i> Standby (Publishing Disabled)
                     </span>
                 </div>
             </div>
         </div>
 
-        <div class="accounts-grid">
-            <!-- Account 7: WhatsApp WABA Gaatha Ventures -->
-            <div class="account-card">
-                <div class="account-card-header">
-                    <div class="account-identity">
-                        <div class="account-avatar" style="background: #25d366; color: #ffffff;">
-                            <i class="fa-brands fa-whatsapp"></i>
-                        </div>
-                        <div class="account-meta">
-                            <h3>Gaatha Ventures</h3>
-                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem;">
-                                <span class="platform-pill" style="background: rgba(37, 211, 102, 0.15); color: #25d366; border: 1px solid rgba(37, 211, 102, 0.3);">
-                                    <i class="fa-solid fa-circle-check"></i> Official Business Account
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                    <span class="status-badge status-running"><i class="fa-solid fa-check"></i> Verified</span>
-                </div>
-
-                <div class="account-details-list">
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Registered Phone</span>
-                        <code class="account-detail-value">+91 90990 28291</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">WABA Account ID</span>
-                        <code class="account-detail-value">1370721214882653</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Phone Number ID</span>
-                        <code class="account-detail-value">100877999564287</code>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Messaging Tier / Limit</span>
-                        <span class="account-detail-value">Tier 1 (1,000 unique recipients / 24h)</span>
-                    </div>
-                    <div class="account-detail-item">
-                        <span class="account-detail-label">Quality Rating</span>
-                        <span class="badge badge-success" style="font-size: 0.75rem;"><i class="fa-solid fa-circle"></i> HIGH (Green)</span>
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                    <button class="btn btn-sm btn-primary" onclick="loadTab('whatsapp')" style="flex: 1; background: #25d366; border-color: #25d366; color: #000; font-weight: 600;">
-                        <i class="fa-brands fa-whatsapp"></i> Open WhatsApp Studio
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div class="card" style="border-left: 4px solid var(--primary); background: #f8fafc; margin-top: 1.5rem;">
-            <div style="display: flex; gap: 0.85rem; align-items: flex-start;">
-                <i class="fa-solid fa-shield-halved" style="color: var(--primary); font-size: 1.4rem; margin-top: 0.2rem;"></i>
-                <div>
-                    <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.2rem;">Security &amp; Token Architecture</h4>
-                    <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45;">
-                        Meta and LinkedIn access tokens, secrets, and authorization codes are safely isolated in server/Termux environment variables (<code style="background: #e2e8f0; padding: 0.1rem 0.3rem; border-radius: 4px;">.env</code>) and local stores. They are never exposed to browser memory or client-side JavaScript.
-                    </p>
-                </div>
+        <div id="integrations-dashboard-view">
+            <div style="text-align: center; padding: 3rem; color: #94a3b8;">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; margin-bottom: 1rem; color: #38bdf8;"></i>
+                <p>Querying verified platform APIs (Meta Graph, LinkedIn OAuth, WhatsApp Business)...</p>
             </div>
         </div>
     `;
 
-    setTimeout(refreshAccountsList, 20);
-    setTimeout(loadLinkedInStatus, 50);
+    setTimeout(loadIntegrationsDashboard, 20);
 }
 
-// ==========================================================================
-// DYNAMIC SOCIAL ACCOUNTS MANAGEMENT (Phase 2)
-// ==========================================================================
-async function refreshAccountsList() {
-    const grid = document.getElementById('dynamic-accounts-grid');
-    if (!grid) return;
-    grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 2rem; color: #64748b;"><i class="fa-solid fa-spinner fa-spin"></i> Loading connected accounts...</div>';
-    
-    try {
-        const res = await authFetch('/api/accounts');
-        if (!res.ok) throw new Error('Failed to fetch accounts from server');
-        const data = await res.json();
-        const accounts = data.accounts || [];
+// Standardized Status Label Pill Generator (Requirement 4)
+function getIntegrationsStatusBadge(statusLabel, actionRequired) {
+    let bg = '#f8fafc', color = '#64748b', border = '#e2e8f0', icon = 'fa-circle-dot';
+    const label = (statusLabel || 'Disconnected').trim();
 
-        if (accounts.length === 0) {
-            grid.innerHTML = `
-                <div class="card" style="grid-column: 1/-1; text-align: center; padding: 2.5rem;">
-                    <i class="fa-solid fa-circle-nodes" style="font-size: 2.5rem; color: #94a3b8; margin-bottom: 0.75rem;"></i>
-                    <h3 style="margin-bottom: 0.5rem;">No Social Accounts Configured</h3>
-                    <p style="color: #64748b;">Connect your Facebook, Instagram, LinkedIn, or WhatsApp accounts to start managing and scheduling posts.</p>
-                </div>
-            `;
-            return;
+    if (label === 'Live Publishing Ready') {
+        bg = 'rgba(16, 185, 129, 0.15)'; color = '#10b981'; border = 'rgba(16, 185, 129, 0.3)'; icon = 'fa-circle-check';
+    } else if (label === 'Connected') {
+        bg = 'rgba(14, 165, 233, 0.15)'; color = '#0284c7'; border = 'rgba(14, 165, 233, 0.3)'; icon = 'fa-check';
+    } else if (label === 'Connected — Limited Permissions') {
+        bg = 'rgba(245, 158, 11, 0.15)'; color = '#d97706'; border = 'rgba(245, 158, 11, 0.3)'; icon = 'fa-triangle-exclamation';
+    } else if (label === 'Authentication Required') {
+        bg = 'rgba(249, 115, 22, 0.15)'; color = '#ea580c'; border = 'rgba(249, 115, 22, 0.3)'; icon = 'fa-key';
+    } else if (label === 'Verification Required') {
+        bg = 'rgba(239, 68, 68, 0.15)'; color = '#ef4444'; border = 'rgba(239, 68, 68, 0.3)'; icon = 'fa-shield-halved';
+    } else if (label === 'Credentials Configured') {
+        bg = 'rgba(99, 102, 241, 0.15)'; color = '#6366f1'; border = 'rgba(99, 102, 241, 0.3)'; icon = 'fa-wrench';
+    } else if (label === 'Credentials Missing') {
+        bg = 'rgba(239, 68, 68, 0.15)'; color = '#ef4444'; border = 'rgba(239, 68, 68, 0.3)'; icon = 'fa-circle-xmark';
+    } else if (label === 'Publishing Not Approved') {
+        bg = 'rgba(245, 158, 11, 0.15)'; color = '#b45309'; border = 'rgba(245, 158, 11, 0.3)'; icon = 'fa-ban';
+    } else if (label === 'Disconnected') {
+        bg = 'rgba(148, 163, 184, 0.15)'; color = '#64748b'; border = 'rgba(148, 163, 184, 0.3)'; icon = 'fa-circle-stop';
+    }
+
+    const titleAttr = actionRequired ? `title="${escapeHtml(actionRequired)}"` : '';
+    return `<span class="platform-pill" ${titleAttr} style="background: ${bg}; color: ${color}; border: 1px solid ${border}; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.78rem;">
+        <i class="fa-solid ${icon}"></i> ${escapeHtml(label)}
+    </span>`;
+}
+
+// Fetch and render all platform integrations dynamically
+async function loadIntegrationsDashboard() {
+    const view = document.getElementById('integrations-dashboard-view');
+    if (!view) return;
+
+    try {
+        const [integrationsRes, brandsRes] = await Promise.all([
+            authFetch('/api/integrations/status'),
+            authFetch('/api/brands')
+        ]);
+
+        if (!integrationsRes.ok) throw new Error('Failed to fetch platform integrations status');
+        const intData = await integrationsRes.json();
+        const brands = brandsRes.ok ? await brandsRes.json() : [];
+
+        // Update Guardrail pill
+        const guardrailPill = document.getElementById('badge-publishing-guardrail');
+        if (guardrailPill) {
+            if (intData.publishing_enabled) {
+                guardrailPill.style.background = 'rgba(16, 185, 129, 0.2)';
+                guardrailPill.style.color = '#6ee7b7';
+                guardrailPill.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+                guardrailPill.innerHTML = '<i class="fa-solid fa-tower-broadcast"></i> Live Publishing Enabled';
+            } else {
+                guardrailPill.style.background = 'rgba(245, 158, 11, 0.2)';
+                guardrailPill.style.color = '#fde68a';
+                guardrailPill.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+                guardrailPill.innerHTML = '<i class="fa-solid fa-lock"></i> Standby (POSTPILOT_PUBLISHING_ENABLED=0)';
+            }
         }
 
-        const platformIcons = {
-            'facebook': { icon: 'fa-brands fa-facebook', class: 'facebook', bg: '#1877f2', label: 'Facebook Page' },
-            'instagram': { icon: 'fa-brands fa-instagram', class: 'instagram', bg: 'var(--ig-gradient)', label: 'Instagram Professional' },
-            'linkedin': { icon: 'fa-brands fa-linkedin', class: 'linkedin', bg: '#0a66c2', label: 'LinkedIn Company' },
-            'whatsapp': { icon: 'fa-brands fa-whatsapp', class: 'whatsapp', bg: '#25d366', label: 'WhatsApp Business Cloud' }
-        };
+        const meta = intData.meta || {};
+        const linkedin = intData.linkedin || {};
+        const whatsapp = intData.whatsapp || {};
 
-        grid.innerHTML = accounts.map(acc => {
-            const pInfo = platformIcons[acc.platform] || { icon: 'fa-solid fa-share-nodes', class: 'other', bg: '#475569', label: acc.platform };
-            const isConnected = acc.status === 'connected';
-            const statusClass = isConnected ? 'status-running' : (acc.status === 'expired' ? 'status-warning' : 'status-stopped');
-            const statusIcon = isConnected ? 'fa-check' : (acc.status === 'expired' ? 'fa-triangle-exclamation' : 'fa-circle-xmark');
-            const lastVerified = acc.last_verified_at ? new Date(acc.last_verified_at).toLocaleString() : 'Never verified';
-            
-            return `
-                <div class="account-card" id="account-card-${acc.id}">
+        let html = '';
+
+        // =========================================================================
+        // 1. META ECOSYSTEM: FACEBOOK PAGES & LINKED INSTAGRAM
+        // =========================================================================
+        const pages = meta.pages || [];
+        const igAccounts = meta.instagram_accounts || [];
+
+        html += `
+            <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #1877f2 0%, #0c4a6e 100%); color: #ffffff; border: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
+                            <i class="fa-brands fa-facebook"></i> Meta Brand Ecosystem (Facebook &amp; Instagram)
+                        </h2>
+                        <p style="color: #bfdbfe; font-size: 0.9rem;">
+                            Auto-discovered from Meta Graph API v19.0. Safe brand mapping guarantees workspace isolation.
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                            <i class="fa-solid fa-key"></i> Long-Lived System Token Active
+                        </span>
+                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                            <i class="fa-solid fa-layer-group"></i> ${pages.length} Pages · ${igAccounts.length} Instagram
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Facebook Pages Section -->
+            <div style="margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-brands fa-facebook" style="color: #1877f2;"></i> Discovered Facebook Pages (${pages.length})
+                </h3>
+                <div class="accounts-grid">
+                    ${pages.map(p => {
+                        const brandOptions = brands.map(b => `
+                            <option value="${b.id}" ${b.id === p.assigned_brand_id ? 'selected' : ''}>
+                                ${escapeHtml(b.name)}
+                            </option>
+                        `).join('');
+
+                        return `
+                            <div class="account-card" id="card-fb-${p.id}">
+                                <div class="account-card-header">
+                                    <div class="account-identity">
+                                        <div class="account-avatar" style="background: #1877f2; color: #fff;">
+                                            <i class="fa-brands fa-facebook-f"></i>
+                                        </div>
+                                        <div class="account-meta">
+                                            <h3>${escapeHtml(p.name)}</h3>
+                                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
+                                                <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> ${escapeHtml(p.category || 'Facebook Page')}</span>
+                                                ${p.assigned_brand_name ? `<span class="platform-pill" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; border: 1px solid rgba(56, 189, 248, 0.3);"><i class="fa-solid fa-tag"></i> ${escapeHtml(p.assigned_brand_name)}</span>` : '<span class="platform-pill" style="background: #f1f5f9; color: #64748b;">Unassigned</span>'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    ${getIntegrationsStatusBadge(p.status_label, p.action_required)}
+                                </div>
+
+                                <div class="account-details-list">
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Page ID</span>
+                                        <code class="account-detail-value">${escapeHtml(p.id)}</code>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Publishing Capability</span>
+                                        <span class="badge ${p.can_publish ? 'badge-success' : 'badge-warning'}">
+                                            ${p.can_publish ? '<i class="fa-solid fa-check"></i> Allowed (CREATE_CONTENT)' : '<i class="fa-solid fa-triangle-exclamation"></i> Restricted'}
+                                        </span>
+                                    </div>
+                                    ${p.action_required ? `
+                                        <div class="account-detail-item" style="flex-direction: column; align-items: flex-start; gap: 0.25rem;">
+                                            <span class="account-detail-label" style="color: #b45309;">Notice</span>
+                                            <div style="font-size: 0.8rem; color: #b45309; line-height: 1.35;">${escapeHtml(p.action_required)}</div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+
+                                <!-- Brand Mapping Assignment Dropdown -->
+                                <div style="margin-top: 1rem; padding-top: 0.85rem; border-top: 1px solid var(--border-color, #e2e8f0);">
+                                    <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.35rem;">
+                                        Assign to GAATHA Brand Workspace:
+                                    </label>
+                                    <div style="display: flex; gap: 0.4rem; align-items: center;">
+                                        <select id="select-brand-fb-${p.id}" class="form-control" style="flex: 1; font-size: 0.85rem; padding: 0.35rem 0.5rem; height: auto;">
+                                            <option value="">-- Unassigned --</option>
+                                            ${brandOptions}
+                                        </select>
+                                        <button class="btn btn-sm btn-primary" onclick="saveSocialPropertyMapping('facebook', '${p.id}', '${escapeAttr(p.name)}', 'select-brand-fb-${p.id}', '${(p.tasks||[]).join(',')}', 'meta_graph')" title="Save brand workspace mapping">
+                                            <i class="fa-solid fa-floppy-disk"></i> Save
+                                        </button>
+                                        ${p.account_id ? `
+                                            <button class="btn btn-sm btn-danger" onclick="unmapSocialProperty(${p.account_id}, '${escapeAttr(p.name)}')" title="Unlink from brand workspace">
+                                                <i class="fa-solid fa-link-slash"></i>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+
+            <!-- Instagram Accounts Section -->
+            <div style="margin-bottom: 2rem;">
+                <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-brands fa-instagram" style="color: #e1306c;"></i> Discovered Instagram Business Accounts (${igAccounts.length})
+                </h3>
+                <div class="accounts-grid">
+                    ${igAccounts.map(ig => {
+                        const brandOptions = brands.map(b => `
+                            <option value="${b.id}" ${b.id === ig.assigned_brand_id ? 'selected' : ''}>
+                                ${escapeHtml(b.name)}
+                            </option>
+                        `).join('');
+
+                        return `
+                            <div class="account-card" id="card-ig-${ig.id}">
+                                <div class="account-card-header">
+                                    <div class="account-identity">
+                                        <div class="account-avatar" style="background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); color: #fff;">
+                                            <i class="fa-brands fa-instagram"></i>
+                                        </div>
+                                        <div class="account-meta">
+                                            <h3>${escapeHtml(ig.username || ig.name)}</h3>
+                                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
+                                                <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Instagram Business</span>
+                                                ${ig.assigned_brand_name ? `<span class="platform-pill" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; border: 1px solid rgba(56, 189, 248, 0.3);"><i class="fa-solid fa-tag"></i> ${escapeHtml(ig.assigned_brand_name)}</span>` : '<span class="platform-pill" style="background: #f1f5f9; color: #64748b;">Unassigned</span>'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    ${getIntegrationsStatusBadge(ig.status_label, ig.action_required)}
+                                </div>
+
+                                <div class="account-details-list">
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Instagram ID</span>
+                                        <code class="account-detail-value">${escapeHtml(ig.id)}</code>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Linked Facebook Page</span>
+                                        <span class="account-detail-value" style="font-size: 0.85rem;">${escapeHtml(ig.linked_facebook_page_name || 'N/A')}</span>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Audience &amp; Media</span>
+                                        <span class="account-detail-value" style="font-size: 0.85rem;">
+                                            ${ig.followers_count !== undefined ? Number(ig.followers_count).toLocaleString() : '0'} followers · ${ig.media_count || 0} posts
+                                        </span>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Publishing Eligibility</span>
+                                        <span class="badge ${ig.can_publish ? 'badge-success' : 'badge-warning'}">
+                                            ${ig.can_publish ? '<i class="fa-solid fa-check"></i> Eligible (Content Publishing)' : '<i class="fa-solid fa-triangle-exclamation"></i> Limited'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- Brand Mapping Assignment Dropdown -->
+                                <div style="margin-top: 1rem; padding-top: 0.85rem; border-top: 1px solid var(--border-color, #e2e8f0);">
+                                    <label style="display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.35rem;">
+                                        Assign to GAATHA Brand Workspace:
+                                    </label>
+                                    <div style="display: flex; gap: 0.4rem; align-items: center;">
+                                        <select id="select-brand-ig-${ig.id}" class="form-control" style="flex: 1; font-size: 0.85rem; padding: 0.35rem 0.5rem; height: auto;">
+                                            <option value="">-- Unassigned --</option>
+                                            ${brandOptions}
+                                        </select>
+                                        <button class="btn btn-sm btn-primary" onclick="saveSocialPropertyMapping('instagram', '${ig.id}', '${escapeAttr(ig.username || ig.name)}', 'select-brand-ig-${ig.id}', 'instagram_content_publish', 'meta_graph')" title="Save brand workspace mapping">
+                                            <i class="fa-solid fa-floppy-disk"></i> Save
+                                        </button>
+                                        ${ig.account_id ? `
+                                            <button class="btn btn-sm btn-danger" onclick="unmapSocialProperty(${ig.account_id}, '${escapeAttr(ig.username || ig.name)}')" title="Unlink from brand workspace">
+                                                <i class="fa-solid fa-link-slash"></i>
+                                            </button>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+
+        // =========================================================================
+        // 2. LINKEDIN ENTERPRISE ECOSYSTEM (DUAL APPLICATIONS)
+        // =========================================================================
+        const liApps = linkedin.apps || [];
+        html += `
+            <div class="card" style="margin-top: 2rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, #0a66c2 0%, #004182 100%); color: #ffffff; border: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
+                            <i class="fa-brands fa-linkedin"></i> LinkedIn Enterprise Ecosystem (Dual Applications)
+                        </h2>
+                        <p style="color: #bfdbfe; font-size: 0.9rem;">
+                            Independent OAuth 2.0 company integrations for Aidni Global LLP and Gaatha Ventures Sh.p.k.
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                            <i class="fa-solid fa-shield-halved"></i> 3-Legged OAuth Mandatory
+                        </span>
+                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                            <i class="fa-solid fa-code-branch"></i> REST Posts API 202401
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="accounts-grid" style="margin-bottom: 2rem;">
+                ${liApps.map(app => {
+                    return `
+                        <div class="account-card" id="card-linkedin-${app.app_key}">
+                            <div class="account-card-header">
+                                <div class="account-identity">
+                                    <div class="account-avatar" style="background: #0a66c2; color: #fff;">
+                                        <i class="fa-brands fa-linkedin-in"></i>
+                                    </div>
+                                    <div class="account-meta">
+                                        <h3>${escapeHtml(app.name)}</h3>
+                                        <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
+                                            <span class="platform-pill linkedin"><i class="fa-brands fa-linkedin"></i> Company Page</span>
+                                            <span class="platform-pill" style="background: rgba(14, 165, 233, 0.15); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.3);">
+                                                Org ID: ${escapeHtml(app.organization_id)}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                ${getIntegrationsStatusBadge(app.status_label, app.action_required)}
+                            </div>
+
+                            <div class="account-details-list">
+                                <div class="account-detail-item">
+                                    <span class="account-detail-label">Client Credentials</span>
+                                    <span class="badge ${app.client_id_configured && app.client_secret_configured ? 'badge-success' : 'badge-danger'}">
+                                        ${app.client_id_configured && app.client_secret_configured ? '<i class="fa-solid fa-check"></i> Configured in .env' : 'Missing in .env'}
+                                    </span>
+                                </div>
+                                <div class="account-detail-item">
+                                    <span class="account-detail-label">Redirect URI</span>
+                                    <code class="account-detail-value" style="font-size: 0.75rem; word-break: break-all;">${escapeHtml(app.redirect_uri)}</code>
+                                </div>
+                                <div class="account-detail-item">
+                                    <span class="account-detail-label">User Authentication</span>
+                                    <span class="account-detail-value" style="font-size: 0.85rem;">
+                                        ${app.user_authenticated ? `<span class="badge badge-success"><i class="fa-solid fa-check"></i> ${escapeHtml(app.authenticated_member || 'Active Member')}</span>` : '<span class="badge badge-warning"><i class="fa-solid fa-key"></i> Unauthenticated (OAuth Required)</span>'}
+                                    </span>
+                                </div>
+                                <div class="account-detail-item">
+                                    <span class="account-detail-label">Confirmed Scopes</span>
+                                    <code class="account-detail-value" style="font-size: 0.75rem;">openid, profile, email, w_member_social</code>
+                                </div>
+
+                                <div class="account-detail-item" style="flex-direction: column; align-items: flex-start; gap: 0.35rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 0.6rem;">
+                                    <span class="account-detail-label" style="color: #92400e; font-weight: 700;">
+                                        <i class="fa-solid fa-circle-info"></i> Company Publishing Eligibility
+                                    </span>
+                                    <div style="font-size: 0.8rem; color: #92400e; line-height: 1.4;">
+                                        <strong>Personal Posting:</strong> Available via <code>w_member_social</code>.<br>
+                                        <strong>Company Page Posting:</strong> Strictly requires LinkedIn's <strong>Community Management API</strong> product approval (scope <code>w_organization_social</code>) inside the LinkedIn Developer Portal.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+                                <a class="btn btn-sm btn-primary" href="${app.connect_url}" style="flex: 1; text-align: center; text-decoration: none;">
+                                    <i class="fa-brands fa-linkedin"></i> Connect via LinkedIn OAuth
+                                </a>
+                                <a class="btn btn-sm btn-secondary" href="${app.connect_url}" title="Reconnect with new authorization code">
+                                    <i class="fa-solid fa-arrow-rotate-right"></i> Re-authorize
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+
+        // =========================================================================
+        // 3. WHATSAPP BUSINESS CLOUD API (META ECOSYSTEM)
+        // =========================================================================
+        html += `
+            <div class="card" style="margin-top: 2rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, #075e54 0%, #128c7e 100%); color: #ffffff; border: none;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
+                            <i class="fa-brands fa-whatsapp"></i> WhatsApp Business Cloud API (Meta Ecosystem)
+                        </h2>
+                        <p style="color: #d1fae5; font-size: 0.9rem;">
+                            Direct enterprise messaging gateway for Gaatha verified business line
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                            <i class="fa-solid fa-bolt"></i> Cloud API v19.0
+                        </span>
+                        <span class="platform-pill" style="background: rgba(245, 158, 11, 0.25); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.4);">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Verification Required
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="accounts-grid" style="margin-bottom: 1.5rem;">
+                <!-- Primary Configured WhatsApp Account -->
+                <div class="account-card">
                     <div class="account-card-header">
                         <div class="account-identity">
-                            <div class="account-avatar" style="background: ${pInfo.bg}; color: #ffffff;">
-                                <i class="${pInfo.icon}"></i>
+                            <div class="account-avatar" style="background: #25d366; color: #ffffff;">
+                                <i class="fa-brands fa-whatsapp"></i>
                             </div>
                             <div class="account-meta">
-                                <h3>${escapeHtml(acc.account_name || 'Account')}</h3>
+                                <h3>${escapeHtml(whatsapp.verified_name || 'Gaatha Ventures')}</h3>
                                 <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                    <span class="platform-pill ${pInfo.class}">
-                                        <i class="${pInfo.icon}"></i> ${pInfo.label}
+                                    <span class="platform-pill whatsapp"><i class="fa-brands fa-whatsapp"></i> WhatsApp Business</span>
+                                    <span class="platform-pill" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">
+                                        ${escapeHtml(whatsapp.platform_type || 'ON_PREMISE')}
                                     </span>
-                                    ${acc.app_identifier ? `<span class="platform-pill" style="background: #f1f5f9; color: #475569;"><i class="fa-solid fa-cube"></i> ${escapeHtml(acc.app_identifier)}</span>` : ''}
                                 </div>
                             </div>
                         </div>
-                        <span class="status-badge ${statusClass}"><i class="fa-solid ${statusIcon}"></i> ${acc.status.toUpperCase()}</span>
+                        ${getIntegrationsStatusBadge(whatsapp.status_label, whatsapp.action_required)}
                     </div>
 
                     <div class="account-details-list">
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Identifier / ID</span>
-                            <code class="account-detail-value">${escapeHtml(acc.account_identifier || 'N/A')}</code>
+                            <span class="account-detail-label">Registered Phone</span>
+                            <code class="account-detail-value">${escapeHtml(whatsapp.display_phone_number || '+91 90990 28291')}</code>
                         </div>
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Token Status</span>
-                            <span class="badge ${acc.token_status === 'valid' ? 'badge-success' : 'badge-warning'}">${escapeHtml(acc.token_status)}</span>
+                            <span class="account-detail-label">WABA Account ID</span>
+                            <code class="account-detail-value">${escapeHtml(whatsapp.configured_waba_id || '1370721214882653')}</code>
                         </div>
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Permissions</span>
-                            <span class="account-detail-value" style="font-size: 0.8rem;">${escapeHtml(acc.permissions_scope || 'Standard publish')}</span>
+                            <span class="account-detail-label">Phone Number ID</span>
+                            <code class="account-detail-value">${escapeHtml(whatsapp.configured_phone_id || '1171737406016871')}</code>
                         </div>
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Last Verified</span>
-                            <span class="account-detail-value" style="font-size: 0.8rem;">${lastVerified}</span>
+                            <span class="account-detail-label">Code Verification Status</span>
+                            <span class="badge ${whatsapp.code_verification_status === 'VERIFIED' ? 'badge-success' : 'badge-danger'}">
+                                ${escapeHtml(whatsapp.code_verification_status || 'NOT_VERIFIED')}
+                            </span>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Platform Type (Root Cause)</span>
+                            <span class="badge badge-warning">
+                                ${escapeHtml(whatsapp.platform_type || 'ON_PREMISE')} (Needs Cloud API Migration)
+                            </span>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Connection Status</span>
+                            <span class="badge badge-secondary">${escapeHtml(whatsapp.phone_status || 'DISCONNECTED')}</span>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Approved Meta Templates</span>
+                            <span class="badge ${whatsapp.approved_templates_count > 0 ? 'badge-success' : 'badge-warning'}">
+                                ${whatsapp.approved_templates_count || 0} Approved Templates
+                            </span>
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem; flex-wrap: wrap;">
-                        <button class="btn btn-sm btn-secondary" onclick="verifySocialAccount(${acc.id})" id="btn-verify-${acc.id}" style="flex: 1;" title="Test and verify connection">
-                            <i class="fa-solid fa-circle-check"></i> Verify
-                        </button>
-                        ${acc.reconnect_url ? `
-                            <a class="btn btn-sm btn-primary" href="${acc.reconnect_url}" style="flex: 1; text-align: center; text-decoration: none;">
-                                <i class="fa-solid fa-arrow-rotate-right"></i> Reconnect
-                            </a>
-                        ` : ''}
-                        <button class="btn btn-sm btn-danger" onclick="disconnectSocialAccount(${acc.id}, '${escapeHtml(acc.account_name)}')" title="Disconnect account">
-                            <i class="fa-solid fa-link-slash"></i>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+                        <button class="btn btn-sm btn-primary" onclick="loadTab('whatsapp')" style="flex: 1; background: #25d366; border-color: #25d366; color: #000; font-weight: 600;">
+                            <i class="fa-brands fa-whatsapp"></i> Open WhatsApp Studio
                         </button>
                     </div>
                 </div>
-            `;
-        }).join('');
+
+                <!-- Discovered Alternative WABA Card -->
+                <div class="account-card" style="border-left: 4px solid #10b981;">
+                    <div class="account-card-header">
+                        <div class="account-identity">
+                            <div class="account-avatar" style="background: #10b981; color: #ffffff;">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                            </div>
+                            <div class="account-meta">
+                                <h3>Aidni Global / Sizzlecraft</h3>
+                                <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
+                                    <span class="platform-pill" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                        <i class="fa-solid fa-check"></i> CLOUD_API Active
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <span class="status-badge status-running"><i class="fa-solid fa-check"></i> CONNECTED</span>
+                    </div>
+
+                    <div class="account-details-list">
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Discovered WABA ID</span>
+                            <code class="account-detail-value">1471882524763501</code>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Active Cloud Phone</span>
+                            <code class="account-detail-value">+91 98257 28291</code>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Phone ID</span>
+                            <code class="account-detail-value">1298748379987770</code>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Platform Type</span>
+                            <span class="badge badge-success">CLOUD_API (Native)</span>
+                        </div>
+                    </div>
+
+                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 1rem; line-height: 1.4; background: var(--bg-hover, #f8fafc); padding: 0.6rem; border-radius: 6px;">
+                        <i class="fa-solid fa-circle-info" style="color: #0284c7;"></i> Alternative verified Meta Cloud API asset. Can be configured in <code>.env</code> if primary phone OTP is delayed.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Meta Business Manager Activation Checklist -->
+            <div class="card" style="margin-bottom: 2rem; border-left: 4px solid #f59e0b; background: var(--bg-card, #ffffff);">
+                <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.65rem; color: #b45309; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-list-check"></i> Meta Business Manager Action Checklist for Phone +91 90990 28291
+                </h4>
+                <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: var(--text-primary); line-height: 1.6;">
+                    <li>Log in to <strong>Meta Business Manager</strong> (<code>business.facebook.com</code>) as an Administrator.</li>
+                    <li>Navigate to <strong>WhatsApp Manager</strong> &rarr; <strong>Account Tools</strong> &rarr; <strong>Phone Numbers</strong>.</li>
+                    <li>Locate <code>+91 90990 28291</code> (ID <code>1171737406016871</code>) and click <strong>Verify</strong> to receive SMS or Voice OTP.</li>
+                    <li>Complete the <strong>Migrate to Cloud API</strong> wizard to transition platform type from <code>ON_PREMISE</code> to <code>CLOUD_API</code>.</li>
+                    <li>Create and submit marketing or utility message templates under Meta WhatsApp Manager for broadcast approval.</li>
+                </ol>
+            </div>
+        `;
+
+        // =========================================================================
+        // 4. SECURITY & TOKEN ISOLATION ARCHITECTURE
+        // =========================================================================
+        html += `
+            <div class="card" style="border-left: 4px solid var(--primary, #6366f1); background: var(--bg-hover, #f8fafc); margin-top: 1.5rem;">
+                <div style="display: flex; gap: 0.85rem; align-items: flex-start;">
+                    <i class="fa-solid fa-shield-halved" style="color: var(--primary, #6366f1); font-size: 1.4rem; margin-top: 0.2rem;"></i>
+                    <div>
+                        <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.2rem;">Security &amp; Secret Isolation Architecture</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary, #64748b); line-height: 1.45;">
+                            Meta system access tokens, LinkedIn client secrets, and WhatsApp bearer keys remain strictly isolated on the VPS filesystem and secure database. They are never rendered or transmitted to client browser memory.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        view.innerHTML = html;
+
     } catch (err) {
-        grid.innerHTML = `<div class="card" style="grid-column: 1/-1; color: #ef4444; padding: 1.5rem;"><i class="fa-solid fa-triangle-exclamation"></i> Error loading accounts: ${escapeHtml(err.message)}</div>`;
+        view.innerHTML = `
+            <div class="card" style="color: #ef4444; padding: 2rem; text-align: center;">
+                <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; margin-bottom: 0.75rem;"></i>
+                <h3 style="margin-bottom: 0.5rem;">Failed to Load Integrations</h3>
+                <p style="color: #94a3b8; margin-bottom: 1rem;">${escapeHtml(err.message)}</p>
+                <button class="btn btn-sm btn-primary" onclick="loadIntegrationsDashboard()">
+                    <i class="fa-solid fa-rotate"></i> Retry
+                </button>
+            </div>
+        `;
     }
 }
 
-async function verifySocialAccount(accountId) {
-    const btn = document.getElementById(`btn-verify-${accountId}`);
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Verifying...';
-    }
-    try {
-        const res = await authFetch(`/api/accounts/verify/${accountId}`, { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            showToast('Account connection verified successfully', 'success');
-            refreshAccountsList();
-        } else {
-            showToast(`Verification failed: ${data.error || 'Unknown error'}`, 'error');
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Verify';
-            }
-        }
-    } catch (err) {
-        showToast(`Verification request error: ${err.message}`, 'error');
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-circle-check"></i> Verify';
-        }
-    }
-}
+// Map a social property (FB Page, IG account) to a GAATHA brand workspace
+async function saveSocialPropertyMapping(platform, accountIdentifier, accountName, selectId, permissionsScope, appIdentifier) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const brandId = select.value;
 
-async function disconnectSocialAccount(accountId, accountName) {
-    if (!confirm(`Are you sure you want to disconnect ${accountName || 'this account'}? Scheduled posts for this account will need reconnection.`)) {
+    if (!brandId) {
+        showToast('Please select a brand workspace to assign this property', 'warning');
         return;
     }
+
     try {
-        const res = await authFetch(`/api/accounts/${accountId}`, { method: 'DELETE' });
+        const payload = {
+            platform: platform,
+            account_identifier: accountIdentifier,
+            account_name: accountName,
+            brand_id: parseInt(brandId, 10),
+            permissions_scope: permissionsScope || 'standard',
+            app_identifier: appIdentifier || 'meta_graph'
+        };
+
+        const res = await authFetch('/api/integrations/map', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
         const data = await res.json();
         if (data.success) {
-            showToast('Account disconnected successfully', 'success');
-            refreshAccountsList();
+            showToast(`Property mapped successfully to ${data.brand_name || 'brand workspace'}`, 'success');
+            loadIntegrationsDashboard();
         } else {
-            showToast(`Failed to disconnect: ${data.error || 'Unknown error'}`, 'error');
+            showToast(`Mapping failed: ${data.error || 'Server error'}`, 'error');
         }
     } catch (err) {
-        showToast(`Disconnect request error: ${err.message}`, 'error');
+        showToast(`Request error: ${err.message}`, 'error');
     }
 }
 
-// Helper to query and update LinkedIn integration status in the UI
-async function loadLinkedInStatus() {
+// Unmap a social property
+async function unmapSocialProperty(accountId, accountName) {
+    if (!confirm(`Are you sure you want to unmap ${accountName || 'this property'} from its brand workspace?`)) {
+        return;
+    }
+
     try {
-        const res = await fetch('/api/linkedin/status');
-        if (!res.ok) return;
+        const res = await authFetch(`/api/integrations/map/${accountId}`, {
+            method: 'DELETE'
+        });
         const data = await res.json();
-        const apps = data.apps || {};
-
-        // Update Aidni Global LLP
-        const aidni = apps.aidni_global;
-        if (aidni) {
-            const pill = document.getElementById('pill-aidni-auth');
-            const badge = document.getElementById('badge-aidni-status');
-            const memberEl = document.getElementById('val-aidni-member');
-            const expiryEl = document.getElementById('val-aidni-expiry');
-            const eligEl = document.getElementById('val-aidni-eligibility');
-            const btnConnect = document.getElementById('btn-aidni-connect');
-
-            if (aidni.authenticated) {
-                if (pill) { pill.textContent = 'Authenticated'; pill.style.background = '#dcfce7'; pill.style.color = '#15803d'; }
-                if (badge) { badge.className = 'status-badge status-running'; badge.innerHTML = '<i class="fa-solid fa-check"></i> Connected'; }
-                if (memberEl) { memberEl.textContent = aidni.member ? `${aidni.member.name} (${aidni.member.sub || 'Active'})` : 'Authorized Member'; }
-                if (expiryEl) {
-                    expiryEl.textContent = aidni.token_expires_in > 0 ? `Active (Expires in ${Math.round(aidni.token_expires_in / 86400)} days)` : 'Active Token';
-                }
-                if (btnConnect) { btnConnect.innerHTML = '<i class="fa-solid fa-arrow-rotate-right"></i> Re-authorize'; }
-            } else {
-                if (pill) { pill.textContent = 'Unauthenticated'; pill.style.background = '#f1f5f9'; pill.style.color = '#64748b'; }
-                if (badge) { badge.className = 'status-badge status-stopped'; badge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Not Connected'; }
-                if (memberEl) { memberEl.textContent = 'Not authenticated'; }
-                if (expiryEl) { expiryEl.textContent = 'No active token'; }
-            }
-
-            if (eligEl) {
-                if (aidni.company_publishing_authorized) {
-                    eligEl.style.background = '#ecfdf5';
-                    eligEl.style.color = '#047857';
-                    eligEl.style.borderColor = '#a7f3d0';
-                    eligEl.innerHTML = '<i class="fa-solid fa-circle-check"></i> <strong>Authorized:</strong> Company-page publishing is fully permitted.';
-                } else if (aidni.personal_posting_available) {
-                    eligEl.style.background = '#eff6ff';
-                    eligEl.style.color = '#1d4ed8';
-                    eligEl.style.borderColor = '#bfdbfe';
-                    eligEl.innerHTML = '<i class="fa-solid fa-user-check"></i> <strong>Personal Posting Available:</strong> Scope <code>w_member_social</code> granted.<br><small style="color: #b45309;"><i class="fa-solid fa-triangle-exclamation"></i> Company-page publishing unavailable: Community Management API approval required.</small>';
-                } else {
-                    eligEl.style.background = '#f8fafc';
-                    eligEl.style.color = '#64748b';
-                    eligEl.style.borderColor = '#e2e8f0';
-                    eligEl.innerHTML = '<i class="fa-solid fa-circle-info"></i> Click "Connect Aidni Global" to initiate OAuth 2.0 authorization.';
-                }
-            }
-        }
-
-        // Update Gaatha Ventures Sh.p.k.
-        const gaatha = apps.gaatha_ventures;
-        if (gaatha) {
-            const pill = document.getElementById('pill-gaatha-auth');
-            const badge = document.getElementById('badge-gaatha-status');
-            const memberEl = document.getElementById('val-gaatha-member');
-            const expiryEl = document.getElementById('val-gaatha-expiry');
-            const eligEl = document.getElementById('val-gaatha-eligibility');
-            const btnConnect = document.getElementById('btn-gaatha-connect');
-
-            if (gaatha.authenticated) {
-                if (pill) { pill.textContent = 'Authenticated'; pill.style.background = '#dcfce7'; pill.style.color = '#15803d'; }
-                if (badge) { badge.className = 'status-badge status-running'; badge.innerHTML = '<i class="fa-solid fa-check"></i> Connected'; }
-                if (memberEl) { memberEl.textContent = gaatha.member ? `${gaatha.member.name} (${gaatha.member.sub || 'Active'})` : 'Authorized Member'; }
-                if (expiryEl) {
-                    expiryEl.textContent = gaatha.token_expires_in > 0 ? `Active (Expires in ${Math.round(gaatha.token_expires_in / 86400)} days)` : 'Active Token';
-                }
-                if (btnConnect) { btnConnect.innerHTML = '<i class="fa-solid fa-arrow-rotate-right"></i> Re-authorize'; }
-            } else {
-                if (pill) { pill.textContent = 'Unauthenticated'; pill.style.background = '#f1f5f9'; pill.style.color = '#64748b'; }
-                if (badge) { badge.className = 'status-badge status-stopped'; badge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> Not Connected'; }
-                if (memberEl) { memberEl.textContent = 'Not authenticated'; }
-                if (expiryEl) { expiryEl.textContent = 'No active token'; }
-            }
-
-            if (eligEl) {
-                if (gaatha.company_publishing_authorized) {
-                    eligEl.style.background = '#ecfdf5';
-                    eligEl.style.color = '#047857';
-                    eligEl.style.borderColor = '#a7f3d0';
-                    eligEl.innerHTML = '<i class="fa-solid fa-circle-check"></i> <strong>Authorized:</strong> Company-page publishing is fully permitted.';
-                } else if (gaatha.personal_posting_available) {
-                    eligEl.style.background = '#eff6ff';
-                    eligEl.style.color = '#1d4ed8';
-                    eligEl.style.borderColor = '#bfdbfe';
-                    eligEl.innerHTML = '<i class="fa-solid fa-user-check"></i> <strong>Personal Posting Available:</strong> Scope <code>w_member_social</code> granted.<br><small style="color: #b45309;"><i class="fa-solid fa-triangle-exclamation"></i> Company-page publishing unavailable: Community Management API approval required.</small>';
-                } else {
-                    eligEl.style.background = '#f8fafc';
-                    eligEl.style.color = '#64748b';
-                    eligEl.style.borderColor = '#e2e8f0';
-                    eligEl.innerHTML = '<i class="fa-solid fa-circle-info"></i> Click "Connect Gaatha Ventures" to initiate OAuth 2.0 authorization.';
-                }
-            }
+        if (data.success) {
+            showToast('Property unmapped successfully', 'success');
+            loadIntegrationsDashboard();
+        } else {
+            showToast(`Unmap failed: ${data.error || 'Server error'}`, 'error');
         }
     } catch (err) {
-        console.warn('Could not load LinkedIn status:', err);
+        showToast(`Request error: ${err.message}`, 'error');
     }
+}
+
+// Compatibility Aliases
+function refreshAccountsList() {
+    loadIntegrationsDashboard();
+}
+
+function loadLinkedInStatus() {
+    loadIntegrationsDashboard();
+}
+
+function escapeAttr(str) {
+    if (!str) return '';
+    return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 // ==========================================================================
