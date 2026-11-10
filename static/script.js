@@ -120,12 +120,72 @@ async function authFetch(url, options = {}) {
 }
 
 // Initialization
+function showLinkedInOAuthBanner(kind, title, message) {
+    const content = document.getElementById('content-area');
+    if (!content || !content.parentNode) return;
+    let banner = document.getElementById('linkedin-oauth-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'linkedin-oauth-banner';
+        content.parentNode.insertBefore(banner, content);
+    }
+    const isSuccess = kind === 'success';
+    const borderColor = isSuccess ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)';
+    const bgColor = isSuccess ? 'rgba(16, 185, 129, 0.10)' : 'rgba(239, 68, 68, 0.10)';
+    const accentColor = isSuccess ? '#10b981' : '#f87171';
+    const iconClass = isSuccess ? 'fa-circle-check' : 'fa-triangle-exclamation';
+
+    banner.style.cssText = `margin: 0 1.5rem 1rem 1.5rem; padding: 0.9rem 1.1rem; border-radius: 10px; border: 1px solid ${borderColor}; background: ${bgColor}; display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;`;
+    banner.innerHTML = `
+        <div style="display: flex; align-items: flex-start; gap: 0.7rem;">
+            <i class="fa-solid ${iconClass}" style="color: ${accentColor}; margin-top: 0.2rem;"></i>
+            <div>
+                <div style="font-weight: 700; color: ${accentColor}; font-size: 0.92rem;">${escapeHtml(title)}</div>
+                <div style="color: var(--text-secondary); font-size: 0.84rem; margin-top: 0.2rem; word-break: break-word;">${escapeHtml(message)}</div>
+            </div>
+        </div>
+        <button type="button" onclick="this.parentElement.remove()" aria-label="Dismiss" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 1rem; padding: 0 0.25rem;">&times;</button>
+    `;
+}
+
+// Initial App Load
 document.addEventListener('DOMContentLoaded', () => {
     setupNavigation();
     setupMobileDrawer();
     setupGlobalSearch();
-    loadTab('dashboard');
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const liError = urlParams.get('linkedin_error');
+    const liErrorDesc = urlParams.get('linkedin_error_description');
+    const liApp = urlParams.get('linkedin_app');
+    const liConnected = urlParams.get('linkedin_connected');
+    const requestedTab = urlParams.get('tab');
+    const initialTab = requestedTab || ((liError || liConnected) ? 'accounts' : 'dashboard');
+
+    loadTab(initialTab);
     startStatusPolling();
+
+    if (liConnected) {
+        const appName = liConnected === 'aidni_global'
+            ? 'Aidni Global LLP'
+            : (liConnected === 'gaatha_ventures' ? 'Gaatha Ventures Sh.p.k.' : liConnected);
+        showToast(`LinkedIn OAuth connected for ${appName}.`, 'success');
+        showLinkedInOAuthBanner('success', `LinkedIn Connected: ${appName}`, 'OAuth authorization succeeded and the active token is saved.');
+    } else if (liError) {
+        const appLabel = liApp === 'aidni_global'
+            ? 'Aidni Global LLP'
+            : (liApp === 'gaatha_ventures' ? 'Gaatha Ventures Sh.p.k.' : 'LinkedIn App');
+        const detail = liErrorDesc ? `${liError}: ${liErrorDesc}` : liError;
+        showToast(`LinkedIn OAuth error (${appLabel}): ${detail}`, 'error');
+        showLinkedInOAuthBanner('error', `LinkedIn OAuth Error (${appLabel})`, detail);
+    }
+
+    if (requestedTab || liError || liErrorDesc || liApp || liConnected) {
+        try {
+            const cleanUrl = window.location.pathname + (window.location.hash || '');
+            window.history.replaceState({}, document.title, cleanUrl);
+        } catch (e) {}
+    }
 });
 
 // Setup Navigation & Listeners
@@ -1405,8 +1465,14 @@ async function loadIntegrationsDashboard() {
                                     </span>
                                 </div>
                                 <div class="account-detail-item">
-                                    <span class="account-detail-label">Confirmed Scopes</span>
-                                    <code class="account-detail-value" style="font-size: 0.75rem;">openid, profile, email, w_member_social</code>
+                                    <span class="account-detail-label">${(app.token_scopes && app.token_scopes.length) ? 'Granted Scopes' : 'Requested Scopes'}</span>
+                                    <code class="account-detail-value" style="font-size: 0.75rem;">${escapeHtml(
+                                        (app.token_scopes && app.token_scopes.length)
+                                            ? app.token_scopes.join(', ')
+                                            : ((app.requested_scopes && app.requested_scopes.length)
+                                                ? app.requested_scopes.join(', ')
+                                                : (app.app_key === 'gaatha_ventures' ? 'w_member_social' : 'openid, profile, email, w_member_social'))
+                                    )}</code>
                                 </div>
 
                                 <div class="account-detail-item" style="flex-direction: column; align-items: flex-start; gap: 0.35rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 0.6rem;">

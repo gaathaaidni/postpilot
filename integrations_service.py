@@ -258,17 +258,47 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
             if token_data and linkedin_api.is_token_expired(token_data):
                 token_expired = True
             else:
-                # Test token via read-only userinfo
-                member = linkedin_api.get_authenticated_member(active_token)
-                if member.get('success'):
-                    user_authenticated = True
-                    member_name = member.get('name')
-                    token_scopes = (token_data.get('scope') or '').split() if token_data else ['openid', 'profile', 'email', 'w_member_social']
-                    # Check organization publishing eligibility
-                    eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=active_token)
-                    company_publishing_ready = bool(eligibility.get('can_publish'))
+                token_scopes = linkedin_api.parse_scopes(token_data.get('scope')) if token_data else []
+                if not token_scopes:
+                    token_scopes = linkedin_api.get_default_scopes(app_key)
+
+                has_openid_profile = ('openid' in token_scopes and 'profile' in token_scopes)
+                if has_openid_profile:
+                    member = linkedin_api.get_authenticated_member(active_token)
+                    if member.get('success'):
+                        user_authenticated = True
+                        member_name = member.get('name')
+                    else:
+                        introspect = linkedin_api.introspect_token(app_key, active_token)
+                        if introspect.get('checked') and introspect.get('active'):
+                            user_authenticated = True
+                            token_scopes = introspect.get('scopes') or token_scopes
+                            member_name = 'Authorized Member (Share on LinkedIn)'
+                        else:
+                            token_expired = True
                 else:
-                    token_expired = True
+                    # w_member_social-only tokens (e.g. Gaatha Ventures) do not have OpenID /v2/userinfo permission;
+                    # verify active status via LinkedIn token introspection rather than failing HTTP 403.
+                    introspect = linkedin_api.introspect_token(app_key, active_token)
+                    if introspect.get('checked'):
+                        if introspect.get('active'):
+                            user_authenticated = True
+                            if introspect.get('scopes'):
+                                token_scopes = introspect['scopes']
+                            if 'openid' in token_scopes and 'profile' in token_scopes:
+                                member = linkedin_api.get_authenticated_member(active_token)
+                                member_name = member.get('name') if member.get('success') else 'Authorized Member (Share on LinkedIn)'
+                            else:
+                                member_name = 'Authorized Member (Share on LinkedIn)'
+                        else:
+                            token_expired = True
+                    else:
+                        user_authenticated = True
+                        member_name = 'Authorized Member (Share on LinkedIn)'
+
+                if user_authenticated:
+                    eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=active_token)
+                    company_publishing_ready = bool(eligibility.get('company_publishing_authorized'))
 
         # Mapping status in database
         mapping = existing_by_org.get(str(org_id))
@@ -308,6 +338,7 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
             'user_authenticated': user_authenticated,
             'authenticated_member': member_name,
             'token_scopes': token_scopes,
+            'requested_scopes': linkedin_api.get_default_scopes(app_key),
             'company_publishing_ready': company_publishing_ready,
             'assigned_brand_id': assigned_brand_id,
             'assigned_brand_name': assigned_brand_name,

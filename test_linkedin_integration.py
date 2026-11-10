@@ -396,13 +396,16 @@ class TestLinkedInDualIntegration(unittest.TestCase):
             d_aidni = r_aidni.get_json()
             d_gaatha = r_gaatha.get_json()
 
-            for d in (d_aidni, d_gaatha):
+            for d, expected_scope in (
+                (d_aidni, 'openid profile email w_member_social'),
+                (d_gaatha, 'w_member_social'),
+            ):
                 parsed = urllib.parse.urlparse(d['authorization_url'])
                 qs = urllib.parse.parse_qs(parsed.query)
                 self.assertEqual(qs['redirect_uri'][0], expected_uri)
                 self.assertFalse(qs['redirect_uri'][0].endswith('/'))
                 self.assertTrue(qs['redirect_uri'][0].startswith('https://'))
-                self.assertEqual(qs['scope'][0], 'openid profile email w_member_social')
+                self.assertEqual(qs['scope'][0], expected_scope)
 
             # Complete callback for Aidni Global while Gaatha Ventures OAuth is still pending
             with patch('linkedin_api.exchange_code_for_token') as mock_exch, \
@@ -446,6 +449,220 @@ class TestLinkedInDualIntegration(unittest.TestCase):
                 self.assertEqual(sess.get('linkedin_access_token_aidni_global'), 'TOK_AIDNI_ONLY')
                 self.assertEqual(sess.get('linkedin_access_token_gaatha_ventures'), 'TOK_GAATHA_ONLY')
                 self.assertNotIn('linkedin_access_token', sess)
+
+
+    # --------------------------------------------------------------------------
+    # 14. Per-App Scope Isolation (Aidni OpenID+Share vs Gaatha Share-only)
+    # --------------------------------------------------------------------------
+    def test_14_per_app_scope_isolation_and_overrides(self):
+        """Verifies Aidni Global retains OpenID+Share while Gaatha Ventures defaults to w_member_social."""
+        import urllib.parse
+        with patch.object(config, 'LINKEDIN_CLIENT_ID_AIDNI_GLOBAL_LLP', 'aidni_cid'), \
+             patch.object(config, 'LINKEDIN_CLIENT_SECRET_AIDNI_GLOBAL_LLP', 'aidni_sec'), \
+             patch.object(config, 'LINKEDIN_CLIENT_ID_GAATHA_VENTURES', 'gaatha_cid'), \
+             patch.object(config, 'LINKEDIN_CLIENT_SECRET_GAATHA_VENTURES', 'gaatha_sec'):
+
+            url_aidni, _, _ = linkedin_api.get_authorization_url('aidni_global')
+            aidni_qs = urllib.parse.parse_qs(urllib.parse.urlparse(url_aidni).query)
+            self.assertEqual(aidni_qs['scope'][0].split(), ['openid', 'profile', 'email', 'w_member_social'])
+
+            url_gaatha, _, _ = linkedin_api.get_authorization_url('gaatha_ventures')
+            gaatha_qs = urllib.parse.parse_qs(urllib.parse.urlparse(url_gaatha).query)
+            self.assertEqual(gaatha_qs['scope'][0].split(), ['w_member_social'])
+            self.assertNotIn('openid', gaatha_qs['scope'][0])
+            self.assertNotIn('w_organization_social', gaatha_qs['scope'][0])
+
+            with patch.dict(os.environ, {'LINKEDIN_SCOPES_GAATHA_VENTURES': 'w_member_social,w_organization_social'}):
+                url_custom, _, _ = linkedin_api.get_authorization_url('gaatha_ventures')
+                custom_qs = urllib.parse.parse_qs(urllib.parse.urlparse(url_custom).query)
+                self.assertEqual(custom_qs['scope'][0].split(), ['w_member_social', 'w_organization_social'])
+
+    # --------------------------------------------------------------------------
+    # 15. Comma-Separated Scope Parsing & Token Introspection
+    # --------------------------------------------------------------------------
+    @patch('requests.post')
+    def test_15_comma_separated_scope_parsing_and_introspection(self, mock_post):
+        """Verifies comma-separated LinkedIn scopes parse cleanly and introspect_token uses app credentials."""
+        self.assertEqual(
+            linkedin_api.parse_scopes('email,openid,profile,w_member_social'),
+            ['email', 'openid', 'profile', 'w_member_social'],
+        )
+        token_data = {
+            'access_token': 'COMMA_SCOPES_TOK',
+            'expires_at': time.time() + 3600,
+            'scope': 'email,openid,profile,w_member_social',
+        }
+        with patch('linkedin_api.get_token_data', return_value=token_data), \
+             patch('linkedin_api.get_active_token', return_value='COMMA_SCOPES_TOK'):
+            elig = linkedin_api.check_organization_publishing_eligibility('aidni_global')
+            self.assertTrue(elig['personal_posting_available'])
+            self.assertFalse(elig['company_publishing_authorized'])
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            'active': True,
+            'status': 'active',
+            'scope': 'w_member_social',
+            'auth_type': '3L',
+        }
+        mock_post.return_value = mock_resp
+
+        with patch.object(config, 'LINKEDIN_CLIENT_ID_GAATHA_VENTURES', 'gaatha_cid_intro'), \
+             patch.object(config, 'LINKEDIN_CLIENT_SECRET_GAATHA_VENTURES', 'gaatha_sec_intro'):
+            res = linkedin_api.introspect_token('gaatha_ventures', 'GAATHA_TOK_XYZ')
+            self.assertTrue(res['checked'])
+            self.assertTrue(res['active'])
+            self.assertEqual(res['scopes'], ['w_member_social'])
+            self.assertEqual(mock_post.call_args[0][0], 'https://www.linkedin.com/oauth/v2/introspectToken')
+            self.assertEqual(mock_post.call_args[1]['data']['client_id'], 'gaatha_cid_intro')
+            self.assertEqual(mock_post.call_args[1]['data']['client_secret'], 'gaatha_sec_intro')
+
+    # --------------------------------------------------------------------------
+    # 16. Callback Error Handling Without Crash / HTTP 500
+    # --------------------------------------------------------------------------
+    def test_16_callback_error_handling_browser_redirect_no_500(self):
+        """Verifies OAuth error callbacks redirect safely to Accounts tab instead of crashing on urllib."""
+        import urllib.parse
+        import app as postpilot_app
+        client = postpilot_app.app.test_client()
+
+        resp = client.get(
+            '/api/auth/linkedin/callback?error=unauthorized_scope_error&error_description=Scope+not+authorized&state=gaatha_ventures:csrf123',
+            headers={'Accept': 'text/html'},
+        )
+        self.assertEqual(resp.status_code, 302)
+        loc = resp.headers.get('Location', '')
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
+        self.assertEqual(qs.get('tab'), ['accounts'])
+        self.assertEqual(qs.get('linkedin_error'), ['unauthorized_scope_error'])
+        self.assertEqual(qs.get('linkedin_app'), ['gaatha_ventures'])
+
+        resp_json = client.get(
+            '/api/auth/linkedin/callback?error=unauthorized_scope_error&error_description=Scope+not+authorized',
+            headers={'Accept': 'application/json'},
+        )
+        self.assertEqual(resp_json.status_code, 400)
+        self.assertEqual(resp_json.get_json().get('code'), 'OAUTH_DENIED')
+
+    # --------------------------------------------------------------------------
+    # 17. Share-Only Token Validation & Honest Account Status
+    # --------------------------------------------------------------------------
+    def test_17_gaatha_w_member_social_status_and_accounts_honesty(self):
+        """Verifies w_member_social-only tokens validate via introspection and unauthenticated rows never fake connected."""
+        import integrations_service
+        import database
+        import app as postpilot_app
+
+        database.init_db()
+        gaatha_tok = {
+            'access_token': 'GAATHA_SHARE_ONLY_TOK',
+            'expires_at': time.time() + 3600,
+            'scope': 'w_member_social',
+        }
+        with patch('linkedin_api.get_active_token', side_effect=lambda k: 'GAATHA_SHARE_ONLY_TOK' if k == 'gaatha_ventures' else None), \
+             patch('linkedin_api.get_token_data', side_effect=lambda k: gaatha_tok if k == 'gaatha_ventures' else None), \
+             patch('linkedin_api.introspect_token', return_value={'checked': True, 'active': True, 'scopes': ['w_member_social']}), \
+             patch('linkedin_api.get_authenticated_member') as mock_userinfo:
+            status = integrations_service.get_linkedin_integration_status()
+            mock_userinfo.assert_not_called()
+            apps = {a['app_key']: a for a in status['apps']}
+            self.assertTrue(apps['gaatha_ventures']['user_authenticated'])
+            self.assertEqual(apps['gaatha_ventures']['token_scopes'], ['w_member_social'])
+            self.assertEqual(apps['gaatha_ventures']['requested_scopes'], ['w_member_social'])
+            self.assertFalse(apps['gaatha_ventures']['company_publishing_ready'])
+            self.assertIn('Limited', apps['gaatha_ventures']['status_label'])
+
+        client = postpilot_app.app.test_client()
+        with client.session_transaction() as sess:
+            sess['user_id'] = 1
+            sess['username'] = 'admin'
+            sess['role'] = 'admin'
+            sess['organization_id'] = 1
+
+        with patch('linkedin_api.get_token_data', return_value=None):
+            acc_resp = client.get('/api/accounts')
+            self.assertEqual(acc_resp.status_code, 200)
+            li_accs = {a.get('app_identifier'): a for a in acc_resp.get_json()['accounts'] if a['platform'] == 'linkedin'}
+            self.assertEqual(li_accs['gaatha_ventures']['status'], 'authentication_required')
+            self.assertEqual(li_accs['gaatha_ventures']['token_status'], 'missing')
+            self.assertEqual(li_accs['gaatha_ventures']['permissions_scope'], 'w_member_social')
+
+    # --------------------------------------------------------------------------
+    # 18. Aidni Global Preservation During Gaatha OAuth Callback
+    # --------------------------------------------------------------------------
+    @patch('requests.post')
+    def test_18_aidni_preservation_during_gaatha_oauth_flow(self, mock_post):
+        """Verifies completing Gaatha Ventures OAuth preserves Aidni Global's existing token store and DB mapping."""
+        import app as postpilot_app
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            'access_token': 'GAATHA_NEW_TOKEN_777',
+            'expires_in': 5184000,
+            'scope': 'w_member_social',
+        }
+        mock_post.return_value = mock_resp
+
+        aidni_expires_at = time.time() + 5000000
+        mem_store = {
+            'aidni_global': {
+                'access_token': 'AIDNI_LIVE_TOKEN_PROTECTED',
+                'expires_in': 5183999,
+                'expires_at': aidni_expires_at,
+                'scope': 'email,openid,profile,w_member_social',
+            }
+        }
+
+        def fake_load():
+            return dict(mem_store)
+
+        def fake_write(data):
+            mem_store.clear()
+            mem_store.update(data)
+
+        client = postpilot_app.app.test_client()
+        with client.session_transaction() as sess:
+            sess['user_id'] = 1
+            sess['username'] = 'admin'
+            sess['role'] = 'admin'
+            sess['organization_id'] = 1
+            sess['linkedin_oauth_states'] = {'gaatha_ventures': 'gaatha_csrf_ok'}
+
+        with patch.object(config, 'LINKEDIN_CLIENT_ID_GAATHA_VENTURES', 'gaatha_cid_live'), \
+             patch.object(config, 'LINKEDIN_CLIENT_SECRET_GAATHA_VENTURES', 'gaatha_sec_live'), \
+             patch.object(config, 'LINKEDIN_REDIRECT_URI', 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'), \
+             patch('linkedin_api._load_token_store_from_disk', side_effect=fake_load), \
+             patch('linkedin_api._write_token_store_to_disk', side_effect=fake_write), \
+             patch('linkedin_api.get_authenticated_member') as mock_userinfo, \
+             patch('database.upsert_social_account') as mock_upsert:
+
+            cb_resp = client.get(
+                '/api/auth/linkedin/callback?code=gaatha_auth_code_123&state=gaatha_ventures:gaatha_csrf_ok',
+                headers={'Accept': 'text/html'},
+            )
+            self.assertEqual(cb_resp.status_code, 302)
+            self.assertIn('linkedin_connected=gaatha_ventures', cb_resp.headers.get('Location', ''))
+            mock_userinfo.assert_not_called()
+
+            # Verify token exchange used Gaatha credentials + exact redirect_uri
+            post_data = mock_post.call_args[1]['data']
+            self.assertEqual(post_data['client_id'], 'gaatha_cid_live')
+            self.assertEqual(post_data['client_secret'], 'gaatha_sec_live')
+            self.assertEqual(post_data['redirect_uri'], 'https://postpilot.gaatha.tech/api/auth/linkedin/callback')
+
+            # Verify Aidni Global token completely untouched while Gaatha Ventures saved
+            self.assertEqual(mem_store['aidni_global']['access_token'], 'AIDNI_LIVE_TOKEN_PROTECTED')
+            self.assertEqual(mem_store['aidni_global']['expires_at'], aidni_expires_at)
+            self.assertEqual(mem_store['gaatha_ventures']['access_token'], 'GAATHA_NEW_TOKEN_777')
+            self.assertEqual(mem_store['gaatha_ventures']['scope'], 'w_member_social')
+
+            # Verify DB upsert targeted Gaatha Ventures (145250613), never Aidni (145240694)
+            mock_upsert.assert_called_once()
+            upsert_kw = mock_upsert.call_args[1]
+            self.assertEqual(upsert_kw['app_identifier'], 'gaatha_ventures')
+            self.assertEqual(upsert_kw['account_identifier'], '145250613')
 
 
 if __name__ == '__main__':

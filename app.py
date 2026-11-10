@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from functools import wraps
 from PIL import Image
+import urllib.parse
 from datetime import datetime, timezone
 from flask import Flask, render_template, jsonify, request, session, send_from_directory, redirect, url_for
 
@@ -381,7 +382,13 @@ def linkedin_connect(app_name=None):
     try:
         norm_key = linkedin_api.normalize_app_key(app_key)
         red_uri = getattr(config, 'LINKEDIN_REDIRECT_URI', None) or 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'
-        auth_url, state, csrf = linkedin_api.get_authorization_url(app_key=norm_key, redirect_uri=red_uri)
+        raw_scope = request.args.get('scope')
+        requested_scopes = linkedin_api.parse_scopes(raw_scope) if raw_scope else None
+        auth_url, state, csrf = linkedin_api.get_authorization_url(
+            app_key=norm_key,
+            redirect_uri=red_uri,
+            scopes=requested_scopes,
+        )
 
         # Save CSRF state per app in session
         if 'linkedin_oauth_states' not in session:
@@ -420,11 +427,37 @@ def linkedin_callback():
     error = request.args.get('error')
     error_desc = request.args.get('error_description')
 
+    def _callback_error_response(err_msg, err_code, desc=None, app_hint=None, force_redirect_for_non_json=False):
+        accept_hdr = request.headers.get('Accept', '')
+        wants_json = 'application/json' in accept_hdr or request.args.get('format') == 'json'
+        wants_browser = 'text/html' in accept_hdr or force_redirect_for_non_json
+        if not wants_json and wants_browser:
+            params = {
+                'tab': 'accounts',
+                'linkedin_error': str(err_msg),
+            }
+            if desc:
+                params['linkedin_error_description'] = str(desc)
+            if app_hint:
+                params['linkedin_app'] = str(app_hint)
+            return redirect('/?' + urllib.parse.urlencode(params))
+        payload = {'error': err_msg, 'code': err_code}
+        if desc:
+            payload['description'] = desc
+        return jsonify(payload), 400
+
+    state_app_hint = state.split(':', 1)[0] if state and ':' in state else None
+
     if error:
-        logger.warning(f"LinkedIn OAuth authorization denied: {error} - {error_desc}")
-        if 'application/json' in request.headers.get('Accept', '') or request.args.get('format') == 'json':
-            return jsonify({'error': error, 'description': error_desc, 'code': 'OAUTH_DENIED'}), 400
-        return redirect('/?tab=accounts&linkedin_error=' + urllib.parse.quote(str(error)))
+        safe_desc = linkedin_api.sanitize_log_message(str(error_desc or ''))
+        logger.warning(f"LinkedIn OAuth authorization denied (app={state_app_hint or 'unknown'}): {error} - {safe_desc}")
+        return _callback_error_response(
+            err_msg=error,
+            err_code='OAUTH_DENIED',
+            desc=error_desc,
+            app_hint=state_app_hint,
+            force_redirect_for_non_json=True,
+        )
 
     if not state:
         return jsonify({'error': 'Missing OAuth state parameter.', 'code': 'INVALID_STATE'}), 400
@@ -451,7 +484,11 @@ def linkedin_callback():
 
     if not valid_csrf:
         logger.warning(f"LinkedIn OAuth callback rejected: CSRF state mismatch for app '{app_key}'.")
-        return jsonify({'error': 'Invalid OAuth state. Potential CSRF detected.', 'code': 'INVALID_STATE'}), 400
+        return _callback_error_response(
+            err_msg='Invalid OAuth state. Potential CSRF detected or login session expired — please retry connecting from Connected Accounts.',
+            err_code='INVALID_STATE',
+            app_hint=app_key,
+        )
 
     # Clean state after use
     if 'linkedin_oauth_states' in session and app_key in session['linkedin_oauth_states']:
@@ -460,19 +497,33 @@ def linkedin_callback():
     session.modified = True
 
     if not code:
-        return jsonify({'error': 'Missing authorization code in LinkedIn callback.', 'code': 'MISSING_CODE'}), 400
+        return _callback_error_response(
+            err_msg='Missing authorization code in LinkedIn callback.',
+            err_code='MISSING_CODE',
+            app_hint=app_key,
+        )
 
     # Exchange code for access token using specific app credentials and exact redirect URI
     red_uri = getattr(config, 'LINKEDIN_REDIRECT_URI', None) or 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'
     token_res = linkedin_api.exchange_code_for_token(code=code, app_key=app_key, redirect_uri=red_uri)
     if not token_res.get('success'):
-        return jsonify({'error': token_res.get('error', 'Token exchange failed'), 'code': 'EXCHANGE_FAILED'}), 400
+        return _callback_error_response(
+            err_msg=token_res.get('error', 'Token exchange failed'),
+            err_code='EXCHANGE_FAILED',
+            app_hint=app_key,
+        )
 
     token = token_res['access_token']
     session[f'linkedin_access_token_{app_key}'] = token
 
     eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=token)
-    member = token_res.get('member') or linkedin_api.get_authenticated_member(token)
+    granted_scopes = linkedin_api.parse_scopes(token_res.get('scope'))
+    if token_res.get('member'):
+        member = token_res['member']
+    elif 'openid' in granted_scopes and 'profile' in granted_scopes:
+        member = linkedin_api.get_authenticated_member(token)
+    else:
+        member = {'success': False, 'skipped': True, 'name': None}
 
     # Persist verified token and status to database social_accounts without overwriting existing brand mapping
     try:
@@ -614,8 +665,27 @@ def get_accounts():
     for a in accounts:
         plat = a['platform']
         if plat == 'linkedin':
-            app_k = a.get('app_identifier') or 'gaatha_ventures'
+            app_k = linkedin_api.normalize_app_key(
+                a.get('app_identifier')
+                or ('aidni_global' if str(a.get('account_identifier')) == str(getattr(config, 'LINKEDIN_ORG_ID_AIDNI_GLOBAL', '145240694')) else 'gaatha_ventures')
+            )
             a['reconnect_url'] = f"/api/auth/linkedin/connect/{app_k}"
+            tok_data = linkedin_api.get_token_data(app_k)
+            if tok_data and tok_data.get('access_token'):
+                real_scopes = linkedin_api.parse_scopes(tok_data.get('scope'))
+                if real_scopes:
+                    a['permissions_scope'] = ','.join(real_scopes)
+                if linkedin_api.is_token_expired(tok_data):
+                    a['status'] = 'expired'
+                    a['token_status'] = 'expired'
+                else:
+                    a['status'] = 'connected'
+                    a['token_status'] = 'valid'
+            else:
+                a['status'] = 'authentication_required'
+                a['token_status'] = 'missing'
+                a['permissions_scope'] = ','.join(linkedin_api.get_default_scopes(app_k))
+            continue
         elif plat in ('facebook', 'instagram'):
             a['reconnect_url'] = "/api/auth/meta/connect"
         elif plat == 'whatsapp':

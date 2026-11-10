@@ -50,6 +50,119 @@ COMMUNITY_MANAGEMENT_SCOPES = [
 # Default requested scopes during authorization (Do NOT request unapproved products)
 DEFAULT_SCOPES = CONFIRMED_SCOPES
 
+# Per-app verified scope profiles:
+# - Aidni Global LLP: Sign In with LinkedIn using OpenID Connect + Share on LinkedIn
+# - Gaatha Ventures Sh.p.k.: Share on LinkedIn (w_member_social) unless OpenID/Community Management are explicitly approved
+DEFAULT_SCOPES_BY_APP = {
+    "aidni_global": list(CONFIRMED_SCOPES),
+    "gaatha_ventures": ["w_member_social"],
+}
+
+
+def parse_scopes(scope_value):
+    """Splits LinkedIn space- or comma-separated scope strings/iterables into an ordered unique list."""
+    if not scope_value:
+        return []
+    if isinstance(scope_value, (list, tuple, set)):
+        raw_items = []
+        for item in scope_value:
+            raw_items.extend(str(item).replace(",", " ").split())
+    else:
+        raw_items = str(scope_value).replace(",", " ").split()
+    seen = set()
+    parsed = []
+    for item in raw_items:
+        clean = item.strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            parsed.append(clean)
+    return parsed
+
+
+def get_default_scopes(app_key=None):
+    """
+    Returns default authorized OAuth scopes for the given LinkedIn application.
+    Supports optional environment overrides:
+      - LINKEDIN_SCOPES_AIDNI_GLOBAL
+      - LINKEDIN_SCOPES_GAATHA_VENTURES
+    """
+    import os
+    norm_key = normalize_app_key(app_key)
+    env_var = (
+        "LINKEDIN_SCOPES_AIDNI_GLOBAL"
+        if norm_key == "aidni_global"
+        else "LINKEDIN_SCOPES_GAATHA_VENTURES"
+    )
+    override = (os.environ.get(env_var) or "").strip()
+    if override:
+        parsed = parse_scopes(override)
+        if parsed:
+            return parsed
+    return list(DEFAULT_SCOPES_BY_APP.get(norm_key, DEFAULT_SCOPES))
+
+
+def introspect_token(app_key=None, access_token=None):
+    """
+    Verifies a LinkedIn OAuth access token via LinkedIn's token introspection endpoint
+    (works for w_member_social-only tokens without requiring OpenID /v2/userinfo scopes).
+    """
+    import logging
+    cfg = get_app_config(app_key)
+    token = access_token or get_active_token(cfg['app_key'])
+    if not token:
+        return {
+            'checked': False,
+            'active': False,
+            'scopes': [],
+            'error': 'No active token available for introspection.',
+        }
+    if not cfg.get('client_id') or not cfg.get('client_secret'):
+        return {
+            'checked': False,
+            'active': False,
+            'scopes': [],
+            'error': 'Client credentials not configured for introspection.',
+        }
+    try:
+        resp = requests.post(
+            "https://www.linkedin.com/oauth/v2/introspectToken",
+            data={
+                'client_id': cfg['client_id'],
+                'client_secret': cfg['client_secret'],
+                'token': token,
+            },
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            data = resp.json() or {}
+            scopes = parse_scopes(data.get('scope'))
+            return {
+                'checked': True,
+                'active': bool(data.get('active')),
+                'status': data.get('status'),
+                'scope': data.get('scope', ''),
+                'scopes': scopes,
+                'auth_type': data.get('auth_type'),
+                'exp': data.get('exp'),
+            }
+        return {
+            'checked': False,
+            'active': False,
+            'scopes': [],
+            'error': f"HTTP {resp.status_code}",
+        }
+    except Exception as e:
+        safe_err = sanitize_log_message(str(e))
+        logging.getLogger('App').warning(
+            f"LinkedIn token introspection error for {cfg['app_key']}: {safe_err}"
+        )
+        return {
+            'checked': False,
+            'active': False,
+            'scopes': [],
+            'error': safe_err,
+        }
+
 # Application Identifier Constants
 APP_AIDNI_GLOBAL = "aidni_global"
 APP_GAATHA_VENTURES = "gaatha_ventures"
@@ -352,7 +465,10 @@ def get_authorization_url(app_key: str = APP_GAATHA_VENTURES,
         sec_state = state
         csrf = state.split(":", 1)[1] if ":" in state else state
 
-    requested_scopes = scopes or DEFAULT_SCOPES
+    if scopes is None:
+        requested_scopes = get_default_scopes(cfg['app_key'])
+    else:
+        requested_scopes = parse_scopes(scopes) or get_default_scopes(cfg['app_key'])
     scope_str = " ".join(requested_scopes)
 
     params = {
@@ -418,8 +534,12 @@ def exchange_code_for_token(code: str,
         expires_in = res_json.get('expires_in', 0)
         scope = res_json.get('scope', '')
 
-        # Fetch authenticated member profile
-        member = get_authenticated_member(token)
+        # Fetch authenticated member profile only when OpenID scopes are granted
+        granted_scopes = parse_scopes(scope)
+        if 'openid' in granted_scopes and 'profile' in granted_scopes:
+            member = get_authenticated_member(token)
+        else:
+            member = {'success': False, 'skipped': True}
 
         token_record = {
             'access_token': token,
@@ -509,7 +629,7 @@ def check_organization_publishing_eligibility(app_key: str, access_token: Option
             'org_urn': cfg['org_urn']
         }
 
-    granted_scopes = (token_data.get('scope', '') or '').split() if token_data else []
+    granted_scopes = parse_scopes(token_data.get('scope', '')) if token_data else []
     # If scopes not recorded, assume confirmed scopes
     if not granted_scopes:
         granted_scopes = CONFIRMED_SCOPES
@@ -631,11 +751,12 @@ def audit_linkedin_status() -> Dict[str, Any]:
         # Eligibility check
         eligibility = check_organization_publishing_eligibility(app_key, access_token=token)
 
+        granted_scopes = parse_scopes(token_data.get('scope')) if token_data else []
         member_info = None
         if token and not expired:
             if token_data and token_data.get('member'):
                 member_info = token_data['member']
-            else:
+            elif 'openid' in granted_scopes and 'profile' in granted_scopes:
                 m = get_authenticated_member(token)
                 if m.get('success'):
                     member_info = {'name': m.get('name'), 'sub': m.get('sub'), 'email': m.get('email')}
@@ -654,6 +775,8 @@ def audit_linkedin_status() -> Dict[str, Any]:
             'org_id': cfg['org_id'],
             'org_urn': cfg['org_urn'],
             'member': member_info,
+            'scopes': granted_scopes,
+            'requested_scopes': get_default_scopes(app_key),
             'personal_posting_available': eligibility.get('personal_posting_available', False),
             'company_publishing_authorized': eligibility.get('company_publishing_authorized', False),
             'eligibility_code': eligibility.get('eligibility_code'),
