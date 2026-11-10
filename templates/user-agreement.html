@@ -18,22 +18,25 @@
     
     <!-- Shared Styles -->
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem('postpilot_theme_v2') === 'dark') {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
 
     <style>
         :root {
-            --bg-canvas: #080c14;
-            --bg-surface: #11192b;
-            --bg-surface-elevated: #162035;
-            --border-subtle: rgba(255, 255, 255, 0.08);
-            --border-highlight: rgba(59, 130, 246, 0.3);
-            --primary: #3b82f6;
-            --primary-hover: #2563eb;
-            --accent-gold: #f59e0b;
-            --accent-green: #10b981;
-            --danger: #ef4444;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --text-subtle: #64748b;
+            --bg-canvas: var(--bg-app);
+            --bg-surface-elevated: var(--bg-surface-subtle);
+            --border-subtle: var(--border);
+            --border-highlight: var(--primary-border);
+            --accent-green: var(--success);
+            --text-main: var(--text-primary);
+            --text-subtle: var(--text-muted);
         }
 
         body {
@@ -374,6 +377,19 @@
             font-size: 0.82rem;
             color: var(--text-subtle);
         }
+
+        /* Light-first SaaS overrides (preserves optional dark mode) */
+        .public-navbar { background: var(--bg-surface); border-bottom-color: var(--border); }
+        .legal-header { background: var(--bg-surface); border-bottom-color: var(--border); }
+        .badge-pill { background: var(--primary-light); color: var(--primary); border-color: var(--primary-border); }
+        .brand-title, .legal-header h1, .section-heading { color: var(--text-primary); }
+        .legal-header p, .prose-section p, .prose-section ul { color: var(--text-secondary); }
+        .nav-link:hover, .nav-link.active, .footer-link:hover, .footer-link.active, .toc-link:hover { color: var(--primary); }
+        .toc-link:hover { background: var(--bg-surface-subtle); }
+        .prose-section, .sidebar-toc { box-shadow: var(--shadow-xs); }
+        .callout-box { background: var(--primary-light); border-color: var(--primary-border); color: var(--text-primary); }
+        .callout-box.info { background: var(--success-light); border-color: var(--success-border); color: var(--success); }
+        .public-footer { background: var(--bg-surface); border-top-color: var(--border); }
     </style>
 </head>
 

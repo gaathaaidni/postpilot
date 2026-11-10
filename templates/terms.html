@@ -18,22 +18,25 @@
     
     <!-- Shared Styles -->
     <link rel="stylesheet" href="/static/style.css">
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem('postpilot_theme_v2') === 'dark') {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
 
     <style>
         :root {
-            --bg-canvas: #080c14;
-            --bg-surface: #11192b;
-            --bg-surface-elevated: #162035;
-            --border-subtle: rgba(255, 255, 255, 0.08);
-            --border-highlight: rgba(59, 130, 246, 0.3);
-            --primary: #3b82f6;
-            --primary-hover: #2563eb;
-            --accent-gold: #f59e0b;
-            --accent-green: #10b981;
-            --danger: #ef4444;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --text-subtle: #64748b;
+            --bg-canvas: var(--bg-app);
+            --bg-surface-elevated: var(--bg-surface-subtle);
+            --border-subtle: var(--border);
+            --border-highlight: var(--primary-border);
+            --accent-green: var(--success);
+            --text-main: var(--text-primary);
+            --text-subtle: var(--text-muted);
         }
 
         body {
@@ -437,6 +440,20 @@
                 padding: 1.75rem 1.5rem;
             }
         }
+
+        /* Light-first SaaS overrides (preserves optional dark mode) */
+        .public-navbar { background: var(--bg-surface); border-bottom-color: var(--border); }
+        .brand-title, .page-title, .section-heading, li strong, .callout-title { color: var(--text-primary); }
+        .nav-link:hover, .nav-link.active, .footer-link:hover, .toc-link:hover { color: var(--primary); }
+        .toc-link:hover { background: var(--bg-surface-subtle); }
+        p, ul, ol, .callout-desc { color: var(--text-secondary); }
+        code { background: var(--bg-surface-subtle); border-color: var(--border); color: var(--text-primary); }
+        .draft-alert-card { background: var(--warning-light); border-color: var(--warning-border); }
+        .draft-alert-text { color: var(--text-primary); }
+        .placeholder-tag { background: var(--warning-light); border-color: var(--warning-border); color: var(--warning); }
+        .prose-container, .toc-sidebar { box-shadow: var(--shadow-sm); }
+        .public-footer { background: var(--bg-surface); border-top-color: var(--border); }
+        .footer-bottom { border-top-color: var(--border); }
     </style>
 </head>
 

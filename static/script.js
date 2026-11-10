@@ -130,9 +130,9 @@ function showLinkedInOAuthBanner(kind, title, message) {
         content.parentNode.insertBefore(banner, content);
     }
     const isSuccess = kind === 'success';
-    const borderColor = isSuccess ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)';
-    const bgColor = isSuccess ? 'rgba(16, 185, 129, 0.10)' : 'rgba(239, 68, 68, 0.10)';
-    const accentColor = isSuccess ? '#10b981' : '#f87171';
+    const borderColor = isSuccess ? 'rgba(5, 150, 105, 0.35)' : 'rgba(220, 38, 38, 0.35)';
+    const bgColor = isSuccess ? 'var(--success-soft)' : 'var(--danger-soft)';
+    const accentColor = isSuccess ? 'var(--success)' : 'var(--danger)';
     const iconClass = isSuccess ? 'fa-circle-check' : 'fa-triangle-exclamation';
 
     banner.style.cssText = `margin: 0 1.5rem 1rem 1.5rem; padding: 0.9rem 1.1rem; border-radius: 10px; border: 1px solid ${borderColor}; background: ${bgColor}; display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;`;
@@ -148,11 +148,155 @@ function showLinkedInOAuthBanner(kind, title, message) {
     `;
 }
 
+// Theme & Sidebar Preferences (Light-first SaaS defaults)
+const THEME_STORAGE_KEY = 'postpilot_theme_v2';
+const SIDEBAR_COLLAPSED_KEY = 'postpilot_sidebar_collapsed';
+
+function getCurrentTheme() {
+    try {
+        return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+    } catch (e) {
+        return 'light';
+    }
+}
+
+function applyThemeUI(mode) {
+    const normalized = mode === 'dark' ? 'dark' : 'light';
+    const root = document.documentElement;
+    if (normalized === 'dark') {
+        root.setAttribute('data-theme', 'dark');
+    } else {
+        root.removeAttribute('data-theme');
+    }
+
+    const desktopBtn = document.getElementById('theme-toggle-btn');
+    if (desktopBtn) {
+        desktopBtn.setAttribute('aria-pressed', normalized === 'dark' ? 'true' : 'false');
+        desktopBtn.setAttribute('title', normalized === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode');
+        desktopBtn.innerHTML = normalized === 'dark'
+            ? '<i class="fa-solid fa-sun"></i><span class="btn-label">Light</span>'
+            : '<i class="fa-solid fa-moon"></i><span class="btn-label">Dark</span>';
+    }
+
+    const mobileBtn = document.getElementById('mobile-theme-btn');
+    if (mobileBtn) {
+        mobileBtn.setAttribute('aria-pressed', normalized === 'dark' ? 'true' : 'false');
+        mobileBtn.innerHTML = normalized === 'dark'
+            ? '<i class="fa-solid fa-sun"></i>'
+            : '<i class="fa-solid fa-moon"></i>';
+    }
+
+    document.querySelectorAll('.theme-choice-card[data-theme-value]').forEach(btn => {
+        const active = btn.dataset.themeValue === normalized;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+function setTheme(mode) {
+    const normalized = mode === 'dark' ? 'dark' : 'light';
+    try {
+        localStorage.setItem(THEME_STORAGE_KEY, normalized);
+    } catch (e) {}
+    applyThemeUI(normalized);
+}
+
+function toggleTheme() {
+    setTheme(getCurrentTheme() === 'dark' ? 'light' : 'dark');
+}
+
+function initTheme() {
+    applyThemeUI(getCurrentTheme());
+    ['theme-toggle-btn', 'mobile-theme-btn'].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn && !btn.getAttribute('onclick') && !btn.dataset.themeBound) {
+            btn.dataset.themeBound = '1';
+            btn.addEventListener('click', toggleTheme);
+        }
+    });
+}
+
+function applySidebarCollapseUI(collapsed) {
+    const isDesktop = window.innerWidth >= 992;
+    document.body.classList.toggle('sidebar-collapsed', Boolean(collapsed && isDesktop));
+    const btn = document.getElementById('sidebar-collapse-btn');
+    if (btn) {
+        btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        btn.setAttribute('title', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        btn.innerHTML = collapsed
+            ? '<i class="fa-solid fa-angles-right"></i>'
+            : '<i class="fa-solid fa-angles-left"></i>';
+    }
+}
+
+function toggleSidebarCollapse() {
+    let current = false;
+    try {
+        current = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    } catch (e) {}
+    const next = !current;
+    try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+    } catch (e) {}
+    applySidebarCollapseUI(next);
+}
+
+function initSidebarCollapse() {
+    let saved = false;
+    try {
+        saved = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    } catch (e) {}
+    applySidebarCollapseUI(saved);
+
+    const btn = document.getElementById('sidebar-collapse-btn');
+    if (btn && !btn.getAttribute('onclick') && !btn.dataset.collapseBound) {
+        btn.dataset.collapseBound = '1';
+        btn.addEventListener('click', toggleSidebarCollapse);
+    }
+
+    if (!window._ppResizeCollapseBound) {
+        window._ppResizeCollapseBound = true;
+        window.addEventListener('resize', () => {
+            let pref = false;
+            try {
+                pref = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+            } catch (e) {}
+            applySidebarCollapseUI(pref);
+        });
+    }
+}
+
+window.setTheme = setTheme;
+window.toggleTheme = toggleTheme;
+window.initTheme = initTheme;
+window.toggleSidebarCollapse = toggleSidebarCollapse;
+
 // Initial App Load
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+    initSidebarCollapse();
     setupNavigation();
     setupMobileDrawer();
     setupGlobalSearch();
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const sidebar = document.getElementById('sidebar') || document.querySelector('.sidebar');
+        const overlay = document.getElementById('drawer-overlay') || document.querySelector('.drawer-overlay');
+        if (sidebar && sidebar.classList.contains('open')) {
+            sidebar.classList.remove('open');
+            if (overlay) overlay.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+        const postModal = document.getElementById('post-modal');
+        if (postModal && postModal.classList.contains('show') && typeof closeModal === 'function') {
+            closeModal();
+        }
+        const waModal = document.getElementById('wa-preview-modal');
+        if (waModal && waModal.classList.contains('show') && typeof closeWaPreviewModal === 'function') {
+            closeWaPreviewModal();
+        }
+    });
 
     const urlParams = new URLSearchParams(window.location.search);
     const liError = urlParams.get('linkedin_error');
@@ -287,6 +431,7 @@ function loadTab(tab) {
         'nz': 'Phoenix International Management',
         'gaatha': 'Gaatha AI Automation',
         'insta': 'Instagram Synchronization',
+        'about': 'Help & About PostPilot',
         'search': 'Search Posts'
     };
     if (title) title.textContent = titles[tab] || 'Dashboard';
@@ -327,9 +472,67 @@ function loadTab(tab) {
         renderQueueView(content);
     } else if (tab === 'analytics') {
         renderAnalytics(content);
+    } else if (tab === 'about') {
+        renderHelpAboutView(content);
     } else if (['tour', 'nz', 'gaatha', 'insta'].includes(tab)) {
         renderModule(content, tab);
     }
+}
+
+function renderHelpAboutView(container) {
+    container.innerHTML = `
+        <div class="hub-hero fade-in">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1.25rem; flex-wrap: wrap;">
+                <div>
+                    <span class="badge badge-primary" style="margin-bottom: 0.65rem;"><i class="fa-solid fa-shield-halved"></i> Enterprise Multi-Brand Operations</span>
+                    <h2 style="font-size: 1.55rem; margin-bottom: 0.45rem;">PostPilot Help & Platform Documentation</h2>
+                    <p style="font-size: 0.92rem; max-width: 720px;">Unified publishing control plane across GAATHA brands with strict workspace isolation, Asia/Kolkata scheduling alignment, and fail-closed publishing safety gates.</p>
+                </div>
+                <div style="display: flex; gap: 0.6rem; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="loadTab('composer')"><i class="fa-solid fa-pen-nib"></i> Open Composer</button>
+                    <button class="btn btn-outline-secondary" onclick="loadTab('accounts')"><i class="fa-solid fa-plug"></i> Connected Accounts</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-metrics-grid fade-in" style="margin-bottom: 1.5rem;">
+            <div class="card">
+                <div class="card-header"><h3 style="margin: 0;"><i class="fa-solid fa-lock text-primary"></i> Publishing Safety Model</h3></div>
+                <div class="card-body">
+                    <p style="color: var(--text-secondary); font-size: 0.88rem; line-height: 1.6; margin-bottom: 0.85rem;">
+                        Scheduled jobs, queue testing, and UI workflows respect environment-level safety guardrails (<code>POSTPILOT_PUBLISHING_ENABLED</code> and <code>WHATSAPP_PUBLISHING_ENABLED</code>). When live dispatch is disabled, scheduled posts stay protected without hitting external social endpoints.
+                    </p>
+                    <div class="notice-callout notice-callout--info">
+                        <i class="fa-solid fa-circle-info"></i>
+                        <div>Check real gateway health on the <strong>Connected Accounts</strong> view before enabling any external brand schedule.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><h3 style="margin: 0;"><i class="fa-solid fa-sitemap text-primary"></i> Multi-Brand Isolation</h3></div>
+                <div class="card-body">
+                    <p style="color: var(--text-secondary); font-size: 0.88rem; line-height: 1.6; margin-bottom: 0.85rem;">
+                        Each GAATHA workspace maintains isolated credentials, brand tones, hashtags, and destination bindings across Meta Pages, Instagram Business profiles, LinkedIn OAuth apps, and WhatsApp senders.
+                    </p>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <button class="btn btn-secondary btn-sm" onclick="loadTab('brands')"><i class="fa-solid fa-layer-group"></i> Manage Brands</button>
+                        <button class="btn btn-secondary btn-sm" onclick="loadTab('settings')"><i class="fa-solid fa-sliders"></i> Theme & Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card fade-in">
+            <div class="card-header"><h3 style="margin: 0;"><i class="fa-solid fa-book-open text-primary"></i> Legal & Governance Pages</h3></div>
+            <div class="card-body" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <a class="btn btn-outline-secondary" href="/about" target="_blank" rel="noopener"><i class="fa-solid fa-circle-info"></i> Public About Page</a>
+                <a class="btn btn-outline-secondary" href="/privacy" target="_blank" rel="noopener"><i class="fa-solid fa-user-shield"></i> Privacy Policy</a>
+                <a class="btn btn-outline-secondary" href="/terms" target="_blank" rel="noopener"><i class="fa-solid fa-file-contract"></i> Terms of Service</a>
+                <a class="btn btn-outline-secondary" href="/agreement" target="_blank" rel="noopener"><i class="fa-solid fa-handshake"></i> User Agreement</a>
+            </div>
+        </div>
+    `;
 }
 
 // Status Polling Engine
@@ -389,6 +592,45 @@ function setDashboardDateFilter(filter) {
     loadDashboardExecutiveMetrics();
 }
 
+function parsePostDate(item) {
+    const raw = item && (item.published_at || item.scheduled_for || item.updated_at || item.created_at);
+    if (!raw) return null;
+    const normalized = String(raw).trim().replace(' ', 'T');
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function filterItemsByDateRange(items, rangeKey) {
+    const list = Array.isArray(items) ? items : [];
+    if (!rangeKey || rangeKey === 'all') return list;
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    let cutoff = startOfToday;
+    if (rangeKey === '7d') {
+        cutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    } else if (rangeKey === '30d') {
+        cutoff = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+    return list.filter(item => {
+        const dt = parsePostDate(item);
+        if (!dt) return false;
+        return dt >= cutoff;
+    });
+}
+
+function syncSidebarNavBadges({ draftsCount, connectedCount, totalAccountsCount } = {}) {
+    const draftsBadge = document.getElementById('nav-drafts-count');
+    if (draftsBadge && typeof draftsCount === 'number') {
+        draftsBadge.textContent = String(draftsCount);
+    }
+    const accountsBadge = document.getElementById('nav-accounts-count');
+    if (accountsBadge && typeof totalAccountsCount === 'number') {
+        accountsBadge.textContent = totalAccountsCount > 0
+            ? `${connectedCount || 0}/${totalAccountsCount}`
+            : '0';
+    }
+}
+
 async function renderDashboard(container) {
     container.innerHTML = `
         <!-- Executive Header & Refresh Controls -->
@@ -398,7 +640,7 @@ async function renderDashboard(container) {
                     <i class="fa-solid fa-chart-pie" style="color: var(--primary);"></i> Executive Publishing Dashboard
                 </h2>
                 <p style="color: var(--text-muted); font-size: 0.88rem; margin: 0;">
-                    Multi-brand social media publishing health, destination audit feed, and canonical platform gateways.
+                    Multi-brand social media publishing health, verified destination records, and live gateway status.
                 </p>
             </div>
             <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
@@ -417,14 +659,14 @@ async function renderDashboard(container) {
         <!-- 6 Executive KPI Metrics Grid -->
         <section class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));" aria-label="Key Performance Indicators">
             <!-- 1. Connected Social Accounts -->
-            <div class="stat-card" style="border-top: 3px solid #38bdf8; cursor: pointer;" onclick="loadTab('accounts')">
-                <div class="stat-icon bg-blue-soft" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
+            <div class="stat-card" style="border-top: 3px solid var(--info); cursor: pointer;" onclick="loadTab('accounts')">
+                <div class="stat-icon bg-blue-soft">
                     <i class="fa-solid fa-share-nodes"></i>
                 </div>
                 <div class="stat-info">
                     <h4>Connected Accounts</h4>
                     <p id="kpi-accounts-count"><i class="fa-solid fa-circle-notch fa-spin fa-xs"></i></p>
-                    <small id="kpi-accounts-desc">Multi-platform assets</small>
+                    <small id="kpi-accounts-desc">Checking destinations...</small>
                 </div>
             </div>
 
@@ -434,9 +676,9 @@ async function renderDashboard(container) {
                     <i class="fa-solid fa-circle-check"></i>
                 </div>
                 <div class="stat-info">
-                    <h4>Successfully Published</h4>
+                    <h4>Published Dispatches</h4>
                     <p id="kpi-published-count"><i class="fa-solid fa-circle-notch fa-spin fa-xs"></i></p>
-                    <small id="kpi-published-desc">Live &amp; verified dispatches</small>
+                    <small id="kpi-published-desc">Recorded database dispatches</small>
                 </div>
             </div>
 
@@ -448,12 +690,12 @@ async function renderDashboard(container) {
                 <div class="stat-info">
                     <h4>Scheduled Posts</h4>
                     <p id="kpi-scheduled-count"><i class="fa-solid fa-circle-notch fa-spin fa-xs"></i></p>
-                    <small>Queued in active database</small>
+                    <small id="kpi-scheduled-desc">Queued in active database</small>
                 </div>
             </div>
 
             <!-- 4. Content Drafts -->
-            <div class="stat-card" style="border-top: 3px solid var(--warning); cursor: pointer;" onclick="loadTab('drafts')">
+            <div class="stat-card" style="border-top: 3px solid var(--accent-gold); cursor: pointer;" onclick="loadTab('drafts')">
                 <div class="stat-icon bg-gold-soft">
                     <i class="fa-solid fa-file-pen"></i>
                 </div>
@@ -466,28 +708,28 @@ async function renderDashboard(container) {
 
             <!-- 5. Failed / Needs Attention -->
             <div class="stat-card" style="border-top: 3px solid var(--danger); cursor: pointer;" onclick="loadTab('history')">
-                <div class="stat-icon bg-orange-soft" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">
+                <div class="stat-icon" style="background: var(--danger-soft); color: var(--danger);">
                     <i class="fa-solid fa-triangle-exclamation"></i>
                 </div>
                 <div class="stat-info">
                     <h4>Needs Attention</h4>
-                    <p id="kpi-failed-count" style="color: #f87171;"><i class="fa-solid fa-circle-notch fa-spin fa-xs"></i></p>
-                    <small id="kpi-failed-desc">Cancelled / Retrying</small>
+                    <p id="kpi-failed-count" style="color: var(--danger);"><i class="fa-solid fa-circle-notch fa-spin fa-xs"></i></p>
+                    <small id="kpi-failed-desc">Failed / Cancelled</small>
                 </div>
             </div>
 
             <!-- 6. Publishing Success Rate -->
-            <div class="stat-card" style="border-top: 3px solid #10b981;">
+            <div class="stat-card" style="border-top: 3px solid var(--success);">
                 <div class="stat-icon bg-green-soft">
                     <i class="fa-solid fa-chart-line"></i>
                 </div>
                 <div class="stat-info">
                     <h4>Publishing Success</h4>
-                    <p id="kpi-success-rate">100.0%</p>
+                    <p id="kpi-success-rate">—</p>
                     <div class="success-rate-bar-track">
-                        <div class="success-rate-bar-fill" id="kpi-success-fill" style="width: 100%;"></div>
+                        <div class="success-rate-bar-fill" id="kpi-success-fill" style="width: 0%;"></div>
                     </div>
-                    <small>Execution reliability</small>
+                    <small id="kpi-success-desc">Measured from real dispatches</small>
                 </div>
             </div>
         </section>
@@ -498,16 +740,16 @@ async function renderDashboard(container) {
                 <div>
                     <div class="card-title">
                         <i class="fa-solid fa-tower-broadcast" style="color: var(--success);"></i>
-                        <span>Recent Successful Publishing Feed</span>
+                        <span>Recent Publishing Feed</span>
                     </div>
-                    <div class="card-subtitle">Explicit destination records across Facebook, Instagram, LinkedIn, and WhatsApp</div>
+                    <div class="card-subtitle">Actual recorded dispatches across Facebook, Instagram, LinkedIn, and WhatsApp</div>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                    <span class="platform-pill" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
-                        <i class="fa-solid fa-shield-halved"></i> Audit Verified
+                    <span id="dashboard-feed-mode-badge" class="badge badge-neutral">
+                        <i class="fa-solid fa-database"></i> Loading...
                     </span>
                     <button class="btn btn-sm btn-secondary" onclick="loadTab('history')">
-                        <i class="fa-solid fa-clock-rotate-left"></i> View Full Publishing Log
+                        <i class="fa-solid fa-clock-rotate-left"></i> View Full History
                     </button>
                 </div>
             </div>
@@ -519,15 +761,15 @@ async function renderDashboard(container) {
             </div>
         </section>
 
-        <!-- Canonical Platform Publishing Gateways (Replaces Legacy Channels) -->
+        <!-- Canonical Platform Publishing Gateways -->
         <section class="card" style="margin-bottom: 1.75rem;">
             <div class="card-header">
                 <div>
                     <div class="card-title">
                         <i class="fa-solid fa-cubes" style="color: var(--primary);"></i>
-                        <span>Canonical Social Publishing Gateways</span>
+                        <span>Platform Publishing Gateways</span>
                     </div>
-                    <div class="card-subtitle">Active multi-brand dispatch architecture with brand routing and API versioning</div>
+                    <div class="card-subtitle">Live status synced from backend integration checks and OAuth token health</div>
                 </div>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                     <button class="btn btn-sm btn-primary" onclick="openModal('add')">
@@ -544,29 +786,29 @@ async function renderDashboard(container) {
                 <div class="control-tile" id="tile-facebook" style="border-left: 4px solid #1877f2;">
                     <div class="tile-header">
                         <div class="tile-brand-group">
-                            <div class="tile-icon-badge" style="background: rgba(24, 119, 242, 0.15); color: #1877f2; border: 1px solid rgba(24, 119, 242, 0.3);">
+                            <div class="tile-icon-badge" style="background: rgba(24, 119, 242, 0.12); color: #1877f2; border: 1px solid rgba(24, 119, 242, 0.25);">
                                 <i class="fa-brands fa-facebook"></i>
                             </div>
                             <div>
                                 <div class="tile-title">Facebook Pages</div>
-                                <div class="tile-subtitle">Graph API v19.0 · Brand-Specific Routing</div>
+                                <div class="tile-subtitle">Graph API · Brand-Specific Routing</div>
                             </div>
                         </div>
-                        <span class="status-badge status-running"><i class="fa-solid fa-circle-check"></i> Ready</span>
+                        <span id="tile-facebook-badge" class="badge badge-neutral">Checking...</span>
                     </div>
-                    <div style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
-                        <span><strong>Routed Brands:</strong> GAATHA Suite (Page <code>967550829768297</code>), Phoenix (Page <code>954901604381882</code>)</span>
+                    <div id="tile-facebook-meta" style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
+                        <span>Inspecting accessible Pages and permissions...</span>
                     </div>
                     <div class="tile-status-bar">
-                        <span style="font-size: 0.75rem; color: #10b981;"><i class="fa-solid fa-shield-halved"></i> Guardrail Active (Safe)</span>
+                        <span id="tile-facebook-guardrail" style="font-size: 0.75rem; color: var(--text-muted);"><i class="fa-solid fa-shield-halved"></i> Guardrail check...</span>
                         <span style="font-weight: 600; font-size: 0.8rem; color: var(--text-primary);">Text, Photo &amp; Video</span>
                     </div>
                     <div class="tile-actions">
                         <button class="btn btn-sm btn-primary" onclick="openComposerForPlatform('facebook')" title="Compose for Facebook">
                             <i class="fa-solid fa-pen"></i> Compose
                         </button>
-                        <button class="btn btn-sm btn-secondary" onclick="loadTab('calendar')" title="View Facebook Schedule">
-                            <i class="fa-solid fa-calendar"></i> Schedule
+                        <button class="btn btn-sm btn-secondary" onclick="loadTab('accounts')" title="View Facebook Accounts">
+                            <i class="fa-solid fa-plug"></i> Accounts
                         </button>
                     </div>
                 </div>
@@ -575,29 +817,29 @@ async function renderDashboard(container) {
                 <div class="control-tile" id="tile-instagram" style="border-left: 4px solid #e1306c;">
                     <div class="tile-header">
                         <div class="tile-brand-group">
-                            <div class="tile-icon-badge" style="background: rgba(225, 48, 108, 0.15); color: #e1306c; border: 1px solid rgba(225, 48, 108, 0.3);">
+                            <div class="tile-icon-badge" style="background: rgba(225, 48, 108, 0.12); color: #e1306c; border: 1px solid rgba(225, 48, 108, 0.25);">
                                 <i class="fa-brands fa-instagram"></i>
                             </div>
                             <div>
                                 <div class="tile-title">Instagram Professional</div>
-                                <div class="tile-subtitle">3-Phase Container Lifecycle Engine</div>
+                                <div class="tile-subtitle">Container Lifecycle Publishing</div>
                             </div>
                         </div>
-                        <span class="status-badge status-running"><i class="fa-solid fa-circle-check"></i> Ready</span>
+                        <span id="tile-instagram-badge" class="badge badge-neutral">Checking...</span>
                     </div>
-                    <div style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
-                        <span><strong>Routed Profiles:</strong> <code>@nexora_suite</code> (Brand 1), <code>@phoenixbygaatha</code> (Brand 5)</span>
+                    <div id="tile-instagram-meta" style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
+                        <span>Inspecting linked Instagram business profiles...</span>
                     </div>
                     <div class="tile-status-bar">
-                        <span style="font-size: 0.75rem; color: #10b981;"><i class="fa-solid fa-shield-halved"></i> Guardrail Active (Safe)</span>
+                        <span id="tile-instagram-guardrail" style="font-size: 0.75rem; color: var(--text-muted);"><i class="fa-solid fa-shield-halved"></i> Guardrail check...</span>
                         <span style="font-weight: 600; font-size: 0.8rem; color: var(--text-primary);">Photos &amp; Reels</span>
                     </div>
                     <div class="tile-actions">
                         <button class="btn btn-sm btn-primary" onclick="openComposerForPlatform('instagram')" title="Compose for Instagram">
                             <i class="fa-solid fa-pen"></i> Compose
                         </button>
-                        <button class="btn btn-sm btn-secondary" onclick="loadTab('calendar')" title="View Instagram Schedule">
-                            <i class="fa-solid fa-calendar"></i> Schedule
+                        <button class="btn btn-sm btn-secondary" onclick="loadTab('accounts')" title="View Instagram Accounts">
+                            <i class="fa-solid fa-plug"></i> Accounts
                         </button>
                     </div>
                 </div>
@@ -606,56 +848,56 @@ async function renderDashboard(container) {
                 <div class="control-tile" id="tile-linkedin" style="border-left: 4px solid #0a66c2;">
                     <div class="tile-header">
                         <div class="tile-brand-group">
-                            <div class="tile-icon-badge" style="background: rgba(10, 102, 194, 0.15); color: #0a66c2; border: 1px solid rgba(10, 102, 194, 0.3);">
+                            <div class="tile-icon-badge" style="background: rgba(10, 102, 194, 0.12); color: #0a66c2; border: 1px solid rgba(10, 102, 194, 0.25);">
                                 <i class="fa-brands fa-linkedin-in"></i>
                             </div>
                             <div>
                                 <div class="tile-title">LinkedIn Pages</div>
-                                <div class="tile-subtitle">REST Posts API 202401 · Dual OAuth</div>
+                                <div class="tile-subtitle">REST Posts API · Dual OAuth Apps</div>
                             </div>
                         </div>
-                        <span class="status-badge status-running"><i class="fa-solid fa-circle-check"></i> Ready</span>
+                        <span id="tile-linkedin-badge" class="badge badge-neutral">Checking...</span>
                     </div>
-                    <div style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
-                        <span><strong>Integrated Apps:</strong> Aidni Global (<code>145240694</code>) &middot; Gaatha Ventures (<code>145250613</code>)</span>
+                    <div id="tile-linkedin-meta" style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
+                        <span>Inspecting Aidni Global &amp; Gaatha Ventures OAuth states...</span>
                     </div>
                     <div class="tile-status-bar">
-                        <span style="font-size: 0.75rem; color: #10b981;"><i class="fa-solid fa-shield-halved"></i> Guardrail Active (Safe)</span>
-                        <span style="font-weight: 600; font-size: 0.8rem; color: var(--text-primary);">3-Step REST Media Upload</span>
+                        <span id="tile-linkedin-guardrail" style="font-size: 0.75rem; color: var(--text-muted);"><i class="fa-solid fa-shield-halved"></i> Guardrail check...</span>
+                        <span id="tile-linkedin-cap" style="font-weight: 600; font-size: 0.8rem; color: var(--text-primary);">OAuth Status Synced</span>
                     </div>
                     <div class="tile-actions">
                         <button class="btn btn-sm btn-primary" onclick="openComposerForPlatform('linkedin')" title="Compose for LinkedIn">
                             <i class="fa-solid fa-pen"></i> Compose
                         </button>
                         <button class="btn btn-sm btn-secondary" onclick="loadTab('accounts')" title="View LinkedIn Details">
-                            <i class="fa-solid fa-link"></i> OAuth
+                            <i class="fa-solid fa-link"></i> OAuth Status
                         </button>
                     </div>
                 </div>
 
                 <!-- Gateway 4: WhatsApp Business Cloud -->
-                <div class="control-tile" id="tile-whatsapp" style="border-left: 4px solid #25d366;">
+                <div class="control-tile" id="tile-whatsapp" style="border-left: 4px solid #059669;">
                     <div class="tile-header">
                         <div class="tile-brand-group">
-                            <div class="tile-icon-badge" style="background: rgba(37, 211, 102, 0.15); color: #25d366; border: 1px solid rgba(37, 211, 102, 0.3);">
+                            <div class="tile-icon-badge" style="background: var(--success-soft); color: var(--success); border: 1px solid rgba(5, 150, 105, 0.25);">
                                 <i class="fa-brands fa-whatsapp"></i>
                             </div>
                             <div>
                                 <div class="tile-title">WhatsApp Cloud API</div>
-                                <div class="tile-subtitle">Official Meta Enterprise Gateway</div>
+                                <div class="tile-subtitle">Sender-Isolated Business Messaging</div>
                             </div>
                         </div>
-                        <span class="status-badge status-running"><i class="fa-solid fa-circle-check"></i> Verified</span>
+                        <span id="tile-whatsapp-badge" class="badge badge-neutral">Checking...</span>
                     </div>
-                    <div style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
-                        <span><strong>Business Line:</strong> Gaatha Ventures (<code>+91 90990 28291</code>) &middot; High Quality (Green)</span>
+                    <div id="tile-whatsapp-meta" style="font-size: 0.82rem; color: var(--text-secondary); margin: 0.5rem 0;">
+                        <span>Inspecting WhatsApp Cloud API verification status...</span>
                     </div>
                     <div class="tile-status-bar">
-                        <span style="font-size: 0.75rem; color: #10b981;"><i class="fa-solid fa-shield-halved"></i> Guardrail Active (Safe)</span>
-                        <span style="font-weight: 600; font-size: 0.8rem; color: var(--text-primary);">Tier 1 (1k/day)</span>
+                        <span id="tile-whatsapp-guardrail" style="font-size: 0.75rem; color: var(--text-muted);"><i class="fa-solid fa-shield-halved"></i> Guardrail check...</span>
+                        <span id="tile-whatsapp-cap" style="font-weight: 600; font-size: 0.8rem; color: var(--text-primary);">Isolated Gateway</span>
                     </div>
                     <div class="tile-actions">
-                        <button class="btn btn-sm btn-primary" onclick="loadTab('whatsapp')" style="background: #25d366; border-color: #25d366; color: #000; font-weight: 600;" title="Open WhatsApp Studio">
+                        <button class="btn btn-sm btn-success" onclick="loadTab('whatsapp')" title="Open WhatsApp Studio">
                             <i class="fa-brands fa-whatsapp"></i> WhatsApp Studio
                         </button>
                         <button class="btn btn-sm btn-secondary" onclick="loadTab('accounts')" title="View WABA Connection">
@@ -706,153 +948,360 @@ function openComposerForPlatform(platform) {
     }
 }
 
+function updateGatewayTilesFromBackend(intData, statusData, accounts) {
+    const pubEnabled = Boolean(statusData && statusData.publishing_enabled);
+    const guardHtml = pubEnabled
+        ? '<i class="fa-solid fa-circle-check" style="color: var(--success);"></i> Live Dispatch Enabled'
+        : '<i class="fa-solid fa-shield-halved" style="color: var(--warning);"></i> Guardrail Safe Mode (Off)';
+
+    // Meta (Facebook + Instagram)
+    const meta = (intData && intData.meta) || {};
+    const fbPages = Array.isArray(meta.pages) ? meta.pages : [];
+    const igAccounts = Array.isArray(meta.instagram_accounts) ? meta.instagram_accounts : [];
+    const metaHealthy = meta.status === 'connected' || fbPages.length > 0;
+
+    const fbBadge = document.getElementById('tile-facebook-badge');
+    const fbMeta = document.getElementById('tile-facebook-meta');
+    const fbGuard = document.getElementById('tile-facebook-guardrail');
+    if (fbBadge) {
+        fbBadge.className = `badge ${metaHealthy ? 'badge-published' : 'badge-warning'}`;
+        fbBadge.innerHTML = metaHealthy
+            ? `<i class="fa-solid fa-circle-check"></i> ${fbPages.length || 0} Page${fbPages.length === 1 ? '' : 's'} Linked`
+            : `<i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(meta.status_label || 'Check Meta Token')}`;
+    }
+    if (fbMeta) {
+        fbMeta.innerHTML = fbPages.length > 0
+            ? `<span><strong>Accessible Pages:</strong> ${fbPages.slice(0, 3).map(p => escapeHtml(p.name || p.id)).join(', ')}${fbPages.length > 3 ? ` (+${fbPages.length - 3})` : ''}</span>`
+            : `<span>No active Pages returned by Meta Graph API check.</span>`;
+    }
+    if (fbGuard) fbGuard.innerHTML = guardHtml;
+
+    const igBadge = document.getElementById('tile-instagram-badge');
+    const igMeta = document.getElementById('tile-instagram-meta');
+    const igGuard = document.getElementById('tile-instagram-guardrail');
+    if (igBadge) {
+        const igOk = igAccounts.length > 0;
+        igBadge.className = `badge ${igOk ? 'badge-published' : 'badge-warning'}`;
+        igBadge.innerHTML = igOk
+            ? `<i class="fa-solid fa-circle-check"></i> ${igAccounts.length} Profile${igAccounts.length === 1 ? '' : 's'}`
+            : `<i class="fa-solid fa-triangle-exclamation"></i> No IG Profiles`;
+    }
+    if (igMeta) {
+        igMeta.innerHTML = igAccounts.length > 0
+            ? `<span><strong>Linked Profiles:</strong> ${igAccounts.slice(0, 3).map(a => `@${escapeHtml(a.username || a.id)}`).join(', ')}</span>`
+            : `<span>Link an Instagram Professional profile via Facebook Page settings.</span>`;
+    }
+    if (igGuard) igGuard.innerHTML = guardHtml;
+
+    // LinkedIn (Dual App accuracy)
+    const li = (intData && intData.linkedin) || {};
+    const liApps = Array.isArray(li.apps) ? li.apps : [];
+    const liAuthed = liApps.filter(a => a.user_authenticated);
+    const liCompanyReady = liApps.filter(a => a.company_publishing_ready);
+    const liBadge = document.getElementById('tile-linkedin-badge');
+    const liMeta = document.getElementById('tile-linkedin-meta');
+    const liGuard = document.getElementById('tile-linkedin-guardrail');
+    const liCap = document.getElementById('tile-linkedin-cap');
+
+    if (liBadge) {
+        if (liCompanyReady.length > 0) {
+            liBadge.className = 'badge badge-published';
+            liBadge.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${liCompanyReady.length}/${liApps.length || 2} Company Ready`;
+        } else if (liAuthed.length > 0) {
+            liBadge.className = 'badge badge-info';
+            liBadge.innerHTML = `<i class="fa-solid fa-user-check"></i> ${liAuthed.length}/${liApps.length || 2} Personal Auth`;
+        } else {
+            liBadge.className = 'badge badge-warning';
+            liBadge.innerHTML = `<i class="fa-solid fa-key"></i> Auth Required`;
+        }
+    }
+    if (liMeta) {
+        if (liApps.length > 0) {
+            const summary = liApps.map(a => `${escapeHtml(a.app_name || a.app_key)}: ${a.user_authenticated ? 'Authorized' : 'Auth Required'}`).join(' &middot; ');
+            liMeta.innerHTML = `<span><strong>OAuth Apps:</strong> ${summary}</span>`;
+        } else {
+            liMeta.innerHTML = `<span>${escapeHtml(li.status_label || 'LinkedIn OAuth pending setup.')}</span>`;
+        }
+    }
+    if (liGuard) liGuard.innerHTML = guardHtml;
+    if (liCap) {
+        liCap.textContent = liCompanyReady.length > 0 ? 'Company & Member API Ready' : 'Company Posting Pending Review';
+    }
+
+    // WhatsApp (Sender isolated, never auto-assigns brands or fakes Verified)
+    const wa = (intData && intData.whatsapp) || {};
+    const waBadge = document.getElementById('tile-whatsapp-badge');
+    const waMeta = document.getElementById('tile-whatsapp-meta');
+    const waGuard = document.getElementById('tile-whatsapp-guardrail');
+    const waCap = document.getElementById('tile-whatsapp-cap');
+    const waOk = wa.status === 'connected';
+    const waPubEnabled = Boolean(wa.publishing_enabled);
+
+    if (waBadge) {
+        waBadge.className = `badge ${waOk ? 'badge-published' : (wa.status === 'error' ? 'badge-failed' : 'badge-warning')}`;
+        waBadge.innerHTML = `<i class="fa-solid ${waOk ? 'fa-circle-check' : 'fa-shield-halved'}"></i> ${escapeHtml(wa.status_label || 'Check WABA Status')}`;
+    }
+    if (waMeta) {
+        const wabas = Array.isArray(wa.discovered_wabas) ? wa.discovered_wabas : [];
+        const nums = Array.isArray(wa.phone_numbers) ? wa.phone_numbers : [];
+        if (wa.active_phone_number_id || nums.length > 0) {
+            const display = wa.active_display_phone || (nums[0] && nums[0].display_phone_number) || 'Configured Sender';
+            waMeta.innerHTML = `<span><strong>Gateway:</strong> ${escapeHtml(display)} (${wabas.length} WABA) &middot; Isolated sender rules active</span>`;
+        } else {
+            waMeta.innerHTML = `<span>${escapeHtml(wa.error || wa.note || 'Sender isolation enabled. Numbers require explicit verification before broadcast.')}</span>`;
+        }
+    }
+    if (waGuard) {
+        waGuard.innerHTML = waPubEnabled
+            ? '<i class="fa-solid fa-circle-check" style="color: var(--success);"></i> WhatsApp Broadcast On'
+            : '<i class="fa-solid fa-shield-halved" style="color: var(--warning);"></i> WhatsApp Dispatch Guardrail Off';
+    }
+    if (waCap) {
+        waCap.textContent = wa.quality_rating ? `Quality: ${wa.quality_rating}` : 'Safely Isolated';
+    }
+}
+
+// Lightweight in-session cache for /api/integrations/status (avoids 15s Graph API stalls on every tab switch)
+window._ppIntegrationsCache = { ts: 0, data: null, pending: null };
+
+async function fetchIntegrationsStatusCached(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && window._ppIntegrationsCache.data && (now - window._ppIntegrationsCache.ts) < 60000) {
+        return window._ppIntegrationsCache.data;
+    }
+    if (!forceRefresh && window._ppIntegrationsCache.pending) {
+        return window._ppIntegrationsCache.pending;
+    }
+    const req = authFetch('/api/integrations/status')
+        .then(r => (r.ok ? r.json() : {}))
+        .then(data => {
+            if (data && (data.meta || data.linkedin || data.whatsapp)) {
+                window._ppIntegrationsCache = { ts: Date.now(), data, pending: null };
+            } else {
+                window._ppIntegrationsCache.pending = null;
+            }
+            return data;
+        })
+        .catch(err => {
+            window._ppIntegrationsCache.pending = null;
+            throw err;
+        });
+    window._ppIntegrationsCache.pending = req;
+    return req;
+}
+
 async function loadDashboardExecutiveMetrics() {
     try {
-        const [dashRes, schedRes, accountsRes, draftsRes] = await Promise.all([
+        // Kick off slow external Meta/LinkedIn/WhatsApp integrations probe in background so local KPIs render immediately
+        const intPromise = fetchIntegrationsStatusCached(false).catch(() => ({}));
+
+        const [dashRes, schedRes, accountsRes, draftsRes, statusRes] = await Promise.all([
             authFetch('/api/analytics/dashboard'),
-            authFetch('/api/schedule?envelope=1&limit=200'),
+            authFetch('/api/schedule?envelope=1&limit=250'),
             authFetch('/api/accounts'),
-            authFetch('/api/drafts')
+            authFetch('/api/drafts'),
+            authFetch('/api/status')
         ]);
 
         const dashData = dashRes.ok ? await dashRes.json() : {};
         const schedData = schedRes.ok ? await schedRes.json() : {};
         const accountsData = accountsRes.ok ? await accountsRes.json() : {};
         const draftsData = draftsRes.ok ? await draftsRes.json() : {};
+        const statusData = statusRes.ok ? await statusRes.json() : {};
 
-        const posts = Array.isArray(schedData.posts) ? schedData.posts : (Array.isArray(schedData) ? schedData : []);
-        const accounts = accountsData.accounts || [];
-        const drafts = draftsData.drafts || [];
+        const allPosts = Array.isArray(schedData.posts) ? schedData.posts : (Array.isArray(schedData) ? schedData : []);
+        const accounts = Array.isArray(accountsData.accounts) ? accountsData.accounts : [];
+        const allDrafts = Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
+
+        const posts = filterItemsByDateRange(allPosts, dashboardDateFilter);
+        const drafts = dashboardDateFilter === 'all' ? allDrafts : filterItemsByDateRange(allDrafts, dashboardDateFilter);
 
         // 1. Connected Social Accounts
         const connectedAccounts = accounts.filter(a => a.status === 'connected');
-        const totalAccounts = accounts.length || 6;
+        const totalAccounts = accounts.length;
         const accountsEl = document.getElementById('kpi-accounts-count');
         const accountsDesc = document.getElementById('kpi-accounts-desc');
         if (accountsEl) accountsEl.textContent = `${connectedAccounts.length} / ${totalAccounts}`;
-        if (accountsDesc) accountsDesc.textContent = `${totalAccounts - connectedAccounts.length} Standby · ${connectedAccounts.length} Active`;
+        if (accountsDesc) {
+            accountsDesc.textContent = totalAccounts > 0
+                ? `${Math.max(0, totalAccounts - connectedAccounts.length)} Standby / Auth Required · ${connectedAccounts.length} Active`
+                : 'No configured social destinations';
+        }
+
+        syncSidebarNavBadges({
+            draftsCount: draftsData.count !== undefined ? draftsData.count : allDrafts.length,
+            connectedCount: connectedAccounts.length,
+            totalAccountsCount: totalAccounts
+        });
 
         // 2. Scheduled Posts Count (status == 'scheduled' or 'publishing')
         const scheduledPosts = posts.filter(p => p.status === 'scheduled' || p.status === 'publishing');
         const schedEl = document.getElementById('kpi-scheduled-count');
-        if (schedEl) schedEl.textContent = scheduledPosts.length;
+        const schedDesc = document.getElementById('kpi-scheduled-desc');
+        if (schedEl) schedEl.textContent = String(scheduledPosts.length);
+        if (schedDesc) {
+            schedDesc.textContent = dashboardDateFilter === 'all' ? 'Queued in active database' : `In selected range (${dashboardDateFilter})`;
+        }
 
-        // 3. Drafts count
+        // 3. Drafts count (genuine backend value only)
         const draftsEl = document.getElementById('kpi-drafts-count');
-        if (draftsEl) draftsEl.textContent = drafts.length || dashData.total_drafts || 18;
+        const draftsTotal = dashboardDateFilter === 'all'
+            ? (draftsData.count !== undefined ? draftsData.count : (allDrafts.length || dashData.total_drafts || 0))
+            : drafts.length;
+        if (draftsEl) draftsEl.textContent = String(draftsTotal);
 
         // 4. Failed / Cancelled Posts
-        const failedOrCancelled = posts.filter(p => p.status === 'failed' || p.status === 'cancelled');
+        const failedPosts = posts.filter(p => p.status === 'failed');
+        const cancelledPosts = posts.filter(p => p.status === 'cancelled');
+        const failedOrCancelled = failedPosts.length + cancelledPosts.length;
         const failedEl = document.getElementById('kpi-failed-count');
         const failedDesc = document.getElementById('kpi-failed-desc');
-        if (failedEl) failedEl.textContent = failedOrCancelled.length;
-        if (failedDesc) failedDesc.textContent = `${failedOrCancelled.length} Cancelled Fixtures`;
+        if (failedEl) failedEl.textContent = String(failedOrCancelled);
+        if (failedDesc) failedDesc.textContent = `${failedPosts.length} Failed · ${cancelledPosts.length} Cancelled`;
 
-        // 5. Successfully Published Count & Success Rate
+        // 5. Successfully Published Count & Genuine Success Rate
         const publishedPosts = posts.filter(p => p.status === 'published');
-        const pubCount = publishedPosts.length || dashData.publishing?.total_published || 2;
+        const pubCount = publishedPosts.length;
         const pubEl = document.getElementById('kpi-published-count');
-        if (pubEl) pubEl.textContent = pubCount;
+        const pubDesc = document.getElementById('kpi-published-desc');
+        if (pubEl) pubEl.textContent = String(pubCount);
 
-        const totalAttempts = pubCount + posts.filter(p => p.status === 'failed').length;
-        const successRate = totalAttempts > 0 ? (pubCount / totalAttempts) * 100 : 100.0;
+        const realLiveCount = publishedPosts.filter(p => p.external_post_id && !String(p.external_post_id).includes('_sim_')).length;
+        const simCount = pubCount - realLiveCount;
+        if (pubDesc) {
+            if (pubCount === 0) {
+                pubDesc.textContent = statusData.publishing_enabled ? 'No dispatches yet' : 'Guardrail Safe Mode active';
+            } else if (simCount > 0 && realLiveCount === 0) {
+                pubDesc.textContent = `${simCount} simulated record${simCount === 1 ? '' : 's'} (no live IDs)`;
+            } else {
+                pubDesc.textContent = `${realLiveCount} live · ${simCount} simulated`;
+            }
+        }
+
+        const totalAttempts = pubCount + failedPosts.length;
         const rateEl = document.getElementById('kpi-success-rate');
         const rateFill = document.getElementById('kpi-success-fill');
-        if (rateEl) rateEl.textContent = `${successRate.toFixed(1)}%`;
-        if (rateFill) rateFill.style.width = `${Math.min(100, Math.max(0, successRate))}%`;
+        const rateDesc = document.getElementById('kpi-success-desc');
+        if (totalAttempts > 0) {
+            const successRate = (pubCount / totalAttempts) * 100;
+            if (rateEl) rateEl.textContent = `${successRate.toFixed(1)}%`;
+            if (rateFill) rateFill.style.width = `${Math.min(100, Math.max(0, successRate))}%`;
+            if (rateDesc) rateDesc.textContent = `From ${totalAttempts} recorded dispatch attempt${totalAttempts === 1 ? '' : 's'}`;
+        } else {
+            if (rateEl) rateEl.textContent = '—';
+            if (rateFill) rateFill.style.width = '0%';
+            if (rateDesc) rateDesc.textContent = 'No completed attempts in range';
+        }
 
-        // 6. Render Publishing Feed & Upcoming Queue with actual data
-        renderRecentPublishedFeed(posts, accounts);
+        // 6. Render Publishing Feed & Upcoming Queue immediately, then hydrate Gateway Tiles when /api/integrations/status resolves
+        renderRecentPublishedFeed(posts, statusData);
         renderUpcomingQueue(scheduledPosts);
+
+        intPromise.then(intData => {
+            updateGatewayTilesFromBackend(intData, statusData, accounts);
+        });
 
     } catch (e) {
         console.warn('Could not load executive dashboard metrics', e);
-        renderRecentPublishedFeed([], []);
+        renderRecentPublishedFeed([], {});
+        renderUpcomingQueue([]);
     }
 }
 
-// Render Recent Successful Publishing Feed from real records
-function renderRecentPublishedFeed(posts, accounts) {
+// Render Recent Publishing Feed strictly from real database records (never fabricated)
+function renderRecentPublishedFeed(posts, statusData) {
     const feedEl = document.getElementById('dashboard-published-feed');
+    const modeBadge = document.getElementById('dashboard-feed-mode-badge');
     if (!feedEl) return;
 
-    // Filter published posts
-    let published = (posts || []).filter(p => p.status === 'published');
+    const published = (posts || []).filter(p => p.status === 'published');
+    const liveCount = published.filter(p => p.external_post_id && !String(p.external_post_id).includes('_sim_')).length;
 
-    // If no published posts in DB yet, show fallback verified destination records
+    if (modeBadge) {
+        if (published.length === 0) {
+            modeBadge.className = 'badge badge-neutral';
+            modeBadge.innerHTML = statusData && statusData.publishing_enabled
+                ? '<i class="fa-solid fa-database"></i> Awaiting First Live Post'
+                : '<i class="fa-solid fa-shield-halved"></i> Guardrail Safe Mode (Off)';
+        } else if (liveCount > 0) {
+            modeBadge.className = 'badge badge-published';
+            modeBadge.innerHTML = `<i class="fa-solid fa-circle-check"></i> ${liveCount} Live Provider ID${liveCount === 1 ? '' : 's'}`;
+        } else {
+            modeBadge.className = 'badge badge-warning';
+            modeBadge.innerHTML = `<i class="fa-solid fa-flask"></i> Simulated Records Only`;
+        }
+    }
+
     if (published.length === 0) {
-        published = [
-            {
-                id: 1,
-                post_type: 'facebook',
-                brand_name: 'GAATHA Suite',
-                scheduled_for: '2026-11-09 18:45:00',
-                message: 'Universal multi-brand publishing architecture verified across Meta and LinkedIn gateways.',
-                external_post_id: 'fb_post_sim_1794230000',
-                status: 'published'
-            },
-            {
-                id: 2,
-                post_type: 'instagram',
-                brand_name: 'Phoenix — BY GAATHA',
-                scheduled_for: '2026-11-09 18:40:00',
-                message: 'Immigration & Visa Consulting update: 3-Phase container verification complete #visa #nz',
-                external_post_id: 'ig_media_sim_1794230100',
-                status: 'published'
-            }
-        ];
+        feedEl.innerHTML = `
+            <div class="empty-state" style="padding: 2.25rem 1.25rem;">
+                <i class="fa-solid fa-tower-broadcast empty-state-icon" style="color: var(--primary);"></i>
+                <div class="empty-state-title">No Published Posts Recorded Yet</div>
+                <p class="empty-state-desc">Real provider post IDs will appear here once posts are dispatched with publishing enabled. In Guardrail Safe Mode, external APIs are never triggered.</p>
+                <div style="display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-top: 0.75rem;">
+                    <button class="btn btn-sm btn-primary" onclick="openModal('add')">
+                        <i class="fa-solid fa-plus"></i> Create Scheduled Post
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="loadTab('history')">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Inspect History
+                    </button>
+                </div>
+            </div>
+        `;
+        return;
     }
 
     const platformIcons = {
-        'facebook': { icon: 'fa-brands fa-facebook', name: 'Facebook Page', color: 'var(--fb-blue)', bg: 'rgba(24, 119, 242, 0.15)' },
-        'instagram': { icon: 'fa-brands fa-instagram', name: 'Instagram Professional', color: 'var(--ig-pink)', bg: 'rgba(225, 48, 108, 0.15)' },
-        'linkedin': { icon: 'fa-brands fa-linkedin-in', name: 'LinkedIn Company', color: '#38bdf8', bg: 'rgba(10, 102, 194, 0.2)' },
-        'whatsapp': { icon: 'fa-brands fa-whatsapp', name: 'WhatsApp Cloud', color: '#25d366', bg: 'rgba(37, 211, 102, 0.2)' }
+        'facebook': { icon: 'fa-brands fa-facebook', name: 'Facebook Page', color: '#1877f2', bg: 'rgba(24, 119, 242, 0.12)' },
+        'instagram': { icon: 'fa-brands fa-instagram', name: 'Instagram Professional', color: '#e1306c', bg: 'rgba(225, 48, 108, 0.12)' },
+        'linkedin': { icon: 'fa-brands fa-linkedin-in', name: 'LinkedIn', color: '#0a66c2', bg: 'rgba(10, 102, 194, 0.12)' },
+        'whatsapp': { icon: 'fa-brands fa-whatsapp', name: 'WhatsApp Cloud', color: '#059669', bg: 'var(--success-soft)' }
     };
 
     feedEl.innerHTML = published.slice(0, 8).map(post => {
         const plat = post.post_type || 'facebook';
         const pInfo = platformIcons[plat] || platformIcons['facebook'];
-        const isSimulated = !post.external_post_id || post.external_post_id.includes('_sim_');
-        const pubTime = post.published_at || post.scheduled_for || post.created_at || 'Recently';
+        const extId = post.external_post_id || '';
+        const isSimulated = !extId || String(extId).includes('_sim_');
+        const pubTime = post.local_display || post.published_at || post.scheduled_for || post.created_at || 'Recorded';
 
         return `
-            <div class="published-feed-card" style="display: flex; justify-content: space-between; align-items: flex-start; padding: 1.15rem; border-bottom: 1px solid var(--border); gap: 1rem; flex-wrap: wrap;">
-                <div class="published-feed-left" style="display: flex; gap: 1rem; align-items: flex-start; flex: 1; min-width: 280px;">
-                    <div class="published-thumb-wrap" style="width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: ${pInfo.bg}; border: 1px solid ${pInfo.color}44; flex-shrink: 0;">
-                        <i class="${pInfo.icon}" style="font-size: 1.35rem; color: ${pInfo.color};"></i>
+            <div class="published-feed-card" style="display: flex; justify-content: space-between; align-items: flex-start; padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--border); gap: 1rem; flex-wrap: wrap;">
+                <div class="published-feed-left" style="display: flex; gap: 0.9rem; align-items: flex-start; flex: 1; min-width: 240px;">
+                    <div class="published-thumb-wrap" style="width: 42px; height: 42px; border-radius: 10px; display: flex; align-items: center; justify-content: center; background: ${pInfo.bg}; border: 1px solid var(--border); flex-shrink: 0;">
+                        <i class="${pInfo.icon}" style="font-size: 1.25rem; color: ${pInfo.color};"></i>
                     </div>
-                    <div class="published-meta-wrap" style="flex: 1;">
+                    <div class="published-meta-wrap" style="flex: 1; min-width: 0;">
                         <div class="published-headline-row" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.35rem;">
-                            <span style="font-weight: 700; font-size: 0.95rem; color: var(--text-primary);">${escapeHtml(post.brand_name || 'GAATHA Brand')}</span>
+                            <span style="font-weight: 700; font-size: 0.94rem; color: var(--text-primary);">${escapeHtml(post.brand_name || 'GAATHA Brand')}</span>
                             <span class="platform-pill ${plat}" style="font-size: 0.72rem; padding: 0.15rem 0.5rem;">
                                 <i class="${pInfo.icon}"></i> ${pInfo.name}
                             </span>
                             ${isSimulated ? `
-                                <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 4px;">
-                                    <i class="fa-solid fa-shield-halved"></i> SIMULATED (SAFETY GUARDRAIL)
+                                <span class="badge badge-warning">
+                                    <i class="fa-solid fa-flask"></i> Simulated (Not Live)
                                 </span>
                             ` : `
-                                <span class="badge badge-published" style="font-size: 0.72rem; padding: 0.15rem 0.5rem;">
-                                    <i class="fa-solid fa-circle-check"></i> LIVE BROADCAST VERIFIED
+                                <span class="badge badge-published">
+                                    <i class="fa-solid fa-circle-check"></i> Live Provider ID
                                 </span>
                             `}
                         </div>
                         <div class="published-caption-snippet" style="font-size: 0.88rem; color: var(--text-secondary); line-height: 1.45; margin-bottom: 0.35rem;" title="${escapeHtml(post.message || '')}">
-                            ${escapeHtml(post.message ? (post.message.length > 140 ? post.message.substring(0, 140) + '...' : post.message) : 'Media broadcast post.')}
+                            ${escapeHtml(post.message ? (post.message.length > 140 ? post.message.substring(0, 140) + '...' : post.message) : 'Media post.')}
                         </div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
-                            <span><i class="fa-regular fa-clock"></i> ${pubTime}</span>
+                        <div style="font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
+                            <span><i class="fa-regular fa-clock"></i> ${escapeHtml(pubTime)}</span>
                             <span>&middot;</span>
-                            <span>External ID: <code style="background: var(--bg-surface); padding: 0.1rem 0.35rem; border-radius: 4px;">${escapeHtml(post.external_post_id || 'simulated_id')}</code></span>
+                            <span>External ID: <code style="background: var(--bg-surface-subtle); padding: 0.1rem 0.4rem; border-radius: 4px; color: var(--text-primary);">${escapeHtml(extId || 'none')}</code></span>
                         </div>
                     </div>
                 </div>
 
                 <div class="published-actions" style="display: flex; gap: 0.5rem; align-items: center;">
-                    <button class="btn btn-sm btn-secondary" onclick="loadTab('history')" title="Inspect Audit Log">
+                    <button class="btn btn-sm btn-secondary" onclick="loadTab('history')" title="Inspect History Log">
                         <i class="fa-solid fa-clock-rotate-left"></i>
-                        <span>Audit Log</span>
+                        <span>History</span>
                     </button>
                 </div>
             </div>
@@ -867,10 +1316,10 @@ function renderUpcomingQueue(scheduledPosts) {
 
     if (!scheduledPosts || scheduledPosts.length === 0) {
         queueEl.innerHTML = `
-            <div class="empty-state" style="padding: 2.5rem 1rem;">
+            <div class="empty-state" style="padding: 2.25rem 1.25rem;">
                 <i class="fa-solid fa-calendar-check empty-state-icon" style="color: var(--primary);"></i>
                 <div class="empty-state-title">No Posts Queued For Release</div>
-                <p class="empty-state-desc">Your publishing queue is currently clear. Use the composer to schedule announcements across Facebook, Instagram, LinkedIn, or WhatsApp.</p>
+                <p class="empty-state-desc">Your publishing queue is clear. Use the composer or calendar to schedule announcements across connected channels.</p>
                 <button class="btn btn-sm btn-primary" onclick="openModal('add')" style="margin-top: 0.75rem;">
                     <i class="fa-solid fa-plus"></i> Compose New Post
                 </button>
@@ -887,7 +1336,7 @@ function renderUpcomingQueue(scheduledPosts) {
     };
 
     queueEl.innerHTML = `
-        <div style="overflow-x: auto;">
+        <div class="table-responsive queue-table-wrap">
             <table class="data-table" style="width: 100%;">
                 <thead>
                     <tr>
@@ -905,21 +1354,23 @@ function renderUpcomingQueue(scheduledPosts) {
                         const pIcon = platformIcons[plat] || 'fa-solid fa-share-nodes';
                         const timeStr = p.local_display || p.scheduled_for || 'Upcoming';
                         const preview = p.message ? (p.message.length > 60 ? p.message.substring(0, 60) + '...' : p.message) : 'Media post';
+                        const st = (p.status || 'scheduled').toLowerCase();
+                        const stClass = st === 'publishing' ? 'badge-publishing' : 'badge-scheduled';
 
                         return `
                             <tr>
-                                <td style="font-weight: 600; font-size: 0.85rem;"><i class="fa-regular fa-clock"></i> ${timeStr}</td>
-                                <td><span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #818cf8;">${escapeHtml(p.brand_name || 'Brand #' + (p.brand_id || 1))}</span></td>
+                                <td style="font-weight: 600; font-size: 0.85rem; white-space: nowrap;"><i class="fa-regular fa-clock"></i> ${escapeHtml(timeStr)}</td>
+                                <td><span class="badge badge-primary">${escapeHtml(p.brand_name || 'Brand #' + (p.brand_id || 1))}</span></td>
                                 <td>
                                     <span class="platform-pill ${plat}" style="font-size: 0.75rem; padding: 0.15rem 0.5rem;">
                                         <i class="${pIcon}"></i> ${plat.toUpperCase()}
                                     </span>
                                 </td>
                                 <td style="font-size: 0.85rem; color: var(--text-secondary); max-width: 280px;" title="${escapeHtml(p.message || '')}">${escapeHtml(preview)}</td>
-                                <td><span class="status-badge status-running"><i class="fa-solid fa-clock"></i> Scheduled</span></td>
+                                <td><span class="badge ${stClass}"><i class="fa-solid fa-clock"></i> ${escapeHtml(st)}</span></td>
                                 <td style="text-align: right;">
-                                    <button class="btn btn-sm btn-secondary" onclick="openModal('view', ${p.id})" title="View Details">
-                                        <i class="fa-solid fa-eye"></i>
+                                    <button class="btn btn-sm btn-secondary" onclick="openModal('edit', ${p.id}, '${plat}')" title="Review or Edit Scheduled Post">
+                                        <i class="fa-solid fa-pen"></i>
                                     </button>
                                 </td>
                             </tr>
@@ -927,6 +1378,27 @@ function renderUpcomingQueue(scheduledPosts) {
                     }).join('')}
                 </tbody>
             </table>
+        </div>
+        <div class="mobile-posts-list" style="padding: 0.25rem 0;">
+            ${scheduledPosts.slice(0, 6).map(p => {
+                const plat = p.post_type || 'facebook';
+                const pIcon = platformIcons[plat] || 'fa-solid fa-share-nodes';
+                const timeStr = p.local_display || p.scheduled_for || 'Upcoming';
+                const preview = p.message ? (p.message.length > 100 ? p.message.substring(0, 100) + '...' : p.message) : 'Media post';
+                return `
+                    <div class="mobile-post-card">
+                        <div class="mobile-post-header">
+                            <span class="platform-pill ${plat}" style="font-size: 0.72rem;"><i class="${pIcon}"></i> ${plat.toUpperCase()}</span>
+                            <span class="badge badge-scheduled">${escapeHtml(p.status || 'scheduled')}</span>
+                        </div>
+                        <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.3rem;">${escapeHtml(p.brand_name || 'Brand #' + (p.brand_id || 1))} &middot; ${escapeHtml(timeStr)}</div>
+                        <div style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.65rem;">${escapeHtml(preview)}</div>
+                        <div class="mobile-post-actions">
+                            <button class="btn btn-sm btn-secondary" onclick="openModal('edit', ${p.id}, '${plat}')"><i class="fa-solid fa-pen"></i> Edit</button>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
         </div>
     `;
 }
@@ -1098,12 +1570,17 @@ async function filterDashboardPosts(type) {
 
 function refreshDashboard() {
     updateStatus();
-    loadDashboardTotalPosts();
+    if (typeof loadDashboardExecutiveMetrics === 'function') {
+        loadDashboardExecutiveMetrics();
+    }
+    if (typeof loadDashboardTotalPosts === 'function') {
+        loadDashboardTotalPosts();
+    }
     const filter = document.getElementById('dashboard-filter');
     if (filter && filter.value) {
         filterDashboardPosts(filter.value);
     }
-    showToast('Dashboard status refreshed', 'info');
+    showToast('Dashboard data refreshed', 'info');
 }
 
 // ==========================================================================
@@ -1111,34 +1588,34 @@ function refreshDashboard() {
 // ==========================================================================
 function renderAccounts(container) {
     container.innerHTML = `
-        <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); color: #ffffff; border: none;">
+        <div class="hub-hero fade-in">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                 <div>
-                    <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
-                        <i class="fa-solid fa-share-nodes" style="color: #38bdf8;"></i> Social Accounts &amp; Integrations Hub
+                    <h2 style="font-size: 1.35rem; font-weight: 800; margin-bottom: 0.35rem;">
+                        <i class="fa-solid fa-share-nodes text-primary"></i> Social Accounts &amp; Integrations Hub
                     </h2>
-                    <p style="color: #94a3b8; font-size: 0.9rem;">
-                        Live verified connectivity, Meta property discovery, LinkedIn enterprise OAuth, and WhatsApp Business Cloud API.
+                    <p style="font-size: 0.9rem;">
+                        Backend-verified connectivity, Meta property discovery, LinkedIn dual OAuth apps, and isolated WhatsApp Business gateways.
                     </p>
                 </div>
                 <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
-                    <button class="btn btn-sm btn-secondary" onclick="loadIntegrationsDashboard()" style="background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); color: #fff;">
+                    <button class="btn btn-sm btn-secondary" onclick="loadIntegrationsDashboard(true)">
                         <i class="fa-solid fa-rotate"></i> Refresh Integrations
                     </button>
-                    <span class="platform-pill" style="background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3);">
+                    <span class="badge badge-published">
                         <i class="fa-solid fa-shield-halved"></i> Secrets Protected
                     </span>
-                    <span class="platform-pill" id="badge-publishing-guardrail" style="background: rgba(245,158,11,0.2); color: #fde68a; border: 1px solid rgba(245,158,11,0.4);">
-                        <i class="fa-solid fa-lock"></i> Standby (Publishing Disabled)
+                    <span class="badge badge-warning" id="badge-publishing-guardrail">
+                        <i class="fa-solid fa-lock"></i> Checking Guardrail...
                     </span>
                 </div>
             </div>
         </div>
 
         <div id="integrations-dashboard-view">
-            <div style="text-align: center; padding: 3rem; color: #94a3b8;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; margin-bottom: 1rem; color: #38bdf8;"></i>
-                <p>Querying verified platform APIs (Meta Graph, LinkedIn OAuth, WhatsApp Business)...</p>
+            <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; margin-bottom: 1rem; color: var(--primary);"></i>
+                <p>Querying backend platform integrations (Meta Graph, LinkedIn OAuth, WhatsApp Cloud)...</p>
             </div>
         </div>
     `;
@@ -1146,64 +1623,71 @@ function renderAccounts(container) {
     setTimeout(loadIntegrationsDashboard, 20);
 }
 
-// Standardized Status Label Pill Generator (Requirement 4)
+// Standardized Status Label Pill Generator using accessible semantic tokens
 function getIntegrationsStatusBadge(statusLabel, actionRequired) {
-    let bg = '#f8fafc', color = '#64748b', border = '#e2e8f0', icon = 'fa-circle-dot';
+    let badgeClass = 'badge-neutral';
+    let icon = 'fa-circle-dot';
     const label = (statusLabel || 'Disconnected').trim();
 
     if (label === 'Live Publishing Ready') {
-        bg = 'rgba(16, 185, 129, 0.15)'; color = '#10b981'; border = 'rgba(16, 185, 129, 0.3)'; icon = 'fa-circle-check';
+        badgeClass = 'badge-published';
+        icon = 'fa-circle-check';
     } else if (label === 'Connected') {
-        bg = 'rgba(14, 165, 233, 0.15)'; color = '#0284c7'; border = 'rgba(14, 165, 233, 0.3)'; icon = 'fa-check';
+        badgeClass = 'badge-info';
+        icon = 'fa-check';
     } else if (label === 'Connected — Limited Permissions') {
-        bg = 'rgba(245, 158, 11, 0.15)'; color = '#d97706'; border = 'rgba(245, 158, 11, 0.3)'; icon = 'fa-triangle-exclamation';
+        badgeClass = 'badge-warning';
+        icon = 'fa-triangle-exclamation';
     } else if (label === 'Authentication Required') {
-        bg = 'rgba(249, 115, 22, 0.15)'; color = '#ea580c'; border = 'rgba(249, 115, 22, 0.3)'; icon = 'fa-key';
+        badgeClass = 'badge-warning';
+        icon = 'fa-key';
     } else if (label === 'Verification Required') {
-        bg = 'rgba(239, 68, 68, 0.15)'; color = '#ef4444'; border = 'rgba(239, 68, 68, 0.3)'; icon = 'fa-shield-halved';
+        badgeClass = 'badge-failed';
+        icon = 'fa-shield-halved';
     } else if (label === 'Credentials Configured') {
-        bg = 'rgba(99, 102, 241, 0.15)'; color = '#6366f1'; border = 'rgba(99, 102, 241, 0.3)'; icon = 'fa-wrench';
+        badgeClass = 'badge-primary';
+        icon = 'fa-wrench';
     } else if (label === 'Credentials Missing') {
-        bg = 'rgba(239, 68, 68, 0.15)'; color = '#ef4444'; border = 'rgba(239, 68, 68, 0.3)'; icon = 'fa-circle-xmark';
+        badgeClass = 'badge-failed';
+        icon = 'fa-circle-xmark';
     } else if (label === 'Publishing Not Approved') {
-        bg = 'rgba(245, 158, 11, 0.15)'; color = '#b45309'; border = 'rgba(245, 158, 11, 0.3)'; icon = 'fa-ban';
+        badgeClass = 'badge-warning';
+        icon = 'fa-ban';
     } else if (label === 'Disconnected') {
-        bg = 'rgba(148, 163, 184, 0.15)'; color = '#64748b'; border = 'rgba(148, 163, 184, 0.3)'; icon = 'fa-circle-stop';
+        badgeClass = 'badge-neutral';
+        icon = 'fa-circle-stop';
     }
 
     const titleAttr = actionRequired ? `title="${escapeHtml(actionRequired)}"` : '';
-    return `<span class="platform-pill" ${titleAttr} style="background: ${bg}; color: ${color}; border: 1px solid ${border}; font-weight: 600; display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.65rem; border-radius: 9999px; font-size: 0.78rem;">
+    return `<span class="badge ${badgeClass}" ${titleAttr}>
         <i class="fa-solid ${icon}"></i> ${escapeHtml(label)}
     </span>`;
 }
 
 // Fetch and render all platform integrations dynamically
-async function loadIntegrationsDashboard() {
+async function loadIntegrationsDashboard(forceRefresh = false) {
     const view = document.getElementById('integrations-dashboard-view');
     if (!view) return;
 
     try {
-        const [integrationsRes, brandsRes] = await Promise.all([
-            authFetch('/api/integrations/status'),
+        const [intData, brandsRes] = await Promise.all([
+            fetchIntegrationsStatusCached(forceRefresh),
             authFetch('/api/brands')
         ]);
 
-        if (!integrationsRes.ok) throw new Error('Failed to fetch platform integrations status');
-        const intData = await integrationsRes.json();
+        if (!intData || (!intData.meta && !intData.linkedin && !intData.whatsapp && !intData.success)) {
+            throw new Error('Failed to fetch platform integrations status');
+        }
         const brands = brandsRes.ok ? await brandsRes.json() : [];
 
         // Update Guardrail pill
         const guardrailPill = document.getElementById('badge-publishing-guardrail');
         if (guardrailPill) {
             if (intData.publishing_enabled) {
-                guardrailPill.style.background = 'rgba(16, 185, 129, 0.2)';
-                guardrailPill.style.color = '#6ee7b7';
-                guardrailPill.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+                guardrailPill.className = 'badge badge-published';
                 guardrailPill.innerHTML = '<i class="fa-solid fa-tower-broadcast"></i> Live Publishing Enabled';
             } else {
-                guardrailPill.style.background = 'rgba(245, 158, 11, 0.2)';
-                guardrailPill.style.color = '#fde68a';
-                guardrailPill.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+                guardrailPill.className = 'badge badge-warning';
                 guardrailPill.innerHTML = '<i class="fa-solid fa-lock"></i> Standby (POSTPILOT_PUBLISHING_ENABLED=0)';
             }
         }
@@ -1221,22 +1705,20 @@ async function loadIntegrationsDashboard() {
         const igAccounts = meta.instagram_accounts || [];
 
         html += `
-            <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #1877f2 0%, #0c4a6e 100%); color: #ffffff; border: none;">
+            <div class="hub-hero hub-hero--meta">
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                     <div>
-                        <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
-                            <i class="fa-brands fa-facebook"></i> Meta Brand Ecosystem (Facebook &amp; Instagram)
+                        <h2 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.3rem;">
+                            <i class="fa-brands fa-facebook" style="color: #1877f2;"></i> Meta Brand Ecosystem (Facebook &amp; Instagram)
                         </h2>
-                        <p style="color: #bfdbfe; font-size: 0.9rem;">
-                            Auto-discovered from Meta Graph API v19.0. Safe brand mapping guarantees workspace isolation.
+                        <p style="font-size: 0.88rem;">
+                            Discovered from Meta Graph API. Explicit brand mapping enforces workspace isolation.
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
-                            <i class="fa-solid fa-key"></i> Long-Lived System Token Active
-                        </span>
-                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
-                            <i class="fa-solid fa-layer-group"></i> ${pages.length} Pages · ${igAccounts.length} Instagram
+                        ${getIntegrationsStatusBadge(meta.status_label || (meta.token_valid ? 'Connected' : 'Credentials Configured'), meta.action_required)}
+                        <span class="badge badge-info">
+                            <i class="fa-solid fa-layer-group"></i> ${pages.length} Pages &middot; ${igAccounts.length} Instagram
                         </span>
                     </div>
                 </div>
@@ -1244,7 +1726,7 @@ async function loadIntegrationsDashboard() {
 
             <!-- Facebook Pages Section -->
             <div style="margin-bottom: 1.5rem;">
-                <h3 style="font-size: 1.1rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
                     <i class="fa-brands fa-facebook" style="color: #1877f2;"></i> Discovered Facebook Pages (${pages.length})
                 </h3>
                 <div class="accounts-grid">
@@ -1266,7 +1748,7 @@ async function loadIntegrationsDashboard() {
                                             <h3>${escapeHtml(p.name)}</h3>
                                             <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
                                                 <span class="platform-pill facebook"><i class="fa-brands fa-facebook"></i> ${escapeHtml(p.category || 'Facebook Page')}</span>
-                                                ${p.assigned_brand_name ? `<span class="platform-pill" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; border: 1px solid rgba(56, 189, 248, 0.3);"><i class="fa-solid fa-tag"></i> ${escapeHtml(p.assigned_brand_name)}</span>` : '<span class="platform-pill" style="background: #f1f5f9; color: #64748b;">Unassigned</span>'}
+                                                ${p.assigned_brand_name ? `<span class="badge badge-info"><i class="fa-solid fa-tag"></i> ${escapeHtml(p.assigned_brand_name)}</span>` : '<span class="badge badge-neutral">Unassigned</span>'}
                                             </div>
                                         </div>
                                     </div>
@@ -1342,7 +1824,7 @@ async function loadIntegrationsDashboard() {
                                             <h3>${escapeHtml(ig.username || ig.name)}</h3>
                                             <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
                                                 <span class="platform-pill instagram"><i class="fa-brands fa-instagram"></i> Instagram Business</span>
-                                                ${ig.assigned_brand_name ? `<span class="platform-pill" style="background: rgba(56, 189, 248, 0.15); color: #0284c7; border: 1px solid rgba(56, 189, 248, 0.3);"><i class="fa-solid fa-tag"></i> ${escapeHtml(ig.assigned_brand_name)}</span>` : '<span class="platform-pill" style="background: #f1f5f9; color: #64748b;">Unassigned</span>'}
+                                                ${ig.assigned_brand_name ? `<span class="badge badge-info"><i class="fa-solid fa-tag"></i> ${escapeHtml(ig.assigned_brand_name)}</span>` : '<span class="badge badge-neutral">Unassigned</span>'}
                                             </div>
                                         </div>
                                     </div>
@@ -1404,22 +1886,22 @@ async function loadIntegrationsDashboard() {
         // =========================================================================
         const liApps = linkedin.apps || [];
         html += `
-            <div class="card" style="margin-top: 2rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, #0a66c2 0%, #004182 100%); color: #ffffff; border: none;">
+            <div class="hub-hero hub-hero--linkedin" style="margin-top: 2rem;">
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                     <div>
-                        <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
-                            <i class="fa-brands fa-linkedin"></i> LinkedIn Enterprise Ecosystem (Dual Applications)
+                        <h2 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.3rem;">
+                            <i class="fa-brands fa-linkedin" style="color: #0a66c2;"></i> LinkedIn Enterprise Ecosystem (Dual Applications)
                         </h2>
-                        <p style="color: #bfdbfe; font-size: 0.9rem;">
+                        <p style="font-size: 0.88rem;">
                             Independent OAuth 2.0 company integrations for Aidni Global LLP and Gaatha Ventures Sh.p.k.
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                        <span class="badge badge-info">
                             <i class="fa-solid fa-shield-halved"></i> 3-Legged OAuth Mandatory
                         </span>
-                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
-                            <i class="fa-solid fa-code-branch"></i> REST Posts API 202401
+                        <span class="badge badge-neutral">
+                            <i class="fa-solid fa-code-branch"></i> REST Posts API
                         </span>
                     </div>
                 </div>
@@ -1427,6 +1909,42 @@ async function loadIntegrationsDashboard() {
 
             <div class="accounts-grid" style="margin-bottom: 2rem;">
                 ${liApps.map(app => {
+                    const scopes = (app.token_scopes && app.token_scopes.length)
+                        ? app.token_scopes
+                        : (app.requested_scopes || []);
+                    const hasCompanyScope = Boolean(app.company_publishing_ready || scopes.includes('w_organization_social'));
+                    let eligibilityBanner = '';
+                    if (!app.user_authenticated) {
+                        eligibilityBanner = `
+                            <div class="notice-callout notice-callout--warning" style="margin-top: 0.5rem;">
+                                <i class="fa-solid fa-key"></i>
+                                <div>
+                                    <strong>Authentication Required</strong><br>
+                                    Authorize via LinkedIn OAuth first to acquire an active token before publishing attempts.
+                                </div>
+                            </div>
+                        `;
+                    } else if (!hasCompanyScope) {
+                        eligibilityBanner = `
+                            <div class="notice-callout notice-callout--info" style="margin-top: 0.5rem;">
+                                <i class="fa-solid fa-circle-info"></i>
+                                <div>
+                                    <strong>Personal Posting:</strong> Available via <code>w_member_social</code>.<br>
+                                    <strong>Company Page Posting:</strong> Pending <strong>Community Management API</strong> approval (<code>w_organization_social</code>) in LinkedIn Developer Portal.
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        eligibilityBanner = `
+                            <div class="notice-callout notice-callout--success" style="margin-top: 0.5rem;">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <div>
+                                    <strong>Personal &amp; Company Page Posting:</strong> Active with <code>w_organization_social</code> approval.
+                                </div>
+                            </div>
+                        `;
+                    }
+
                     return `
                         <div class="account-card" id="card-linkedin-${app.app_key}">
                             <div class="account-card-header">
@@ -1438,7 +1956,7 @@ async function loadIntegrationsDashboard() {
                                         <h3>${escapeHtml(app.name)}</h3>
                                         <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
                                             <span class="platform-pill linkedin"><i class="fa-brands fa-linkedin"></i> Company Page</span>
-                                            <span class="platform-pill" style="background: rgba(14, 165, 233, 0.15); color: #0284c7; border: 1px solid rgba(14, 165, 233, 0.3);">
+                                            <span class="badge badge-info">
                                                 Org ID: ${escapeHtml(app.organization_id)}
                                             </span>
                                         </div>
@@ -1474,23 +1992,15 @@ async function loadIntegrationsDashboard() {
                                                 : (app.app_key === 'gaatha_ventures' ? 'w_member_social' : 'openid, profile, email, w_member_social'))
                                     )}</code>
                                 </div>
-
-                                <div class="account-detail-item" style="flex-direction: column; align-items: flex-start; gap: 0.35rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 0.6rem;">
-                                    <span class="account-detail-label" style="color: #92400e; font-weight: 700;">
-                                        <i class="fa-solid fa-circle-info"></i> Company Publishing Eligibility
-                                    </span>
-                                    <div style="font-size: 0.8rem; color: #92400e; line-height: 1.4;">
-                                        <strong>Personal Posting:</strong> Available via <code>w_member_social</code>.<br>
-                                        <strong>Company Page Posting:</strong> Strictly requires LinkedIn's <strong>Community Management API</strong> product approval (scope <code>w_organization_social</code>) inside the LinkedIn Developer Portal.
-                                    </div>
-                                </div>
                             </div>
 
-                            <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+                            ${eligibilityBanner}
+
+                            <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem; flex-wrap: wrap;">
                                 <a class="btn btn-sm btn-primary" href="${app.connect_url}" style="flex: 1; text-align: center; text-decoration: none;">
-                                    <i class="fa-brands fa-linkedin"></i> Connect via LinkedIn OAuth
+                                    <i class="fa-brands fa-linkedin"></i> ${app.user_authenticated ? 'Reconnect OAuth' : 'Connect via LinkedIn OAuth'}
                                 </a>
-                                <a class="btn btn-sm btn-secondary" href="${app.connect_url}" title="Reconnect with new authorization code">
+                                <a class="btn btn-sm btn-secondary" href="${app.connect_url}" title="Start fresh OAuth authorization">
                                     <i class="fa-solid fa-arrow-rotate-right"></i> Re-authorize
                                 </a>
                             </div>
@@ -1503,47 +2013,53 @@ async function loadIntegrationsDashboard() {
         // =========================================================================
         // 3. WHATSAPP BUSINESS CLOUD API (META ECOSYSTEM)
         // =========================================================================
+        const waActiveConfigured = Boolean(whatsapp.active_phone_number_id || (whatsapp.phone_numbers && whatsapp.phone_numbers.length));
+        const waActivePhone = whatsapp.active_display_phone || '+91 98257 28291';
+        const waActivePhoneId = whatsapp.active_phone_number_id || '1298748379987770';
+        const waActiveWabaId = whatsapp.active_waba_id || '1471882524763501';
+        const waActiveStatusLabel = whatsapp.publishing_enabled
+            ? (whatsapp.status_label || 'Configured')
+            : 'Standby (Guardrail Safe Mode)';
+
         html += `
-            <div class="card" style="margin-top: 2rem; margin-bottom: 1.5rem; background: linear-gradient(135deg, #075e54 0%, #128c7e 100%); color: #ffffff; border: none;">
+            <div class="hub-hero hub-hero--whatsapp" style="margin-top: 2rem;">
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                     <div>
-                        <h2 style="font-size: 1.35rem; font-weight: 700; margin-bottom: 0.35rem;">
-                            <i class="fa-brands fa-whatsapp"></i> WhatsApp Business Cloud API (Meta Ecosystem)
+                        <h2 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.3rem;">
+                            <i class="fa-brands fa-whatsapp" style="color: #059669;"></i> WhatsApp Business Cloud API
                         </h2>
-                        <p style="color: #d1fae5; font-size: 0.9rem;">
-                            Direct enterprise messaging gateway for Gaatha verified business line
+                        <p style="font-size: 0.88rem;">
+                            Explicit sender-isolated configuration. No automatic brand binding or background dispatch while guardrails are off.
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <span class="platform-pill" style="background: rgba(255,255,255,0.18); color: #ffffff; border: 1px solid rgba(255,255,255,0.25);">
+                        <span class="badge badge-neutral">
                             <i class="fa-solid fa-bolt"></i> Cloud API v19.0
                         </span>
-                        <span class="platform-pill" style="background: rgba(245, 158, 11, 0.25); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.4);">
-                            <i class="fa-solid fa-triangle-exclamation"></i> Verification Required
-                        </span>
+                        ${getIntegrationsStatusBadge(whatsapp.status_label || 'Verification Required', whatsapp.action_required)}
                     </div>
                 </div>
             </div>
 
             <div class="accounts-grid" style="margin-bottom: 1.5rem;">
-                <!-- Primary Configured WhatsApp Account -->
+                <!-- Preserved Legacy / Secondary Phone Line (No auto brand binding, strictly untouched) -->
                 <div class="account-card">
                     <div class="account-card-header">
                         <div class="account-identity">
-                            <div class="account-avatar" style="background: #25d366; color: #ffffff;">
+                            <div class="account-avatar" style="background: var(--bg-surface-subtle); color: var(--success); border: 1px solid var(--border);">
                                 <i class="fa-brands fa-whatsapp"></i>
                             </div>
                             <div class="account-meta">
-                                <h3>${escapeHtml(whatsapp.verified_name || 'Gaatha Ventures')}</h3>
+                                <h3>${escapeHtml(whatsapp.verified_name || 'Preserved WhatsApp Line')}</h3>
                                 <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                    <span class="platform-pill whatsapp"><i class="fa-brands fa-whatsapp"></i> WhatsApp Business</span>
-                                    <span class="platform-pill" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">
+                                    <span class="platform-pill whatsapp"><i class="fa-brands fa-whatsapp"></i> Preserved Asset</span>
+                                    <span class="badge badge-warning">
                                         ${escapeHtml(whatsapp.platform_type || 'ON_PREMISE')}
                                     </span>
                                 </div>
                             </div>
                         </div>
-                        ${getIntegrationsStatusBadge(whatsapp.status_label, whatsapp.action_required)}
+                        ${getIntegrationsStatusBadge(whatsapp.status_label || 'Verification Required', whatsapp.action_required)}
                     </div>
 
                     <div class="account-details-list">
@@ -1566,14 +2082,14 @@ async function loadIntegrationsDashboard() {
                             </span>
                         </div>
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Platform Type (Root Cause)</span>
+                            <span class="account-detail-label">Platform Type</span>
                             <span class="badge badge-warning">
-                                ${escapeHtml(whatsapp.platform_type || 'ON_PREMISE')} (Needs Cloud API Migration)
+                                ${escapeHtml(whatsapp.platform_type || 'ON_PREMISE')} (Inactive for Broadcast)
                             </span>
                         </div>
                         <div class="account-detail-item">
                             <span class="account-detail-label">Connection Status</span>
-                            <span class="badge badge-secondary">${escapeHtml(whatsapp.phone_status || 'DISCONNECTED')}</span>
+                            <span class="badge badge-neutral">${escapeHtml(whatsapp.phone_status || 'DISCONNECTED')}</span>
                         </div>
                         <div class="account-detail-item">
                             <span class="account-detail-label">Approved Meta Templates</span>
@@ -1583,68 +2099,78 @@ async function loadIntegrationsDashboard() {
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
-                        <button class="btn btn-sm btn-primary" onclick="loadTab('whatsapp')" style="flex: 1; background: #25d366; border-color: #25d366; color: #000; font-weight: 600;">
-                            <i class="fa-brands fa-whatsapp"></i> Open WhatsApp Studio
-                        </button>
+                    <div class="notice-callout notice-callout--info" style="margin-top: 0.75rem;">
+                        <i class="fa-solid fa-lock"></i>
+                        <div>Preserved without credential modification or automatic brand assignment.</div>
                     </div>
                 </div>
 
-                <!-- Discovered Alternative WABA Card -->
-                <div class="account-card" style="border-left: 4px solid #10b981;">
+                <!-- Discovered Cloud API Sender (Strict Status Accuracy, Zero Auto-Brand Binding) -->
+                <div class="account-card" style="border-left: 4px solid var(--success);">
                     <div class="account-card-header">
                         <div class="account-identity">
-                            <div class="account-avatar" style="background: #10b981; color: #ffffff;">
+                            <div class="account-avatar" style="background: var(--success-soft); color: var(--success);">
                                 <i class="fa-solid fa-cloud-arrow-up"></i>
                             </div>
                             <div class="account-meta">
-                                <h3>Aidni Global / Sizzlecraft</h3>
+                                <h3>${escapeHtml(whatsapp.active_verified_name || 'Cloud API Sender (Isolated)')}</h3>
                                 <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                    <span class="platform-pill" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">
-                                        <i class="fa-solid fa-check"></i> CLOUD_API Active
+                                    <span class="badge badge-info">
+                                        <i class="fa-solid fa-cloud"></i> CLOUD_API Discovery
                                     </span>
                                 </div>
                             </div>
                         </div>
-                        <span class="status-badge status-running"><i class="fa-solid fa-check"></i> CONNECTED</span>
+                        <span class="badge ${waActiveConfigured && whatsapp.publishing_enabled ? 'badge-published' : 'badge-warning'}">
+                            <i class="fa-solid fa-shield-halved"></i> ${escapeHtml(waActiveStatusLabel)}
+                        </span>
                     </div>
 
                     <div class="account-details-list">
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Discovered WABA ID</span>
-                            <code class="account-detail-value">1471882524763501</code>
+                            <span class="account-detail-label">WABA Account ID</span>
+                            <code class="account-detail-value">${escapeHtml(waActiveWabaId)}</code>
                         </div>
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Active Cloud Phone</span>
-                            <code class="account-detail-value">+91 98257 28291</code>
+                            <span class="account-detail-label">Phone Number</span>
+                            <code class="account-detail-value">${escapeHtml(waActivePhone)}</code>
                         </div>
                         <div class="account-detail-item">
-                            <span class="account-detail-label">Phone ID</span>
-                            <code class="account-detail-value">1298748379987770</code>
+                            <span class="account-detail-label">Phone Number ID</span>
+                            <code class="account-detail-value">${escapeHtml(waActivePhoneId)}</code>
                         </div>
                         <div class="account-detail-item">
                             <span class="account-detail-label">Platform Type</span>
-                            <span class="badge badge-success">CLOUD_API (Native)</span>
+                            <span class="badge badge-info">CLOUD_API</span>
+                        </div>
+                        <div class="account-detail-item">
+                            <span class="account-detail-label">Brand Assignment</span>
+                            <span class="badge badge-neutral">Manual Opt-In Only (Not Auto-Bound)</span>
                         </div>
                     </div>
 
-                    <div style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 1rem; line-height: 1.4; background: var(--bg-hover, #f8fafc); padding: 0.6rem; border-radius: 6px;">
-                        <i class="fa-solid fa-circle-info" style="color: #0284c7;"></i> Alternative verified Meta Cloud API asset. Can be configured in <code>.env</code> if primary phone OTP is delayed.
+                    <div class="notice-callout notice-callout--info" style="margin-top: 0.75rem;">
+                        <i class="fa-solid fa-circle-info"></i>
+                        <div>Meta Cloud API asset remains safely in standby while <code>WHATSAPP_PUBLISHING_ENABLED=0</code>.</div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                        <button class="btn btn-sm btn-success" onclick="loadTab('whatsapp')" style="flex: 1;">
+                            <i class="fa-brands fa-whatsapp"></i> Open WhatsApp Studio
+                        </button>
                     </div>
                 </div>
             </div>
 
             <!-- Meta Business Manager Activation Checklist -->
-            <div class="card" style="margin-bottom: 2rem; border-left: 4px solid #f59e0b; background: var(--bg-card, #ffffff);">
-                <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.65rem; color: #b45309; display: flex; align-items: center; gap: 0.5rem;">
-                    <i class="fa-solid fa-list-check"></i> Meta Business Manager Action Checklist for Phone +91 90990 28291
+            <div class="card" style="margin-bottom: 1.5rem; border-left: 4px solid var(--warning);">
+                <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.65rem; color: var(--warning); display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fa-solid fa-list-check"></i> Meta Business Manager Verification Notes (+91 90990 28291 Preserved Line)
                 </h4>
-                <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: var(--text-primary); line-height: 1.6;">
-                    <li>Log in to <strong>Meta Business Manager</strong> (<code>business.facebook.com</code>) as an Administrator.</li>
-                    <li>Navigate to <strong>WhatsApp Manager</strong> &rarr; <strong>Account Tools</strong> &rarr; <strong>Phone Numbers</strong>.</li>
-                    <li>Locate <code>+91 90990 28291</code> (ID <code>1171737406016871</code>) and click <strong>Verify</strong> to receive SMS or Voice OTP.</li>
-                    <li>Complete the <strong>Migrate to Cloud API</strong> wizard to transition platform type from <code>ON_PREMISE</code> to <code>CLOUD_API</code>.</li>
-                    <li>Create and submit marketing or utility message templates under Meta WhatsApp Manager for broadcast approval.</li>
+                <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6;">
+                    <li>Open <strong>Meta Business Manager</strong> &rarr; <strong>WhatsApp Manager</strong> &rarr; <strong>Phone Numbers</strong>.</li>
+                    <li>Preserved number <code>+91 90990 28291</code> (ID <code>1171737406016871</code>) requires OTP verification and Cloud API migration if intended for future use.</li>
+                    <li>Broadcasting remains strictly gated behind server environment flags and sender isolation checks.</li>
                 </ol>
             </div>
         `;
@@ -1653,13 +2179,13 @@ async function loadIntegrationsDashboard() {
         // 4. SECURITY & TOKEN ISOLATION ARCHITECTURE
         // =========================================================================
         html += `
-            <div class="card" style="border-left: 4px solid var(--primary, #6366f1); background: var(--bg-hover, #f8fafc); margin-top: 1.5rem;">
+            <div class="card" style="border-left: 4px solid var(--primary); background: var(--bg-surface-subtle); margin-top: 1.25rem;">
                 <div style="display: flex; gap: 0.85rem; align-items: flex-start;">
-                    <i class="fa-solid fa-shield-halved" style="color: var(--primary, #6366f1); font-size: 1.4rem; margin-top: 0.2rem;"></i>
+                    <i class="fa-solid fa-shield-halved" style="color: var(--primary); font-size: 1.35rem; margin-top: 0.2rem;"></i>
                     <div>
-                        <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.2rem;">Security &amp; Secret Isolation Architecture</h4>
-                        <p style="font-size: 0.85rem; color: var(--text-secondary, #64748b); line-height: 1.45;">
-                            Meta system access tokens, LinkedIn client secrets, and WhatsApp bearer keys remain strictly isolated on the VPS filesystem and secure database. They are never rendered or transmitted to client browser memory.
+                        <h4 style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.2rem; color: var(--text-primary);">Security &amp; Secret Isolation Architecture</h4>
+                        <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.45; margin: 0;">
+                            Meta system access tokens, LinkedIn client secrets, and WhatsApp bearer keys remain isolated on the server filesystem and environment store. They are never rendered or transmitted to browser storage.
                         </p>
                     </div>
                 </div>
@@ -1763,16 +2289,16 @@ function escapeAttr(str) {
 // ==========================================================================
 let composerCurrentStep = 1;
 let composerDestinations = {
-    'fb_gaathasuite': { selected: true, name: 'GAATHA Suite (FB)', platform: 'facebook', brand_id: 1, meta: 'Facebook Page · ID 104690782333066', icon: 'fa-building-flag', color: '#4f46e5' },
-    'fb_tour': { selected: false, name: 'Nexora Suite (FB)', platform: 'facebook', brand_id: 4, meta: 'Facebook Page · ID 967550829768297', icon: 'fa-earth-americas', color: '#0284c7' },
-    'fb_nz': { selected: false, name: 'Phoenix Intl (FB)', platform: 'facebook', brand_id: 5, meta: 'Facebook Page · ID 954901604381882', icon: 'fa-passport', color: '#16a34a' },
-    'fb_gaatha': { selected: false, name: 'Gaatha AI (FB)', platform: 'facebook', brand_id: 6, meta: 'Facebook Page · ID 1028368893692590', icon: 'fa-wand-magic-sparkles', color: '#9333ea' },
-    'fb_grahak': { selected: false, name: 'GAATHA POS (FB)', platform: 'facebook', brand_id: 2, meta: 'Facebook Page · ID 61571408331302', icon: 'fa-scale-balanced', color: '#d97706' },
-    'ig_gaathasuite': { selected: false, name: 'GAATHA Suite (IG)', platform: 'instagram', brand_id: 1, meta: '@nexora_suite · Connected Professional', icon: 'fa-camera-retro', color: '#e1306c' },
-    'ig_phoenix': { selected: false, name: 'Phoenix Intl (IG)', platform: 'instagram', brand_id: 5, meta: '@phoenixbygaatha · ID 17841471822022390', icon: 'fa-camera-retro', color: '#e1306c' },
-    'li_aidni': { selected: false, name: 'Aidni Global LLP (LinkedIn)', platform: 'linkedin', brand_id: 2, meta: 'Company Page · Org ID 145240694', icon: 'fa-linkedin-in', color: '#0a66c2' },
-    'li_gaatha': { selected: false, name: 'Gaatha Ventures Sh.p.k. (LinkedIn)', platform: 'linkedin', brand_id: 3, meta: 'Company Page · Org ID 145250613', icon: 'fa-linkedin-in', color: '#0a66c2' },
-    'wa_gaatha': { selected: false, name: 'Gaatha Ventures (WhatsApp)', platform: 'whatsapp', brand_id: 1, meta: 'WhatsApp Cloud · +91 90990 28291', icon: 'fa-whatsapp', color: '#25d366' }
+    'fb_gaathasuite': { selected: true, name: 'GAATHA Suite (FB)', platform: 'facebook', brand_id: 1, meta: 'Facebook Page · ID 104690782333066', icon: 'fa-building-flag', color: '#4f46e5', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'fb_tour': { selected: false, name: 'Nexora Suite (FB)', platform: 'facebook', brand_id: 4, meta: 'Facebook Page · ID 967550829768297', icon: 'fa-earth-americas', color: '#0284c7', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'fb_nz': { selected: false, name: 'Phoenix Intl (FB)', platform: 'facebook', brand_id: 5, meta: 'Facebook Page · ID 954901604381882', icon: 'fa-passport', color: '#16a34a', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'fb_gaatha': { selected: false, name: 'Gaatha AI (FB)', platform: 'facebook', brand_id: 6, meta: 'Facebook Page · ID 1028368893692590', icon: 'fa-wand-magic-sparkles', color: '#9333ea', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'fb_grahak': { selected: false, name: 'GAATHA POS (FB)', platform: 'facebook', brand_id: 2, meta: 'Facebook Page · ID 61571408331302', icon: 'fa-scale-balanced', color: '#d97706', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'ig_gaathasuite': { selected: false, name: 'GAATHA Suite (IG)', platform: 'instagram', brand_id: 1, meta: '@nexora_suite · Professional', icon: 'fa-camera-retro', color: '#e1306c', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'ig_phoenix': { selected: false, name: 'Phoenix Intl (IG)', platform: 'instagram', brand_id: 5, meta: '@phoenixbygaatha · ID 17841471822022390', icon: 'fa-camera-retro', color: '#e1306c', statusLabel: 'Checking...', statusKind: 'neutral' },
+    'li_aidni': { selected: false, name: 'Aidni Global LLP (LinkedIn)', platform: 'linkedin', brand_id: 2, meta: 'Company Page · Org ID 145240694', icon: 'fa-linkedin-in', color: '#0a66c2', statusLabel: 'Auth Required', statusKind: 'warning' },
+    'li_gaatha': { selected: false, name: 'Gaatha Ventures Sh.p.k. (LinkedIn)', platform: 'linkedin', brand_id: 3, meta: 'Company Page · Org ID 145250613', icon: 'fa-linkedin-in', color: '#0a66c2', statusLabel: 'Auth Required', statusKind: 'warning' },
+    'wa_gaatha': { selected: false, name: 'WhatsApp Cloud API (Standby)', platform: 'whatsapp', brand_id: 1, meta: 'Sender-Isolated Gateway · Verification Pending', icon: 'fa-whatsapp', color: '#059669', statusLabel: 'Isolated Standby', statusKind: 'warning' }
 };
 
 function setComposerStep(step) {
@@ -1922,6 +2448,25 @@ function updateComposerSummary() {
             summaryMediaEl.innerHTML = `<i class="fa-solid fa-font" style="color: var(--text-muted);"></i> Text-Only Post (No media attached)`;
         }
     }
+
+    const preflightEl = document.getElementById('composer-preflight-list');
+    if (preflightEl) {
+        const unready = selected.filter(d => d.statusKind === 'warning' || d.statusKind === 'failed');
+        const hasIgWithoutMedia = selected.some(d => d.platform === 'instagram') && (!fileInput || fileInput.files.length === 0);
+        const items = [];
+        if (unready.length > 0) {
+            items.push(`<div><i class="fa-solid fa-triangle-exclamation" style="color: var(--warning);"></i> <strong>Pending Destination Setup:</strong> ${unready.map(u => escapeHtml(u.name) + ' (' + escapeHtml(u.statusLabel) + ')').join(', ')}. Live dispatch requires authorization/verification first.</div>`);
+        } else {
+            items.push(`<div><i class="fa-solid fa-check" style="color: var(--success);"></i> Selected destination tokens checked against current integration status.</div>`);
+        }
+        if (hasIgWithoutMedia) {
+            items.push(`<div><i class="fa-solid fa-triangle-exclamation" style="color: var(--warning);"></i> Instagram posts require an attached image or reel video before live publishing.</div>`);
+        } else {
+            items.push(`<div><i class="fa-solid fa-check" style="color: var(--success);"></i> Media &amp; caption inputs formatted cleanly for selected destinations.</div>`);
+        }
+        items.push(`<div><i class="fa-solid fa-shield-halved" style="color: var(--primary);"></i> Publishing safety guardrails &amp; idempotent scheduling are enforced server-side.</div>`);
+        preflightEl.innerHTML = items.join('');
+    }
 }
 
 function renderComposerView(container) {
@@ -1979,7 +2524,8 @@ function renderComposerView(container) {
 
                 <div class="dest-grid">
                     ${Object.entries(composerDestinations).map(([key, item]) => {
-                        let platIcon = item.platform === 'facebook' ? 'fa-facebook' : (item.platform === 'instagram' ? 'fa-instagram' : (item.platform === 'linkedin' ? 'fa-linkedin-in' : 'fa-whatsapp'));
+                        const platIcon = item.platform === 'facebook' ? 'fa-facebook' : (item.platform === 'instagram' ? 'fa-instagram' : (item.platform === 'linkedin' ? 'fa-linkedin-in' : 'fa-whatsapp'));
+                        const badgeClass = item.statusKind === 'published' ? 'badge-published' : (item.statusKind === 'info' ? 'badge-info' : (item.statusKind === 'warning' ? 'badge-warning' : 'badge-neutral'));
                         return `
                             <div class="dest-card ${item.selected ? 'selected' : ''}" id="dest-card-${key}" onclick="toggleComposerDestination('${key}')">
                                 <div class="dest-card-left">
@@ -1987,8 +2533,11 @@ function renderComposerView(container) {
                                         <i class="fa-brands ${platIcon}"></i>
                                     </div>
                                     <div>
-                                        <div class="dest-info-title">${escapeHtml(item.name)}</div>
-                                        <div class="dest-info-sub">${item.meta}</div>
+                                        <div class="dest-info-title" style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+                                            <span>${escapeHtml(item.name)}</span>
+                                            <span id="dest-status-${key}" class="badge ${badgeClass}" style="font-size: 0.66rem; padding: 0.1rem 0.45rem;">${escapeHtml(item.statusLabel || 'Checking...')}</span>
+                                        </div>
+                                        <div class="dest-info-sub">${escapeHtml(item.meta)}</div>
                                     </div>
                                 </div>
                                 <div class="dest-check-indicator">
@@ -2163,7 +2712,7 @@ function renderComposerView(container) {
                                 <div class="li-mockup-name">
                                     <span>Aidni Global LLP</span> &middot; <span style="font-weight: 400; color: #8c9094; font-size: 0.8rem;">1st</span>
                                 </div>
-                                <div class="li-mockup-meta">14,250 followers &middot; Just now &middot; <i class="fa-solid fa-earth-americas"></i></div>
+                                <div class="li-mockup-meta">Company Page Preview &middot; <i class="fa-solid fa-earth-americas"></i></div>
                             </div>
                         </div>
                         <div class="li-mockup-caption" id="v-li-preview-caption">Your LinkedIn article or post will render here...</div>
@@ -2209,7 +2758,7 @@ function renderComposerView(container) {
                         <span>Schedule Date, Time &amp; Timezone</span>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
                         <div class="form-group" style="margin-bottom: 0;">
                             <label for="view-composer-datetime" class="form-label">Scheduled Date &amp; Time (Local)</label>
                             <input type="datetime-local" id="view-composer-datetime" class="form-control">
@@ -2227,15 +2776,14 @@ function renderComposerView(container) {
                 </div>
 
                 <!-- Safe Mode Banner -->
-                <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1.5rem; display: flex; align-items: flex-start; gap: 0.75rem;">
-                    <i class="fa-solid fa-shield-halved" style="color: var(--success); font-size: 1.25rem; margin-top: 0.15rem;"></i>
-                    <div style="font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary);">
-                        <strong style="color: var(--text-primary);">Publishing Safeguards Enforced:</strong> 
-                        <code>POSTPILOT_PUBLISHING_ENABLED=0</code> is active. All scheduled posts are queued, validated, and logged safely in local databases without executing unintended live API broadcasts.
+                <div class="notice-callout notice-callout--success" style="margin-bottom: 1.5rem;">
+                    <i class="fa-solid fa-shield-halved"></i>
+                    <div>
+                        <strong>Publishing Safeguards Enforced:</strong> Guardrails prevent accidental external publishing while allowing scheduling, drafts, and layout previewing.
                     </div>
                 </div>
 
-                <div style="display: flex; justify-content: space-between; margin-top: 2rem;">
+                <div style="display: flex; justify-content: space-between; margin-top: 2rem; flex-wrap: wrap; gap: 0.75rem;">
                     <button type="button" class="btn btn-secondary btn-lg" onclick="setComposerStep(3)">
                         <i class="fa-solid fa-arrow-left"></i> <span>Back: Previews</span>
                     </button>
@@ -2274,7 +2822,7 @@ function renderComposerView(container) {
                     </div>
 
                     <!-- Media & Time Summary -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
                         <div class="card" style="margin-bottom: 0; background: var(--bg-surface-subtle);">
                             <label class="studio-card-field-label">Media Attachment</label>
                             <div id="summary-media-badge" style="font-size: 0.88rem; color: var(--text-primary); margin-top: 0.35rem;">
@@ -2290,14 +2838,12 @@ function renderComposerView(container) {
                     </div>
 
                     <!-- Verification Checklist -->
-                    <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: var(--radius-md); padding: 0.85rem 1rem;">
+                    <div class="notice-callout notice-callout--info" style="flex-direction: column; align-items: stretch;">
                         <div style="font-weight: 700; font-size: 0.85rem; color: var(--primary); margin-bottom: 0.35rem;">
-                            <i class="fa-solid fa-list-check"></i> Pre-Flight Acceptance Checklist
+                            <i class="fa-solid fa-list-check"></i> Pre-Flight Check
                         </div>
-                        <div style="font-size: 0.8rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.2rem;">
-                            <div><i class="fa-solid fa-check" style="color: var(--success);"></i> Destination credentials and account tokens confirmed valid.</div>
-                            <div><i class="fa-solid fa-check" style="color: var(--success);"></i> Copy length verified within Meta &amp; LinkedIn character limits.</div>
-                            <div><i class="fa-solid fa-check" style="color: var(--success);"></i> Safe mode audit active — idempotency keys generated automatically.</div>
+                        <div id="composer-preflight-list" style="font-size: 0.82rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 0.3rem;">
+                            <div><i class="fa-solid fa-circle-info"></i> Checking selected destinations...</div>
                         </div>
                     </div>
                 </div>
@@ -2755,6 +3301,48 @@ async function renderSearch(container, query) {
 // ==========================================================================
 // Post Modal & Live Preview Engine
 // ==========================================================================
+function showModalValidationAlert(message) {
+    const el = document.getElementById('modal-validation-alert');
+    if (!el) {
+        showToast(message, 'error');
+        return;
+    }
+    el.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>${escapeHtml(message)}</span>`;
+    el.classList.add('show');
+    el.style.display = 'flex';
+}
+
+function clearModalValidationAlert() {
+    const el = document.getElementById('modal-validation-alert');
+    if (!el) return;
+    el.classList.remove('show');
+    el.style.display = 'none';
+    el.innerHTML = '';
+}
+
+async function syncModalBrandDropdown(preferredBrandId) {
+    const brandSelect = document.getElementById('post-brand');
+    if (!brandSelect) return;
+    try {
+        if (!Array.isArray(window._ppCachedBrands) || window._ppCachedBrands.length === 0) {
+            const res = await authFetch('/api/brands');
+            if (res.ok) {
+                const list = await res.json();
+                if (Array.isArray(list) && list.length > 0) {
+                    window._ppCachedBrands = list;
+                }
+            }
+        }
+        if (Array.isArray(window._ppCachedBrands) && window._ppCachedBrands.length > 0) {
+            const cur = preferredBrandId ? String(preferredBrandId) : brandSelect.value;
+            brandSelect.innerHTML = window._ppCachedBrands
+                .map(b => `<option value="${b.id}">${escapeHtml(b.name)}</option>`)
+                .join('');
+            if (cur) brandSelect.value = cur;
+        }
+    } catch (e) {}
+}
+
 function openModal(mode, postId, type, brandId) {
     const modal = document.getElementById('post-modal');
     const modalTitle = document.getElementById('modal-title');
@@ -2767,25 +3355,35 @@ function openModal(mode, postId, type, brandId) {
     const fileInput = document.getElementById('post-file');
     const previewCard = document.getElementById('file-preview-card');
     const previewThumb = document.getElementById('preview-thumb-img');
+    const schedDtInput = document.getElementById('post-schedule-datetime');
+    const schedTzSelect = document.getElementById('post-schedule-timezone');
 
     if (!modal) return;
 
+    clearModalValidationAlert();
     modal.classList.add('show');
     modalTitle.textContent = mode === 'edit' ? 'Edit Social Post' : 'Create New Post';
     const canonicalPlatforms = ['facebook', 'instagram', 'linkedin', 'whatsapp'];
     typeSelect.value = (type && canonicalPlatforms.includes(type)) ? type : 'facebook';
+    syncModalBrandDropdown(brandId);
     if (brandSelect && brandId) {
         brandSelect.value = String(brandId);
         handleComposerBrandChange(brandId);
     }
 
     if (mode === 'edit' && postId) {
-        const post = currentModulePosts.find(p => p.id === postId);
+        const post = currentModulePosts.find(p => p.id === postId)
+            || (typeof calendarPostsCache !== 'undefined' && Array.isArray(calendarPostsCache) ? calendarPostsCache.find(p => p.id === postId) : null);
         if (post) {
             idInput.value = post.id;
             msgInput.value = post.message || '';
             curImgInput.value = post.image_filename || '';
             fileLabel.textContent = post.image_filename ? `Current: ${post.image_filename}` : 'Choose new file or drag here';
+            if (schedDtInput) {
+                const rawDt = (post.local_scheduled_for || post.scheduled_for || '').trim();
+                schedDtInput.value = rawDt ? rawDt.replace(' ', 'T').substring(0, 16) : '';
+            }
+            if (schedTzSelect && post.timezone) schedTzSelect.value = post.timezone;
             
             if (post.image_filename) {
                 previewThumb.src = `/images/${post.image_filename}`;
@@ -2803,6 +3401,8 @@ function openModal(mode, postId, type, brandId) {
         msgInput.value = '';
         curImgInput.value = '';
         fileInput.value = '';
+        if (schedDtInput) schedDtInput.value = '';
+        if (schedTzSelect) schedTzSelect.value = 'Asia/Kolkata';
         fileLabel.textContent = 'Drag & drop image/video or browse files';
         previewCard.style.display = 'none';
         clearMockupMedia();
@@ -3058,12 +3658,35 @@ function clearMockupMedia() {
 
 // Save Post (Modal)
 async function savePost() {
+    clearModalValidationAlert();
     const type = document.getElementById('post-type').value;
     const postId = document.getElementById('post-id').value;
     const message = document.getElementById('post-message').value.trim();
     const fileInput = document.getElementById('post-file');
     let filename = document.getElementById('current-image-filename').value;
+    const schedDtVal = document.getElementById('post-schedule-datetime')?.value.trim() || '';
+    const schedTzVal = document.getElementById('post-schedule-timezone')?.value || 'Asia/Kolkata';
     const saveBtn = document.getElementById('save-post-btn');
+
+    const hasNewFile = fileInput && fileInput.files && fileInput.files.length > 0;
+    if (!message && !hasNewFile && !filename) {
+        showModalValidationAlert('Please enter a caption or attach media before saving.');
+        document.getElementById('post-message')?.focus();
+        return;
+    }
+
+    const platformLimits = { facebook: 63206, instagram: 2200, linkedin: 3000, whatsapp: 4096 };
+    const limit = platformLimits[type] || 3000;
+    if (message.length > limit) {
+        showModalValidationAlert(`Caption exceeds the ${limit.toLocaleString()} character limit for ${type}.`);
+        document.getElementById('post-message')?.focus();
+        return;
+    }
+
+    if (type === 'instagram' && !hasNewFile && !filename) {
+        showModalValidationAlert('Instagram publishing requires an image or video attachment. Attach media or click Save as Draft.');
+        return;
+    }
 
     if (saveBtn) {
         saveBtn.disabled = true;
@@ -3071,7 +3694,7 @@ async function savePost() {
     }
 
     // Media upload if a new file was chosen
-    if (fileInput.files.length > 0) {
+    if (hasNewFile) {
         try {
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
@@ -3080,7 +3703,7 @@ async function savePost() {
             if (uploadData.filename) {
                 filename = uploadData.filename;
             } else {
-                showToast(uploadData.error || 'Upload failed', 'error');
+                showModalValidationAlert(uploadData.error || 'Media upload failed.');
                 if (saveBtn) {
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Post';
@@ -3088,7 +3711,7 @@ async function savePost() {
                 return;
             }
         } catch (e) {
-            showToast('Media upload failed due to network error', 'error');
+            showModalValidationAlert('Media upload failed due to a network error.');
             if (saveBtn) {
                 saveBtn.disabled = false;
                 saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Save Post';
@@ -3114,7 +3737,28 @@ async function savePost() {
             if (res.ok) {
                 showToast('Post updated successfully', 'success');
             } else {
-                showToast('Failed to update post', 'error');
+                const err = await res.json().catch(() => ({}));
+                showModalValidationAlert(err.error || 'Failed to update post.');
+                return;
+            }
+        } else if (schedDtVal) {
+            const schedRes = await authFetch('/api/schedule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...payload,
+                    post_type: type,
+                    scheduled_for: schedDtVal.replace('T', ' '),
+                    timezone: schedTzVal,
+                    status: 'scheduled'
+                })
+            });
+            if (schedRes.ok) {
+                showToast(`Post scheduled for ${schedDtVal.replace('T', ' ')} (${schedTzVal})`, 'success');
+            } else {
+                const err = await schedRes.json().catch(() => ({}));
+                showModalValidationAlert(err.error || 'Failed to schedule post.');
+                return;
             }
         } else {
             const res = await authFetch(`/api/posts/${type}`, {
@@ -3125,11 +3769,14 @@ async function savePost() {
             if (res.ok) {
                 showToast(`New post queued for ${CHANNEL_INFO[type]?.name || type}`, 'success');
             } else {
-                showToast('Failed to create post', 'error');
+                const err = await res.json().catch(() => ({}));
+                showModalValidationAlert(err.error || 'Failed to create post.');
+                return;
             }
         }
     } catch (e) {
-        showToast('Error communicating with server', 'error');
+        showModalValidationAlert('Error communicating with server.');
+        return;
     } finally {
         if (saveBtn) {
             saveBtn.disabled = false;
@@ -3141,6 +3788,10 @@ async function savePost() {
     if (currentTab === type) loadPosts(type);
     if (currentTab === 'dashboard') {
         loadDashboardExecutiveMetrics();
+    } else if (currentTab === 'calendar' && typeof renderCalendarContent === 'function') {
+        loadTab('calendar');
+    } else if (currentTab === 'queue' && typeof renderQueueView === 'function') {
+        loadTab('queue');
     }
 }
 
@@ -3411,6 +4062,57 @@ async function initComposerView() {
         }
     } catch (e) {
         console.error('Failed to load timezones:', e);
+    }
+
+    // 4. Sync real backend integration readiness onto destination cards (read-only metadata)
+    try {
+        const intData = await fetchIntegrationsStatusCached(false);
+        if (intData && (intData.meta || intData.linkedin || intData.whatsapp)) {
+            const meta = intData.meta || {};
+            const fbPages = Array.isArray(meta.pages) ? meta.pages : [];
+            const igAccts = Array.isArray(meta.instagram_accounts) ? meta.instagram_accounts : [];
+            const liApps = Array.isArray((intData.linkedin || {}).apps) ? intData.linkedin.apps : [];
+            const wa = intData.whatsapp || {};
+
+            const setDestStatus = (key, label, kind) => {
+                if (composerDestinations[key]) {
+                    composerDestinations[key].statusLabel = label;
+                    composerDestinations[key].statusKind = kind;
+                }
+                const el = document.getElementById(`dest-status-${key}`);
+                if (el) {
+                    const cls = kind === 'published' ? 'badge-published' : (kind === 'info' ? 'badge-info' : (kind === 'warning' ? 'badge-warning' : 'badge-neutral'));
+                    el.className = `badge ${cls}`;
+                    el.textContent = label;
+                }
+            };
+
+            const fbOk = fbPages.length > 0;
+            const igOk = igAccts.length > 0;
+            ['fb_gaathasuite', 'fb_tour', 'fb_nz', 'fb_gaatha', 'fb_grahak'].forEach(k => {
+                setDestStatus(k, fbOk ? 'Connected' : 'Check Token', fbOk ? 'published' : 'warning');
+            });
+            ['ig_gaathasuite', 'ig_phoenix'].forEach(k => {
+                setDestStatus(k, igOk ? 'Connected' : 'Unlinked', igOk ? 'published' : 'warning');
+            });
+
+            liApps.forEach(app => {
+                const key = app.app_key === 'aidni_global' ? 'li_aidni' : (app.app_key === 'gaatha_ventures' ? 'li_gaatha' : null);
+                if (!key) return;
+                if (!app.user_authenticated) {
+                    setDestStatus(key, 'Auth Required', 'warning');
+                } else if (app.company_publishing_ready) {
+                    setDestStatus(key, 'Company Ready', 'published');
+                } else {
+                    setDestStatus(key, 'Personal Auth Only', 'info');
+                }
+            });
+
+            const waReady = Boolean(wa.publishing_enabled && wa.status === 'connected');
+            setDestStatus('wa_gaatha', waReady ? 'Ready' : (wa.status_label || 'Isolated Standby'), waReady ? 'published' : 'warning');
+        }
+    } catch (e) {
+        console.warn('Could not sync composer destination status pills:', e);
     }
 }
 
@@ -3808,7 +4510,7 @@ function renderCalendarMonthGrid(root) {
 
         if (dayPosts.length > 3) {
             html += `
-                <div style="font-size: 0.72rem; color: var(--primary); font-weight: 700; text-align: center; cursor: pointer;" onclick="setCalendarView('day'); calendarCurrentDate = new Date('${dateStr}'); renderCalendarContent(); event.stopPropagation();">
+                <div style="font-size: 0.72rem; color: var(--primary); font-weight: 700; text-align: center; cursor: pointer;" onclick="setCalendarView('day'); calendarCurrentDate = new Date('${dateStr}T12:00:00'); renderCalendarContent(); event.stopPropagation();">
                     +${dayPosts.length - 3} more
                 </div>
             `;
@@ -3849,7 +4551,7 @@ function renderCalendarWeekView(root) {
     const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     let html = `
-        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.75rem;">
+        <div class="calendar-week-grid">
     `;
 
     for (let i = 0; i < 7; i++) {
@@ -4485,9 +5187,9 @@ async function renderQueueView(container) {
         <div class="calendar-toolbar">
             <div>
                 <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
-                    <i class="fa-solid fa-list-check" style="color: #34d399;"></i> Publishing Queue &amp; History
+                    <i class="fa-solid fa-list-check" style="color: var(--primary);"></i> Publishing Queue &amp; Schedule
                 </h3>
-                <small style="color: var(--text-secondary);">Filter and audit all queued, published, draft, and failed campaign posts.</small>
+                <small style="color: var(--text-secondary);">Filter and manage queued, scheduled, draft, and failed campaign posts.</small>
             </div>
 
             <div class="calendar-filters-group">
@@ -4502,13 +5204,13 @@ async function renderQueueView(container) {
                     <option value="cancelled">Cancelled</option>
                 </select>
                 <select id="q-filter-channel" onchange="handleQueueFilterChange()">
-                    <option value="all">All Channels</option>
-                    <option value="tour">Nexora Suite</option>
-                    <option value="nz">Phoenix Intl</option>
-                    <option value="gaatha">Gaatha AI</option>
-                    <option value="insta">Instagram Sync</option>
+                    <option value="all">All Platforms</option>
+                    <option value="facebook">Facebook Pages</option>
+                    <option value="instagram">Instagram</option>
+                    <option value="linkedin">LinkedIn</option>
+                    <option value="whatsapp">WhatsApp</option>
                 </select>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="loadQueueData()">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="loadQueueData()" title="Refresh Queue">
                     <i class="fa-solid fa-rotate"></i>
                 </button>
             </div>
@@ -4559,8 +5261,8 @@ function renderQueueTable() {
         root.innerHTML = `
             <div class="card" style="text-align: center; padding: 3.5rem 1rem; color: var(--text-muted);">
                 <i class="fa-solid fa-inbox" style="font-size: 2.5rem; opacity: 0.5; margin-bottom: 0.75rem; display: block;"></i>
-                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 0.25rem;">No posts match current queue filters</div>
-                <p style="font-size: 0.85rem;">Try selecting a different status or channel filter above.</p>
+                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 0.25rem; color: var(--text-primary);">No posts match current queue filters</div>
+                <p style="font-size: 0.85rem;">Try selecting a different status or platform filter above.</p>
             </div>
         `;
         return;
@@ -4573,7 +5275,7 @@ function renderQueueTable() {
                     <tr>
                         <th>Status</th>
                         <th>Scheduled (Local)</th>
-                        <th>Channel</th>
+                        <th>Platform</th>
                         <th>Caption / Content</th>
                         <th>Media</th>
                         <th>Retries</th>
@@ -4586,14 +5288,14 @@ function renderQueueTable() {
     filtered.forEach(p => {
         html += `
             <tr>
-                <td><span class="badge badge-${p.status}">${p.status}</span></td>
+                <td><span class="badge badge-${p.status}">${escapeHtml(p.status)}</span></td>
                 <td>
-                    <div style="font-weight: 600; font-size: 0.85rem;">${p.local_display || p.scheduled_for}</div>
-                    <small style="color: var(--text-muted); font-size: 0.72rem;">UTC: ${p.scheduled_for}</small>
+                    <div style="font-weight: 600; font-size: 0.85rem;">${escapeHtml(p.local_display || p.scheduled_for || 'Queued')}</div>
+                    <small style="color: var(--text-muted); font-size: 0.72rem;">UTC: ${escapeHtml(p.scheduled_for || '—')}</small>
                 </td>
                 <td>
-                    <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border);">
-                        ${CHANNEL_INFO[p.post_type]?.name || p.post_type}
+                    <span class="badge badge-neutral">
+                        ${escapeHtml(CHANNEL_INFO[p.post_type]?.name || p.post_type)}
                     </span>
                 </td>
                 <td style="max-width: 280px;">
@@ -4601,14 +5303,14 @@ function renderQueueTable() {
                         ${escapeHtml(p.message || '(No text caption)')}
                     </div>
                     ${p.status === 'failed' && p.error_message ? `
-                        <div style="font-size: 0.75rem; color: #b91c1c; margin-top: 0.2rem; background: #fee2e2; padding: 2px 6px; border-radius: 4px;" class="text-truncate" title="${escapeHtml(p.error_message)}">
+                        <div style="font-size: 0.75rem; color: var(--danger); margin-top: 0.2rem; background: var(--danger-soft); padding: 2px 6px; border-radius: 4px;" class="text-truncate" title="${escapeHtml(p.error_message)}">
                             <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.error_message)}
                         </div>
                     ` : ''}
                 </td>
                 <td>
                     ${p.image_filename ? `
-                        <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border); font-size: 0.75rem;" title="${escapeHtml(p.image_filename)}">
+                        <span class="badge badge-neutral" style="font-size: 0.75rem;" title="${escapeHtml(p.image_filename)}">
                             <i class="fa-solid fa-paperclip"></i> Media
                         </span>
                     ` : '<span style="color: var(--text-muted); font-size: 0.75rem;">None</span>'}
@@ -4643,6 +5345,34 @@ function renderQueueTable() {
     html += `
                 </tbody>
             </table>
+        </div>
+        <div class="mobile-posts-list">
+            ${filtered.map(p => `
+                <div class="mobile-post-card">
+                    <div class="mobile-post-header">
+                        <span class="platform-pill ${escapeHtml(p.post_type || 'facebook')}" style="font-size: 0.72rem;">
+                            ${escapeHtml(CHANNEL_INFO[p.post_type]?.name || p.post_type)}
+                        </span>
+                        <span class="badge badge-${escapeHtml(p.status)}">${escapeHtml(p.status)}</span>
+                    </div>
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.25rem;">
+                        <i class="fa-regular fa-clock"></i> ${escapeHtml(p.local_display || p.scheduled_for || 'Queued')}
+                    </div>
+                    <div style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 0.6rem; line-height: 1.45;">
+                        ${escapeHtml(p.message || '(Media-only post)')}
+                    </div>
+                    ${p.status === 'failed' && p.error_message ? `
+                        <div style="font-size: 0.75rem; color: var(--danger); background: var(--danger-soft); padding: 0.35rem 0.55rem; border-radius: 6px; margin-bottom: 0.6rem;">
+                            <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.error_message)}
+                        </div>
+                    ` : ''}
+                    <div class="mobile-post-actions">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id})"><i class="fa-solid fa-eye"></i> Details</button>
+                        ${p.status === 'failed' ? `<button type="button" class="btn btn-primary btn-sm" onclick="retryPostFromDetails(${p.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>` : ''}
+                        ${['scheduled', 'draft'].includes(p.status) ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openRescheduleModal(${p.id})"><i class="fa-solid fa-clock"></i></button><button type="button" class="btn btn-danger btn-sm" onclick="cancelPostFromDetails(${p.id})"><i class="fa-solid fa-ban"></i></button>` : ''}
+                    </div>
+                </div>
+            `).join('')}
         </div>
     `;
 
@@ -5657,25 +6387,25 @@ async function renderBrands(container) {
                             </p>
 
                             <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-                                <span class="platform-pill" style="font-size: 0.72rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
+                                <span class="badge badge-info">
                                     <i class="fa-solid fa-share-nodes"></i> ${bAccounts.length} Accounts
                                 </span>
-                                <span class="platform-pill" style="font-size: 0.72rem; background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                                <span class="badge badge-published">
                                     <i class="fa-solid fa-calendar-check"></i> ${bPosts.length} Scheduled
                                 </span>
-                                <span class="platform-pill" style="font-size: 0.72rem; background: rgba(245, 158, 11, 0.15); color: #fbbf24;">
+                                <span class="badge badge-warning">
                                     <i class="fa-solid fa-file-pen"></i> ${bDrafts.length} Drafts
                                 </span>
                             </div>
 
-                            <div style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.78rem; color: var(--text-muted); background: var(--bg-surface); padding: 0.6rem 0.8rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.78rem; color: var(--text-muted); background: var(--bg-surface-subtle); padding: 0.65rem 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
                                 <div><i class="fa-solid fa-globe" style="width: 16px;"></i> ${escapeHtml(b.website || 'No website set')}</div>
                                 <div><i class="fa-solid fa-users" style="width: 16px;"></i> ${escapeHtml(b.target_audience || 'Universal audiences')}</div>
                                 <div><i class="fa-solid fa-earth-americas" style="width: 16px;"></i> ${escapeHtml(b.target_markets || 'Global')}</div>
                             </div>
                         </div>
 
-                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; pt: 0.5rem; border-top: 1px solid var(--border);">
+                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; padding-top: 0.65rem; border-top: 1px solid var(--border);">
                             <button type="button" class="btn btn-primary btn-sm" onclick="openModal('add', null, 'facebook', ${b.id})" title="Compose post for this brand">
                                 <i class="fa-solid fa-pen"></i> Compose
                             </button>
@@ -5824,14 +6554,14 @@ async function renderCampaigns(container) {
                                 ${escapeHtml(c.brief || 'No campaign brief supplied.')}
                             </p>
 
-                            <div style="display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.76rem; color: var(--text-muted); background: var(--bg-surface); padding: 0.5rem 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                            <div style="display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.76rem; color: var(--text-muted); background: var(--bg-surface-subtle); padding: 0.55rem 0.75rem; border-radius: var(--radius-md); border: 1px solid var(--border);">
                                 <div><strong>Objective:</strong> ${escapeHtml(c.objective || 'Brand Awareness')}</div>
                                 <div><strong>Audience:</strong> ${escapeHtml(c.target_audience || 'Universal')}</div>
                                 <div><strong>Markets:</strong> ${escapeHtml(c.target_markets || 'Global')}</div>
                             </div>
                         </div>
 
-                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; pt: 0.5rem; border-top: 1px solid var(--border);">
+                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; padding-top: 0.65rem; border-top: 1px solid var(--border);">
                             <button type="button" class="btn btn-secondary btn-sm" onclick="openCampaignStrategyModal(${c.id})" title="View/generate AI strategy roadmap">
                                 <i class="fa-solid fa-chess-knight" style="color: #6366f1;"></i> Strategy
                             </button>
@@ -5894,7 +6624,7 @@ async function renderMedia(container) {
                 </div>
 
                 <!-- Media Upload Dropzone Card -->
-                <div class="card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: var(--bg-surface); border: 2px dashed var(--border);">
+                <div class="card" style="padding: 1.25rem; margin-bottom: 1.5rem; background: var(--bg-surface-subtle); border: 2px dashed var(--border-strong);">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                         <div style="display: flex; align-items: center; gap: 0.75rem;">
                             <i class="fa-solid fa-cloud-arrow-up fa-2x" style="color: var(--primary);"></i>
@@ -5949,8 +6679,8 @@ async function renderMedia(container) {
 
                 html += `
                     <div class="card media-asset-card" style="overflow: hidden; padding: 0; display: flex; flex-direction: column;">
-                        <div style="height: 150px; background: #0f172a; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
-                            ${m.file_url ? `<img src="${escapeHtml(m.file_url)}" alt="${escapeHtml(m.original_filename)}" style="width: 100%; height: 100%; object-fit: cover;">` : `<i class="fa-regular fa-image fa-2x" style="color: #64748b;"></i>`}
+                        <div style="height: 150px; background: var(--bg-surface-subtle); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; border-bottom: 1px solid var(--border);">
+                            ${m.file_url ? `<img src="${escapeHtml(m.file_url)}" alt="${escapeHtml(m.original_filename)}" style="width: 100%; height: 100%; object-fit: cover;">` : `<i class="fa-regular fa-image fa-2x" style="color: var(--text-muted);"></i>`}
                             <span class="badge" style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #fff; font-size: 0.65rem;">
                                 ${escapeHtml(brandName)}
                             </span>
@@ -6098,16 +6828,16 @@ async function renderHistory(container) {
                         <div style="font-size: 1.35rem; font-weight: 800; color: var(--text-primary); margin-top: 0.2rem;">${totalCount}</div>
                     </div>
                     <div class="stat-card" style="padding: 0.75rem 1rem;">
-                        <div style="font-size: 0.72rem; color: #38bdf8; text-transform: uppercase; font-weight: 700;">Scheduled</div>
-                        <div style="font-size: 1.35rem; font-weight: 800; color: #38bdf8; margin-top: 0.2rem;">${schedCount}</div>
+                        <div style="font-size: 0.72rem; color: var(--primary); text-transform: uppercase; font-weight: 700;">Scheduled</div>
+                        <div style="font-size: 1.35rem; font-weight: 800; color: var(--primary); margin-top: 0.2rem;">${schedCount}</div>
                     </div>
                     <div class="stat-card" style="padding: 0.75rem 1rem;">
-                        <div style="font-size: 0.72rem; color: #f59e0b; text-transform: uppercase; font-weight: 700;">Publishing In-Flight</div>
-                        <div style="font-size: 1.35rem; font-weight: 800; color: #f59e0b; margin-top: 0.2rem;">${pubCount}</div>
+                        <div style="font-size: 0.72rem; color: var(--warning); text-transform: uppercase; font-weight: 700;">Publishing In-Flight</div>
+                        <div style="font-size: 1.35rem; font-weight: 800; color: var(--warning); margin-top: 0.2rem;">${pubCount}</div>
                     </div>
                     <div class="stat-card" style="padding: 0.75rem 1rem;">
-                        <div style="font-size: 0.72rem; color: #ef4444; text-transform: uppercase; font-weight: 700;">Diagnostics / Errors</div>
-                        <div style="font-size: 1.35rem; font-weight: 800; color: #ef4444; margin-top: 0.2rem;">${failedCount}</div>
+                        <div style="font-size: 0.72rem; color: var(--danger); text-transform: uppercase; font-weight: 700;">Diagnostics / Errors</div>
+                        <div style="font-size: 1.35rem; font-weight: 800; color: var(--danger); margin-top: 0.2rem;">${failedCount}</div>
                     </div>
                 </div>
 
@@ -6139,18 +6869,28 @@ async function renderHistory(container) {
                     <span style="font-size: 0.82rem; color: var(--text-muted); font-weight: 600;">Showing ${historyPosts.length} of ${totalCount} Records</span>
                 </div>
 
-                <div class="card" style="overflow-x: auto; padding: 0;">
-                    <table class="data-table" style="width: 100%; border-collapse: collapse;">
+                <div class="card queue-table-wrap" style="overflow-x: auto; padding: 0;">
+                    <table class="data-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                        <colgroup>
+                            <col style="width: 46px;">
+                            <col style="width: 128px;">
+                            <col style="width: 155px;">
+                            <col style="width: 64px;">
+                            <col style="width: 105px;">
+                            <col style="width: 132px;">
+                            <col style="width: 140px;">
+                            <col style="width: 146px;">
+                        </colgroup>
                         <thead>
-                            <tr style="background: var(--bg-surface); border-bottom: 1px solid var(--border);">
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">ID</th>
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Platform / Brand</th>
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Caption Excerpt</th>
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Media</th>
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Status &amp; Verification</th>
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Diagnostics / Error</th>
-                                <th style="padding: 0.75rem 1rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Scheduled (Local)</th>
-                                <th style="padding: 0.75rem 1rem; text-align: right; font-size: 0.75rem; text-transform: uppercase;">Actions</th>
+                            <tr style="background: var(--bg-surface-subtle); border-bottom: 1px solid var(--border);">
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">ID</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">Brand</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">Caption</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">Media</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">Status</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">Diagnostics</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase;">Scheduled (IST)</th>
+                                <th style="padding: 0.6rem 0.5rem; text-align: right; font-size: 0.7rem; text-transform: uppercase;">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -6174,51 +6914,48 @@ async function renderHistory(container) {
 
                 html += `
                     <tr style="border-bottom: 1px solid var(--border);">
-                        <td style="padding: 0.75rem 1rem; font-weight: 700; font-size: 0.82rem;">#${p.id}</td>
-                        <td style="padding: 0.75rem 1rem;">
-                            <span style="font-weight: 600; font-size: 0.85rem; display: flex; align-items: center; gap: 0.35rem;">
-                                <i class="${info.icon || 'fa-solid fa-share-nodes'}" style="color: var(--primary);"></i> ${escapeHtml(p.brand_name || info.name)}
+                        <td style="padding: 0.6rem 0.5rem; font-weight: 700; font-size: 0.78rem; white-space: nowrap;">#${p.id}</td>
+                        <td style="padding: 0.6rem 0.5rem;">
+                            <span style="font-weight: 600; font-size: 0.8rem; display: flex; align-items: center; gap: 0.3rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                <i class="${info.icon || 'fa-solid fa-share-nodes'}" style="color: var(--primary); flex-shrink: 0;"></i>
+                                <span style="overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.brand_name || info.name)}</span>
                             </span>
                         </td>
-                        <td style="padding: 0.75rem 1rem; max-width: 260px;">
-                            <div style="font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);" title="${escapeHtml(p.message || '')}">
+                        <td style="padding: 0.6rem 0.5rem;">
+                            <div style="font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);" title="${escapeHtml(p.message || '')}">
                                 ${escapeHtml(p.message || 'No caption')}
                             </div>
                         </td>
-                        <td style="padding: 0.75rem 1rem; font-size: 0.82rem;">
-                            ${p.image_filename ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;"><i class="fa-regular fa-image"></i> Image</span>` : `<span style="color: var(--text-muted);">Text</span>`}
+                        <td style="padding: 0.6rem 0.5rem; font-size: 0.75rem; white-space: nowrap;">
+                            ${p.image_filename ? `<span class="badge badge-info" style="font-size: 0.68rem;">Image</span>` : `<span style="color: var(--text-muted);">Text</span>`}
                         </td>
-                        <td style="padding: 0.75rem 1rem;">
-                            <span class="badge ${statusBadge}" style="text-transform: capitalize; font-size: 0.72rem;">${escapeHtml(p.status)}</span>
+                        <td style="padding: 0.6rem 0.5rem;">
+                            <span class="badge ${statusBadge}" style="text-transform: capitalize; font-size: 0.68rem;">${escapeHtml(p.status)}</span>
                             ${p.external_post_id ? (isSim ? `
-                                <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; font-size: 0.68rem; display: block; margin-top: 0.2rem;" title="Simulated via safety guardrail">
-                                    <i class="fa-solid fa-shield-halved"></i> SIMULATED
-                                </span>
+                                <span class="badge badge-warning" style="font-size: 0.64rem; display: inline-flex; margin-top: 0.2rem;" title="Simulated via safety guardrail">SIMULATED</span>
                             ` : `
-                                <span class="badge badge-published" style="font-size: 0.68rem; display: block; margin-top: 0.2rem;">
-                                    <i class="fa-solid fa-circle-check"></i> LIVE BROADCAST
-                                </span>
+                                <span class="badge badge-published" style="font-size: 0.64rem; display: inline-flex; margin-top: 0.2rem;">LIVE ID</span>
                             `) : ''}
-                            ${p.retry_count ? `<small style="color: var(--text-muted); display: block; font-size: 0.7rem;">Retries: ${p.retry_count}</small>` : ''}
+                            ${p.retry_count ? `<small style="color: var(--text-muted); display: block; font-size: 0.66rem;">Retries: ${p.retry_count}</small>` : ''}
                         </td>
-                        <td style="padding: 0.75rem 1rem; max-width: 200px;">
+                        <td style="padding: 0.6rem 0.5rem;">
                             ${p.error_message ? `
-                                <span class="badge badge-danger" style="font-size: 0.7rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.3rem;" onclick="openPostDetails(${p.id})" title="${escapeHtml(p.error_message)}">
-                                    <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.error_message.slice(0, 26))}...
+                                <span class="badge badge-danger" style="font-size: 0.66rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.2rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" onclick="openPostDetails(${p.id})" title="${escapeHtml(p.error_message)}">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.error_message.slice(0, 16))}...
                                 </span>
-                            ` : `<span style="color: #10b981; font-size: 0.75rem;"><i class="fa-solid fa-circle-check"></i> Healthy</span>`}
+                            ` : `<span style="color: var(--success); font-size: 0.72rem;"><i class="fa-solid fa-circle-check"></i> Healthy</span>`}
                         </td>
-                        <td style="padding: 0.75rem 1rem; font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">
-                            <div>${escapeHtml(p.local_display || p.scheduled_for || formatReadableDateTime(p.created_at))}</div>
-                            ${p.external_post_id ? `<code style="font-size: 0.7rem; background: var(--bg-surface); padding: 0.1rem 0.3rem; border-radius: 3px;" title="External Post ID">${escapeHtml(p.external_post_id)}</code>` : ''}
+                        <td style="padding: 0.6rem 0.5rem; font-size: 0.74rem; color: var(--text-muted);">
+                            <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(p.local_display || p.scheduled_for || formatReadableDateTime(p.created_at))}</div>
+                            ${p.external_post_id ? `<code style="font-size: 0.66rem; background: var(--bg-surface-subtle); color: var(--text-primary); padding: 0.05rem 0.25rem; border-radius: 3px; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(p.external_post_id)}">${escapeHtml(p.external_post_id)}</code>` : ''}
                         </td>
-                        <td style="padding: 0.75rem 1rem; text-align: right; white-space: nowrap;">
-                            <div style="display: inline-flex; gap: 0.35rem;">
-                                <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id})" title="View Lifecycle Audit Trail">
+                        <td style="padding: 0.6rem 0.5rem; text-align: right; white-space: nowrap;">
+                            <div style="display: inline-flex; gap: 0.25rem;">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id})" title="View Lifecycle Audit Trail" style="padding: 0.28rem 0.48rem; font-size: 0.74rem;">
                                     <i class="fa-solid fa-eye"></i> Audit
                                 </button>
                                 ${isFailed || p.status === 'cancelled' ? `
-                                    <button type="button" class="btn btn-primary btn-sm" onclick="retryHistoryPost(${p.id})" title="Retry Scheduled Dispatch">
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="retryHistoryPost(${p.id})" title="Retry Scheduled Dispatch" style="padding: 0.28rem 0.48rem; font-size: 0.74rem;">
                                         <i class="fa-solid fa-rotate-right"></i> Retry
                                     </button>
                                 ` : ''}
@@ -6232,6 +6969,45 @@ async function renderHistory(container) {
         html += `
                         </tbody>
                     </table>
+                </div>
+
+                <!-- Mobile History Cards -->
+                <div class="mobile-posts-list">
+                    ${historyPosts.length === 0 ? `
+                        <div class="card" style="text-align: center; padding: 2.5rem 1rem; color: var(--text-muted);">
+                            No publishing records match the selected criteria.
+                        </div>
+                    ` : historyPosts.map(p => {
+                        const cKey = p.post_type || p.type || p.channel || 'facebook';
+                        const info = CHANNEL_INFO[cKey] || { name: cKey.toUpperCase() };
+                        const isFailed = p.status === 'failed' || !!p.error_message;
+                        const statusBadge = p.status === 'published' ? 'badge-success' : (p.status === 'publishing' ? 'badge-warning' : (p.status === 'scheduled' ? 'badge-info' : (p.status === 'cancelled' ? 'badge-secondary' : 'badge-danger')));
+                        const isSim = Boolean(p.external_post_id && p.external_post_id.includes('_sim_'));
+                        return `
+                            <div class="mobile-post-card">
+                                <div class="mobile-post-header">
+                                    <span style="font-weight: 700; font-size: 0.85rem; color: var(--text-primary);">#${p.id} &middot; ${escapeHtml(p.brand_name || info.name)}</span>
+                                    <span class="badge ${statusBadge}">${escapeHtml(p.status)}</span>
+                                </div>
+                                <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.35rem;">
+                                    <i class="fa-regular fa-clock"></i> ${escapeHtml(p.local_display || p.scheduled_for || formatReadableDateTime(p.created_at))}
+                                    ${p.external_post_id ? ` &middot; <span class="badge ${isSim ? 'badge-warning' : 'badge-published'}">${isSim ? 'SIMULATED' : 'LIVE'}</span>` : ''}
+                                </div>
+                                <div style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 0.6rem; line-height: 1.45;">
+                                    ${escapeHtml(p.message || '(No text caption)')}
+                                </div>
+                                ${p.error_message ? `
+                                    <div style="font-size: 0.75rem; color: var(--danger); background: var(--danger-soft); padding: 0.35rem 0.55rem; border-radius: 6px; margin-bottom: 0.6rem;">
+                                        <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.error_message)}
+                                    </div>
+                                ` : ''}
+                                <div class="mobile-post-actions">
+                                    <button type="button" class="btn btn-secondary btn-sm" onclick="openPostDetails(${p.id})"><i class="fa-solid fa-eye"></i> Audit</button>
+                                    ${isFailed || p.status === 'cancelled' ? `<button type="button" class="btn btn-primary btn-sm" onclick="retryHistoryPost(${p.id})"><i class="fa-solid fa-rotate-right"></i> Retry</button>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
             </div>
         `;
@@ -6371,7 +7147,7 @@ function renderDraftsListUI(container) {
                     <div style="font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin-top: 0.2rem;">${pendingCount}</div>
                 </div>
                 <div class="stat-card" style="padding: 0.85rem; cursor: pointer; border: 1px solid ${draftsFilterStatus === 'scheduled' ? 'var(--primary)' : 'var(--border)'};" onclick="draftsFilterStatus = 'scheduled'; renderDraftsListUI(document.getElementById('content-area'))">
-                    <div style="font-size: 0.75rem; color: #38bdf8; text-transform: uppercase; font-weight: 700;"><i class="fa-solid fa-calendar-check"></i> Scheduled</div>
+                    <div style="font-size: 0.75rem; color: var(--primary); text-transform: uppercase; font-weight: 700;"><i class="fa-solid fa-calendar-check"></i> Scheduled</div>
                     <div style="font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin-top: 0.2rem;">${scheduledCount}</div>
                 </div>
             </div>
@@ -6457,63 +7233,60 @@ function renderWhatsAppView(container) {
     const html = `
         <div class="whatsapp-view-container">
             <!-- Header & Safe Mode Alert -->
-            <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #064e3b 0%, #065f46 100%); color: #ffffff; border: none;">
+            <div class="hub-hero hub-hero--whatsapp">
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                     <div>
-                        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem;">
-                            <i class="fa-brands fa-whatsapp fa-2x" style="color: #25d366;"></i>
-                            <h2 style="font-size: 1.35rem; font-weight: 800; margin: 0;">WhatsApp Business Cloud API</h2>
-                            <span class="badge" style="background: rgba(37, 211, 102, 0.25); color: #86efac; border: 1px solid rgba(37, 211, 102, 0.4); font-size: 0.72rem;">
-                                <i class="fa-solid fa-circle-check"></i> Meta Verified
+                        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+                            <i class="fa-brands fa-whatsapp fa-2x" style="color: #059669;"></i>
+                            <h2 style="font-size: 1.35rem; font-weight: 800; margin: 0;">WhatsApp Cloud API Studio</h2>
+                            <span id="wa-studio-verification-badge" class="badge badge-warning">
+                                <i class="fa-solid fa-shield-halved"></i> Checking Gateway Status...
                             </span>
                         </div>
-                        <p style="color: #d1fae5; font-size: 0.88rem; margin: 0;">
-                            Enterprise messaging gateway for Gaatha Ventures (+91 90990 28291 &middot; WABA 1370721214882653)
+                        <p id="wa-studio-subtitle" style="font-size: 0.88rem; margin: 0;">
+                            Isolated Meta WhatsApp Business sandbox studio. Verification and publishing flags control all outbound dispatches.
                         </p>
                     </div>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <span class="platform-pill" style="background: rgba(255, 255, 255, 0.15); color: #ffffff; border-color: rgba(255, 255, 255, 0.25);">
-                            <i class="fa-solid fa-shield-halved"></i> SAFE MODE ACTIVE
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <span id="wa-studio-guardrail-pill" class="badge badge-warning">
+                            <i class="fa-solid fa-lock"></i> Safe Mode (No Live Send)
                         </span>
                     </div>
                 </div>
             </div>
 
             <!-- Safe Mode Banner -->
-            <div class="card" style="border-left: 4px solid var(--primary); background: rgba(59, 130, 246, 0.08); margin-bottom: 1.5rem; padding: 0.85rem 1.25rem;">
-                <div style="display: flex; gap: 0.75rem; align-items: center;">
-                    <i class="fa-solid fa-lock" style="color: var(--primary); font-size: 1.2rem;"></i>
-                    <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4;">
-                        <strong style="color: var(--text-primary);">Publishing Safeguard Enforced:</strong> 
-                        <code>POSTPILOT_PUBLISHING_ENABLED=0</code> is active. Dispatches are strictly executed as simulated sandbox events. Real outbound WhatsApp API messages will not be billed or transmitted.
-                    </div>
+            <div class="notice-callout notice-callout--info" style="margin-bottom: 1.5rem;">
+                <i class="fa-solid fa-lock"></i>
+                <div>
+                    <strong>Publishing Safeguard Enforced:</strong> Actions in this studio simulate message formatting and template previews locally without triggering outbound Meta Cloud API billing or live messages.
                 </div>
             </div>
 
             <!-- Two-Column Studio Layout -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; align-items: start;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1.5rem; align-items: start;">
                 <!-- Left Column: Message Dispatch Studio -->
                 <div class="card" style="padding: 1.5rem;">
                     <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem;">
-                        <i class="fa-solid fa-paper-plane" style="color: #25d366;"></i> Dispatch Studio
+                        <i class="fa-solid fa-paper-plane" style="color: var(--success);"></i> Template Preview &amp; Sandbox Studio
                     </h3>
 
                     <div style="margin-bottom: 1rem;">
-                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Registered Business Sender</label>
-                        <div style="display: flex; align-items: center; gap: 0.65rem; padding: 0.65rem 0.85rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md);">
-                            <div style="width: 32px; height: 32px; border-radius: 50%; background: #25d366; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85rem;">
-                                GV
+                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Configured Sender Identity</label>
+                        <div style="display: flex; align-items: center; gap: 0.65rem; padding: 0.65rem 0.85rem; background: var(--bg-surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
+                            <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--success); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.85rem;">
+                                WA
                             </div>
                             <div>
-                                <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);">Gaatha Ventures</div>
-                                <div style="font-size: 0.75rem; color: var(--text-muted);">+91 90990 28291 &middot; WABA: <code>1370721214882653</code></div>
+                                <div id="wa-sender-name" style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);">WhatsApp Sandbox Sender</div>
+                                <div id="wa-sender-meta" style="font-size: 0.75rem; color: var(--text-muted);">Loading backend sender metadata...</div>
                             </div>
                         </div>
                     </div>
 
                     <div style="margin-bottom: 1rem;">
-                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Recipient Phone Number</label>
-                        <input type="text" id="wa-recipient-input" class="form-control" value="+91 90990 28291" placeholder="+91XXXXXXXXXX" style="font-size: 0.88rem;">
+                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Test Recipient Phone (Sandbox Only)</label>
+                        <input type="text" id="wa-recipient-input" class="form-control" value="+91 98257 28291" placeholder="+91XXXXXXXXXX" style="font-size: 0.88rem;">
                         <small style="color: var(--text-muted); font-size: 0.74rem;">Include international country code prefix (e.g. +91, +1, +44)</small>
                     </div>
 
@@ -6535,11 +7308,11 @@ function renderWhatsAppView(container) {
                     </div>
 
                     <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-                        <button type="button" class="btn btn-primary" onclick="handleWASendSimulation()" style="background: #25d366; border-color: #25d366; color: #000; font-weight: 700; flex: 1;">
+                        <button type="button" class="btn btn-success" onclick="handleWASendSimulation()" style="flex: 1;">
                             <i class="fa-solid fa-paper-plane"></i> Simulate Send (Safe Mode)
                         </button>
-                        <button type="button" class="btn btn-secondary" onclick="showToast('Template payload verified: valid WhatsApp Business schema.', 'success')">
-                            <i class="fa-solid fa-code"></i> Test Payload
+                        <button type="button" class="btn btn-secondary" onclick="showToast('Template payload verified locally.', 'success')">
+                            <i class="fa-solid fa-code"></i> Validate Format
                         </button>
                     </div>
                 </div>
@@ -6602,7 +7375,7 @@ function renderWhatsAppView(container) {
                         </h4>
                         <div id="wa-activity-log" style="display: flex; flex-direction: column; gap: 0.4rem;">
                             ${waSimulatedLogs.map(l => `
-                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 0.4rem 0.5rem; background: var(--bg-surface); border-radius: 4px; border: 1px solid var(--border);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--bg-surface-subtle); border-radius: 6px; border: 1px solid var(--border);">
                                     <div>
                                         <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(l.recipient)}</span>
                                         <span style="color: var(--text-muted); margin-left: 0.4rem;">${escapeHtml(l.template)}</span>
@@ -6621,6 +7394,37 @@ function renderWhatsAppView(container) {
     `;
 
     container.innerHTML = html;
+
+    // Async backend WhatsApp integration readiness check (honest status without modifying assets)
+    authFetch('/api/integrations/status')
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+            if (!data || !data.whatsapp) return;
+            const wa = data.whatsapp;
+            const badgeEl = document.getElementById('wa-studio-verification-badge');
+            const senderNameEl = document.getElementById('wa-sender-name');
+            const senderMetaEl = document.getElementById('wa-sender-meta');
+            const guardEl = document.getElementById('wa-studio-guardrail-pill');
+            if (badgeEl) {
+                badgeEl.className = `badge ${wa.status === 'connected' ? 'badge-published' : 'badge-warning'}`;
+                badgeEl.innerHTML = `<i class="fa-solid ${wa.status === 'connected' ? 'fa-circle-check' : 'fa-shield-halved'}"></i> ${escapeHtml(wa.status_label || 'Verification Required')}`;
+            }
+            if (senderNameEl) {
+                senderNameEl.textContent = wa.active_verified_name || 'Isolated Cloud API Sender (No Auto Brand Binding)';
+            }
+            if (senderMetaEl) {
+                const phone = wa.active_display_phone || wa.display_phone_number || 'Isolated';
+                const waba = wa.active_waba_id || wa.configured_waba_id || 'Unassigned';
+                senderMetaEl.textContent = `${phone} · WABA ${waba}`;
+            }
+            if (guardEl) {
+                guardEl.className = `badge ${wa.publishing_enabled ? 'badge-published' : 'badge-warning'}`;
+                guardEl.innerHTML = wa.publishing_enabled
+                    ? '<i class="fa-solid fa-tower-broadcast"></i> WhatsApp Broadcast Active'
+                    : '<i class="fa-solid fa-lock"></i> WHATSAPP_PUBLISHING_ENABLED=0';
+            }
+        })
+        .catch(() => {});
 }
 
 function handleWATemplateChange(templateKey) {
@@ -6664,7 +7468,7 @@ function handleWASendSimulation() {
     const logEl = document.getElementById('wa-activity-log');
     if (logEl) {
         logEl.innerHTML = waSimulatedLogs.map(l => `
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 0.4rem 0.5rem; background: var(--bg-surface); border-radius: 4px; border: 1px solid var(--border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--bg-surface-subtle); border-radius: 6px; border: 1px solid var(--border);">
                 <div>
                     <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(l.recipient)}</span>
                     <span style="color: var(--text-muted); margin-left: 0.4rem;">${escapeHtml(l.template)}</span>
@@ -6803,8 +7607,8 @@ async function renderAnalytics(container) {
                                     <span>Drafting &amp; Generation</span>
                                     <span style="font-weight: 700;">${funnel.draft || 0}</span>
                                 </div>
-                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                    <div style="width: ${Math.min(100, ((funnel.draft || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #94a3b8; height: 100%;"></div>
+                                <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.draft || 0) / Math.max(1, totalDrafts)) * 100)}%; background: var(--text-muted); height: 100%;"></div>
                                 </div>
                             </div>
                             <div>
@@ -6812,8 +7616,8 @@ async function renderAnalytics(container) {
                                     <span>Pending Approval</span>
                                     <span style="font-weight: 700;">${funnel.pending_approval || 0}</span>
                                 </div>
-                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                    <div style="width: ${Math.min(100, ((funnel.pending_approval || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #fbbf24; height: 100%;"></div>
+                                <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.pending_approval || 0) / Math.max(1, totalDrafts)) * 100)}%; background: var(--warning); height: 100%;"></div>
                                 </div>
                             </div>
                             <div>
@@ -6821,8 +7625,8 @@ async function renderAnalytics(container) {
                                     <span>Approved</span>
                                     <span style="font-weight: 700;">${funnel.approved || 0}</span>
                                 </div>
-                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                    <div style="width: ${Math.min(100, ((funnel.approved || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #34d399; height: 100%;"></div>
+                                <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.approved || 0) / Math.max(1, totalDrafts)) * 100)}%; background: var(--success); height: 100%;"></div>
                                 </div>
                             </div>
                             <div>
@@ -6830,8 +7634,8 @@ async function renderAnalytics(container) {
                                     <span>Scheduled &amp; Queued</span>
                                     <span style="font-weight: 700;">${funnel.scheduled || 0}</span>
                                 </div>
-                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                    <div style="width: ${Math.min(100, ((funnel.scheduled || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #60a5fa; height: 100%;"></div>
+                                <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.scheduled || 0) / Math.max(1, totalDrafts)) * 100)}%; background: var(--primary); height: 100%;"></div>
                                 </div>
                             </div>
                             <div>
@@ -6839,8 +7643,8 @@ async function renderAnalytics(container) {
                                     <span>Published Dispatches</span>
                                     <span style="font-weight: 700;">${funnel.published || 0}</span>
                                 </div>
-                                <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                    <div style="width: ${Math.min(100, ((funnel.published || 0) / Math.max(1, totalDrafts)) * 100)}%; background: #10b981; height: 100%;"></div>
+                                <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                    <div style="width: ${Math.min(100, ((funnel.published || 0) / Math.max(1, totalDrafts)) * 100)}%; background: var(--success); height: 100%;"></div>
                                 </div>
                             </div>
                         </div>
@@ -6854,7 +7658,7 @@ async function renderAnalytics(container) {
                         <div style="display: flex; flex-direction: column; gap: 0.65rem;">
                             ${Object.keys(platforms).length === 0 ? `<p style="color: var(--text-muted); font-size: 0.85rem;">No platform copies generated yet.</p>` : ''}
                             ${Object.entries(platforms).map(([plat, count]) => `
-                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.45rem 0.6rem; background: var(--bg-surface); border-radius: var(--radius-md); border: 1px solid var(--border);">
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0.7rem; background: var(--bg-surface-subtle); border-radius: var(--radius-md); border: 1px solid var(--border);">
                                     <span style="font-weight: 600; font-size: 0.85rem; text-transform: capitalize;">${escapeHtml(plat)}</span>
                                     <span class="badge badge-secondary">${count} Drafts</span>
                                 </div>
@@ -6913,7 +7717,25 @@ async function renderSettings(container) {
                     </p>
                 </div>
 
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
+                    <!-- Appearance & Theme Card (Light-first SaaS Default) -->
+                    <div class="card" style="padding: 1.25rem;">
+                        <h4 style="margin: 0 0 0.5rem 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <i class="fa-solid fa-palette" style="color: var(--primary);"></i> Interface Appearance
+                        </h4>
+                        <p style="font-size: 0.84rem; color: var(--text-secondary); margin: 0 0 1rem 0;">
+                            PostPilot defaults to high-clarity Light Mode for editorial accuracy. Switch cleanly to optional Dark Mode whenever preferred.
+                        </p>
+                        <div class="theme-choice-group" role="group" aria-label="Interface Theme Selection">
+                            <button type="button" class="theme-choice-card ${getCurrentTheme() === 'light' ? 'active' : ''}" data-theme-value="light" onclick="setTheme('light')">
+                                <i class="fa-solid fa-sun" style="color: var(--accent-gold);"></i> Light Mode (Default)
+                            </button>
+                            <button type="button" class="theme-choice-card ${getCurrentTheme() === 'dark' ? 'active' : ''}" data-theme-value="dark" onclick="setTheme('dark')">
+                                <i class="fa-solid fa-moon" style="color: var(--primary);"></i> Dark Mode
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Org Profile Card -->
                     <div class="card" style="padding: 1.25rem;">
                         <h4 style="margin: 0 0 1rem 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
@@ -6945,7 +7767,7 @@ async function renderSettings(container) {
                         <div>
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
                                 <h4 style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem;">
-                                    <i class="fa-solid fa-crown" style="color: #f59e0b;"></i> Subscription Plan
+                                    <i class="fa-solid fa-crown" style="color: var(--accent-gold);"></i> Subscription Plan
                                 </h4>
                                 <span class="badge badge-success" style="font-weight: 800; font-size: 0.78rem;">${escapeHtml(planName)}</span>
                             </div>
@@ -6960,8 +7782,8 @@ async function renderSettings(container) {
                                         <span>AI Monthly Tokens: <strong>${tokensUsed.toLocaleString()} / ${tokensLimit.toLocaleString()}</strong></span>
                                         <span>${tokensPct}%</span>
                                     </div>
-                                    <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                        <div style="width: ${tokensPct}%; background: #f59e0b; height: 100%;"></div>
+                                    <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                        <div style="width: ${tokensPct}%; background: var(--accent-gold); height: 100%;"></div>
                                     </div>
                                 </div>
                                 <div>
@@ -6969,8 +7791,8 @@ async function renderSettings(container) {
                                         <span>Campaigns: <strong>${campsUsed} / ${campsLimit}</strong></span>
                                         <span>${campsPct}%</span>
                                     </div>
-                                    <div style="background: var(--bg-surface); height: 8px; border-radius: 4px; overflow: hidden;">
-                                        <div style="width: ${campsPct}%; background: #6366f1; height: 100%;"></div>
+                                    <div style="background: var(--bg-surface-subtle); height: 8px; border-radius: 4px; overflow: hidden;">
+                                        <div style="width: ${campsPct}%; background: var(--primary); height: 100%;"></div>
                                     </div>
                                 </div>
                             </div>
@@ -6999,7 +7821,7 @@ async function renderSettings(container) {
                     <div style="overflow-x: auto;">
                         <table class="data-table" style="width: 100%; border-collapse: collapse;">
                             <thead>
-                                <tr style="background: var(--bg-surface); border-bottom: 1px solid var(--border);">
+                                <tr style="background: var(--bg-surface-subtle); border-bottom: 1px solid var(--border);">
                                     <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">User</th>
                                     <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Email</th>
                                     <th style="padding: 0.65rem 0.85rem; text-align: left; font-size: 0.75rem; text-transform: uppercase;">Role</th>
@@ -7306,7 +8128,7 @@ function renderPlannerEntriesInModal(plan, entries) {
         listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No planned posts in this roadmap.</div>`;
     } else {
         listEl.innerHTML = entries.map(e => `
-            <div style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem;">
+            <div style="background: var(--bg-surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.75rem 1rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem;">
                 <div style="flex: 1;">
                     <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem;">
                         <span class="badge badge-primary" style="font-size: 0.7rem;">${escapeHtml((e.target_platform || 'all').toUpperCase())}</span>

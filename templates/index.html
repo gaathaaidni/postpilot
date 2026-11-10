@@ -16,6 +16,17 @@
     
     <!-- Main Design System -->
     <link rel="stylesheet" href="/static/style.css">
+
+    <!-- Light-first default (respects explicit optional dark preference without flash) -->
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem('postpilot_theme_v2') === 'dark') {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
 </head>
 <body>
     <!-- Mobile App Bar (Fixed on phones & tablets) -->
@@ -28,8 +39,11 @@
             <span>PostPilot</span>
         </div>
         <div class="mobile-actions">
-            <button class="mobile-btn" onclick="openModal('add')" title="Compose New Post" aria-label="Compose New Post">
-                <i class="fa-solid fa-plus-circle" style="color: var(--primary);"></i>
+            <button type="button" class="mobile-btn" onclick="toggleTheme()" title="Toggle Light / Dark Theme" aria-label="Toggle Light / Dark Theme">
+                <i class="fa-regular fa-moon theme-toggle-icon"></i>
+            </button>
+            <button type="button" class="mobile-btn" onclick="openModal('add')" title="Compose New Post" aria-label="Compose New Post">
+                <i class="fa-solid fa-circle-plus" style="color: var(--primary);"></i>
             </button>
         </div>
     </header>
@@ -42,129 +56,147 @@
         <aside id="sidebar" class="sidebar" role="navigation" aria-label="Main Navigation">
             <div class="sidebar-header">
                 <div class="brand">
-                    <div class="brand-icon">
+                    <div class="brand-icon" aria-hidden="true">
                         <i class="fa-solid fa-paper-plane"></i>
                     </div>
-                    <div>
+                    <div class="brand-text-col">
                         <div style="line-height: 1.1; font-weight: 700; font-size: 1.05rem;">PostPilot</div>
-                        <span class="brand-tag" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">BY GAATHA &middot; v2.5</span>
+                        <span class="brand-tag">BY GAATHA &middot; v2.5</span>
                     </div>
                 </div>
-                <button id="sidebar-close-btn" class="sidebar-close-btn" aria-label="Close Navigation">
+                <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" type="button" onclick="toggleSidebarCollapse()" aria-label="Collapse or expand sidebar" title="Collapse sidebar">
+                    <i class="fa-solid fa-angles-left"></i>
+                </button>
+                <button id="sidebar-close-btn" class="sidebar-close-btn" type="button" aria-label="Close Navigation">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
 
             <nav class="nav-menu">
-                <div class="nav-section-title">Primary Navigation</div>
-                <button class="nav-item active" data-tab="dashboard">
+                <div class="nav-section-title">Workspace</div>
+                <button class="nav-item active" data-tab="dashboard" title="Dashboard Overview">
                     <div class="nav-item-content">
                         <i class="fa-solid fa-chart-pie"></i>
                         <span>Dashboard</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="composer">
+                <button class="nav-item" data-tab="composer" title="Create Post (Guided Composer)">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-pen-to-square" style="color: var(--primary);"></i>
+                        <i class="fa-solid fa-pen-to-square"></i>
                         <span>Create Post</span>
                     </div>
-                    <span class="nav-badge" style="background: var(--primary-light); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);">Guided</span>
+                    <span class="nav-badge nav-badge--blue">Guided</span>
                 </button>
-                <button class="nav-item" data-tab="calendar">
+                <button class="nav-item" data-tab="calendar" title="Content Calendar">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-calendar-days" style="color: #60a5fa;"></i>
-                        <span>Content Calendar</span>
+                        <i class="fa-solid fa-calendar-days"></i>
+                        <span>Calendar</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="drafts">
+                <button class="nav-item" data-tab="history" title="Posts &amp; Publishing History">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-file-pen" style="color: #f59e0b;"></i>
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                        <span>Publishing History</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="queue" title="Active Publishing Queue">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-list-check"></i>
+                        <span>Queue</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="drafts" title="Saved Drafts">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-file-pen"></i>
                         <span>Drafts</span>
                     </div>
-                    <span class="nav-badge" id="nav-drafts-count" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">18</span>
-                </button>
-                <button class="nav-item" data-tab="history">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-clock-rotate-left" style="color: #94a3b8;"></i>
-                        <span>Publishing Queue</span>
-                    </div>
-                </button>
-                <button class="nav-item" data-tab="accounts">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-share-nodes" style="color: #38bdf8;"></i>
-                        <span>Social Accounts</span>
-                    </div>
-                    <span class="nav-badge" id="nav-accounts-count" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Connected</span>
-                </button>
-                <button class="nav-item" data-tab="whatsapp">
-                    <div class="nav-item-content">
-                        <i class="fa-brands fa-whatsapp" style="color: #25d366;"></i>
-                        <span>WhatsApp</span>
-                    </div>
-                    <span class="nav-badge" style="background: rgba(37, 211, 102, 0.15); color: #4ade80; border: 1px solid rgba(37, 211, 102, 0.3);">Cloud API</span>
-                </button>
-                <button class="nav-item" data-tab="settings">
-                    <div class="nav-item-content">
-                        <i class="fa-solid fa-gear" style="color: #64748b;"></i>
-                        <span>Settings</span>
-                    </div>
+                    <span class="nav-badge nav-badge--amber" id="nav-drafts-count">0</span>
                 </button>
 
-                <div class="nav-section-title">Marketing Studio &amp; Intelligence</div>
-                <button class="nav-item" data-tab="brands">
+                <div class="nav-section-title">Accounts &amp; Brands</div>
+                <button class="nav-item" data-tab="accounts" title="Connected Accounts">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-building-flag" style="color: #6366f1;"></i>
-                        <span>Brand Workspaces</span>
+                        <i class="fa-solid fa-share-nodes"></i>
+                        <span>Connected Accounts</span>
+                    </div>
+                    <span class="nav-badge nav-badge--blue" id="nav-accounts-count">—</span>
+                </button>
+                <button class="nav-item" data-tab="brands" title="Brands">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-building-flag"></i>
+                        <span>Brands</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="studio">
+                <button class="nav-item" data-tab="whatsapp" title="WhatsApp Cloud Studio">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-wand-magic-sparkles" style="color: #c084fc;"></i>
-                        <span>AI Marketing Studio</span>
+                        <i class="fa-brands fa-whatsapp"></i>
+                        <span>WhatsApp</span>
                     </div>
-                    <span class="nav-badge" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">AI</span>
+                    <span class="nav-badge nav-badge--green">Cloud API</span>
                 </button>
-                <button class="nav-item" data-tab="campaigns">
+
+                <div class="nav-section-title">Studio &amp; Insights</div>
+                <button class="nav-item" data-tab="studio" title="AI Marketing Studio">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-bullhorn" style="color: #f59e0b;"></i>
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>AI Studio</span>
+                    </div>
+                    <span class="nav-badge nav-badge--gold">AI</span>
+                </button>
+                <button class="nav-item" data-tab="campaigns" title="Campaigns">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-bullhorn"></i>
                         <span>Campaigns</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="media">
+                <button class="nav-item" data-tab="media" title="Media Library">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-photo-film" style="color: #ec4899;"></i>
+                        <i class="fa-solid fa-photo-film"></i>
                         <span>Media Library</span>
                     </div>
                 </button>
-                <button class="nav-item" data-tab="approvals">
+                <button class="nav-item" data-tab="approvals" title="Approvals">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-clipboard-check" style="color: #fbbf24;"></i>
+                        <i class="fa-solid fa-clipboard-check"></i>
                         <span>Approvals</span>
                     </div>
-                    <span id="nav-approvals-count" class="nav-badge" style="display: none; background: rgba(245, 158, 11, 0.2); color: #fbbf24;">0</span>
+                    <span id="nav-approvals-count" class="nav-badge nav-badge--amber" style="display: none;">0</span>
                 </button>
-                <button class="nav-item" data-tab="analytics">
+                <button class="nav-item" data-tab="analytics" title="Analytics">
                     <div class="nav-item-content">
-                        <i class="fa-solid fa-chart-line" style="color: #10b981;"></i>
+                        <i class="fa-solid fa-chart-line"></i>
                         <span>Analytics</span>
                     </div>
                 </button>
 
+                <div class="nav-section-title">System</div>
+                <button class="nav-item" data-tab="settings" title="Settings &amp; Preferences">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-gear"></i>
+                        <span>Settings</span>
+                    </div>
+                </button>
+                <button class="nav-item" data-tab="about" title="Help &amp; About PostPilot">
+                    <div class="nav-item-content">
+                        <i class="fa-solid fa-circle-question"></i>
+                        <span>Help / About</span>
+                    </div>
+                </button>
             </nav>
 
             <div class="sidebar-footer">
                 <div class="system-status-widget">
                     <div class="status-indicator-badge">
                         <span class="pulsing-dot" id="system-pulsing-dot"></span>
-                        <span id="global-status-indicator">Engine Active</span>
+                        <span id="global-status-indicator">Engine Ready</span>
                     </div>
-                    <small id="worker-lease-indicator" style="color: #64748b; font-size: 0.72rem;">Standby</small>
+                    <small id="worker-lease-indicator" style="color: var(--text-muted); font-size: 0.72rem;">Safe Mode</small>
                 </div>
-                <div style="padding: 0.5rem 0.25rem 0; font-size: 0.72rem; color: #64748b; display: flex; gap: 0.4rem; justify-content: center; flex-wrap: wrap; border-top: 1px solid rgba(255, 255, 255, 0.05); margin-top: 0.6rem;">
-                    <a href="/about" target="_blank" style="color: #94a3b8; text-decoration: none;">About</a> &middot;
-                    <a href="/privacy" target="_blank" style="color: #94a3b8; text-decoration: none;">Privacy</a> &middot;
-                    <a href="/terms" target="_blank" style="color: #94a3b8; text-decoration: none;">Terms</a> &middot;
-                    <a href="/agreement" target="_blank" style="color: #94a3b8; text-decoration: none;">Agreement</a>
+                <div class="sidebar-legal-links">
+                    <a href="/about" target="_blank">About</a> &middot;
+                    <a href="/privacy" target="_blank">Privacy</a> &middot;
+                    <a href="/terms" target="_blank">Terms</a> &middot;
+                    <a href="/agreement" target="_blank">Agreement</a>
                 </div>
             </div>
         </aside>
@@ -202,15 +234,18 @@
                 <div class="global-actions">
                     <button class="btn btn-primary" onclick="openModal('add')" title="Compose new post">
                         <i class="fa-solid fa-plus"></i>
-                        <span>New Post</span>
+                        <span>Create Post</span>
                     </button>
-                    <button class="btn btn-outline-danger" onclick="controlAll('stop')" title="Stop all automation channels">
+                    <button class="btn btn-outline-danger btn-sm" onclick="controlAll('stop')" title="Stop all automation channels">
                         <i class="fa-solid fa-stop"></i>
-                        <span>Stop All</span>
+                        <span>Pause</span>
                     </button>
-                    <button class="btn btn-secondary" onclick="controlAll('start')" title="Start all automation channels">
+                    <button class="btn btn-secondary btn-sm" onclick="controlAll('start')" title="Start all automation channels">
                         <i class="fa-solid fa-play" style="color: var(--success);"></i>
-                        <span>Run All</span>
+                        <span>Run</span>
+                    </button>
+                    <button id="theme-toggle-btn" type="button" class="theme-toggle-btn" onclick="toggleTheme()" title="Switch Light / Dark Theme" aria-label="Switch Light or Dark Theme">
+                        <i class="fa-regular fa-moon theme-toggle-icon"></i>
                     </button>
 
                     <div class="user-profile-menu">
@@ -264,11 +299,15 @@
                 <button class="close-btn" onclick="closeModal()" aria-label="Close dialog">&times;</button>
             </div>
             <div class="modal-body">
+                <div id="modal-validation-alert" class="validation-alert" role="alert">
+                    <i class="fa-solid fa-circle-exclamation" style="margin-top: 0.15rem;"></i>
+                    <span id="modal-validation-text">Please complete the required fields.</span>
+                </div>
                 <form id="post-form" onsubmit="event.preventDefault(); savePost();">
                     <input type="hidden" id="post-id">
                     
                     <!-- Destination Channel & Brand Selector Grid -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                         <div class="form-group">
                             <label for="post-brand" class="form-label">Brand Workspace</label>
                             <select id="post-brand" class="form-control" onchange="handleComposerBrandChange(this.value)">
@@ -287,6 +326,24 @@
                                 <option value="instagram">Instagram Professional</option>
                                 <option value="linkedin">LinkedIn Pages</option>
                                 <option value="whatsapp">WhatsApp Business Cloud</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Optional Scheduling Controls -->
+                    <div class="form-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="form-group">
+                            <label for="post-schedule-datetime" class="form-label">Schedule Date &amp; Time <span style="color: var(--text-muted); font-weight: 400;">(Optional)</span></label>
+                            <input type="datetime-local" id="post-schedule-datetime" class="form-control">
+                        </div>
+                        <div class="form-group">
+                            <label for="post-schedule-timezone" class="form-label">Timezone</label>
+                            <select id="post-schedule-timezone" class="form-control">
+                                <option value="Asia/Kolkata" selected>Asia/Kolkata (IST)</option>
+                                <option value="UTC">UTC</option>
+                                <option value="Europe/Tirane">Europe/Tirane (CET/CEST)</option>
+                                <option value="Europe/London">Europe/London</option>
+                                <option value="America/New_York">America/New_York</option>
                             </select>
                         </div>
                     </div>
@@ -344,11 +401,11 @@
                     </div>
 
                     <!-- Live Social Feed Preview Accordion / Tabs -->
-                    <div style="margin-top: 1.5rem; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; background: var(--bg-app);">
+                    <div style="margin-top: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; background: var(--bg-surface-subtle);">
                         <div class="composer-preview-header">
-                            <div style="font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <div style="font-weight: 700; font-size: 0.9rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
                                 <i class="fa-solid fa-eye" style="color: var(--primary);"></i>
-                                <span>Live Social Media Mockup</span>
+                                <span>Live Social Media Preview</span>
                             </div>
                             <div class="preview-toggle-group">
                                 <button type="button" id="tab-btn-fb" class="preview-tab-btn active" onclick="switchPreviewPlatform('fb')">
@@ -358,10 +415,10 @@
                                     <i class="fa-brands fa-instagram" style="color: var(--ig-pink);"></i> Instagram
                                 </button>
                                 <button type="button" id="tab-btn-li" class="preview-tab-btn" onclick="switchPreviewPlatform('li')">
-                                    <i class="fa-brands fa-linkedin" style="color: #38bdf8;"></i> LinkedIn
+                                    <i class="fa-brands fa-linkedin" style="color: var(--li-blue);"></i> LinkedIn
                                 </button>
                                 <button type="button" id="tab-btn-wa" class="preview-tab-btn" onclick="switchPreviewPlatform('wa')">
-                                    <i class="fa-brands fa-whatsapp" style="color: #25d366;"></i> WhatsApp
+                                    <i class="fa-brands fa-whatsapp" style="color: var(--wa-green);"></i> WhatsApp
                                 </button>
                             </div>
                         </div>
@@ -515,30 +572,30 @@
                 </div>
 
                 <!-- Failure Diagnostics Alert (if failed) -->
-                <div id="details-error-alert" style="display: none; background: #fff1f2; border: 1px solid #fecdd3; border-radius: var(--radius-md); padding: 0.85rem 1rem;">
-                    <div style="font-weight: 700; color: #be123c; font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
+                <div id="details-error-alert" style="display: none; background: var(--danger-light); border: 1px solid var(--danger-border); border-radius: var(--radius-md); padding: 0.85rem 1rem;">
+                    <div style="font-weight: 700; color: var(--danger); font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
                         <i class="fa-solid fa-triangle-exclamation"></i> Publishing Diagnostics
                     </div>
-                    <div id="details-error-msg" style="font-size: 0.82rem; color: #9f1239; line-height: 1.45; word-break: break-word;"></div>
+                    <div id="details-error-msg" style="font-size: 0.82rem; color: var(--text-primary); line-height: 1.45; word-break: break-word;"></div>
                 </div>
 
                 <!-- Rejection Reason Alert (if rejected) -->
-                <div id="details-rejection-alert" style="display: none; background: #fef2f2; border: 1px solid #fee2e2; border-radius: var(--radius-md); padding: 0.85rem 1rem;">
-                    <div style="font-weight: 700; color: #b91c1c; font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
+                <div id="details-rejection-alert" style="display: none; background: var(--danger-light); border: 1px solid var(--danger-border); border-radius: var(--radius-md); padding: 0.85rem 1rem;">
+                    <div style="font-weight: 700; color: var(--danger); font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem;">
                         <i class="fa-solid fa-circle-xmark"></i> Rejection Reason
                     </div>
-                    <div id="details-rejection-msg" style="font-size: 0.85rem; color: #7f1d1d; line-height: 1.45;"></div>
+                    <div id="details-rejection-msg" style="font-size: 0.85rem; color: var(--text-primary); line-height: 1.45;"></div>
                 </div>
 
                 <!-- Content & Media -->
                 <div>
                     <label class="form-label" style="font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);">Content Caption</label>
-                    <div id="details-caption" style="background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.85rem 1rem; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;"></div>
+                    <div id="details-caption" style="background: var(--bg-surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 0.85rem 1rem; font-size: 0.9rem; line-height: 1.5; white-space: pre-wrap;"></div>
                 </div>
 
                 <div id="details-media-container" style="display: none;">
                     <label class="form-label" style="font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted);">Attached Media</label>
-                    <div style="border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; max-height: 240px; display: flex; justify-content: center; background: #000;">
+                    <div style="border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; max-height: 240px; display: flex; justify-content: center; background: var(--bg-surface-subtle);">
                         <img id="details-media-img" src="" alt="Post Media Attachment" style="max-height: 240px; object-fit: contain;">
                     </div>
                 </div>
