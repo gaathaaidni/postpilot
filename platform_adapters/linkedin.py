@@ -63,7 +63,7 @@ class LinkedInAdapter(BasePlatformAdapter):
             'authenticated': is_authed,
             'token_expired': linkedin_api.is_token_expired(token_data) if token_data else True,
             'org_id': app_cfg['org_id'],
-            'publishing_enabled': config.is_publishing_enabled()
+            'publishing_enabled': config.is_platform_publishing_enabled('linkedin')
         }
 
     def validate_content(self, content: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -118,21 +118,28 @@ class LinkedInAdapter(BasePlatformAdapter):
             except Exception:
                 pass
 
-        app_key = self.resolve_app_key(payload.get('organization_id'), app_key)
+        app_key = self.resolve_app_key(payload.get('linkedin_org_id'), app_key)
         app_cfg = linkedin_api.get_app_config(app_key)
-        org_id = payload.get('organization_id') or app_cfg['org_id']
+        acct_org = acct.get('account_identifier') if 'acct' in locals() and acct else None
+        org_id = payload.get('linkedin_org_id') or acct_org or app_cfg['org_id']
 
         image_filename = payload.get('image_filename') or payload.get('media_filename')
         image_urn = None
 
         if image_filename:
+            import config as app_config
+            media_path = str(image_filename)
+            if not os.path.isfile(media_path):
+                candidate = os.path.join(str(app_config.UPLOAD_FOLDER), os.path.basename(media_path))
+                if os.path.isfile(candidate):
+                    media_path = candidate
             # 3-Step Modern REST Image Upload procedure
             init_res = linkedin_api.initialize_image_upload(org_id, app_key=app_key)
             if init_res.get('success'):
                 upload_url = init_res.get('upload_url')
                 image_urn = init_res.get('image_urn')
-                if upload_url and os.path.isfile(image_filename):
-                    linkedin_api.upload_image_file(upload_url, image_filename)
+                if upload_url and os.path.isfile(media_path):
+                    linkedin_api.upload_image_file(upload_url, media_path)
 
         # Create organization post referencing uploaded media if available
         res = linkedin_api.create_organization_post(

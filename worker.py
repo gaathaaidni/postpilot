@@ -52,8 +52,12 @@ def process_due_scheduled_posts(worker_id, allow_simulation=False):
     if not config.is_publishing_enabled() and not allow_sim:
         logger.info("🛡️ [SAFETY] Scheduled post claiming paused: POSTPILOT_PUBLISHING_ENABLED=0.")
         return []
+    enabled_platforms = None if allow_sim else config.get_enabled_publishing_platforms()
+    if not allow_sim and not enabled_platforms:
+        logger.info("🛡️ [SAFETY] Scheduled post claiming paused: no enabled publishing platforms.")
+        return []
     try:
-        due_posts = database.claim_due_scheduled_posts(worker_id, limit=5)
+        due_posts = database.claim_due_scheduled_posts(worker_id, limit=5, allowed_platforms=enabled_platforms)
         for sp in due_posts:
             p_type = sp['post_type']
             logger.info(f"Executing scheduled post #{sp['id']} on platform/channel '{p_type}'...")
@@ -61,6 +65,9 @@ def process_due_scheduled_posts(worker_id, allow_simulation=False):
                 res = PlatformRegistry.dispatch(sp, worker_id=worker_id)
                 success = bool(res.get('success', False))
                 err = res.get('error')
+                if success and not allow_sim and res.get('simulated'):
+                    success = False
+                    err = res.get('message') or f"Platform '{p_type}' publishing disabled or simulated only."
                 ext_id = res.get('external_post_id') or res.get('post_id') or res.get('media_id')
                 if success:
                     database.complete_scheduled_post(sp['id'], worker_id, success=True, external_post_id=ext_id)
@@ -75,15 +82,30 @@ def process_due_scheduled_posts(worker_id, allow_simulation=False):
     except Exception as e:
         logger.error(f"Error processing due scheduled posts: {facebook_api.sanitize_log_message(str(e))}")
 
+def _maybe_sync_meta_pages_to_env(last_sync_ts):
+    interval = int(os.getenv('META_ENV_SYNC_INTERVAL_SECONDS', '21600') or '21600')
+    now_ts = time.time()
+    if interval <= 0 or (now_ts - last_sync_ts) < interval:
+        return last_sync_ts
+    try:
+        res = facebook_api.sync_connected_pages_to_env()
+        if res.get('success'):
+            logger.info(f"[META-SYNC] Verified {res.get('pages_count', 0)} connected Meta Page(s) in .env (updated={res.get('updated')}).")
+    except Exception as sync_err:
+        logger.warning(f"[META-SYNC] Periodic .env page sync skipped: {facebook_api.sanitize_log_message(str(sync_err))}")
+    return now_ts
+
 def run_worker_loop():
     logger.info(f"PostPilot worker daemon initializing (ID: {WORKER_ID})...")
     database.init_db()
+    last_meta_sync = 0.0
     
     while not shutdown_event.is_set():
         try:
             # Enforce single active worker via database lease (15-second TTL)
             has_lease = database.acquire_worker_lease(WORKER_ID, lease_name='scheduler', ttl_seconds=15)
             if has_lease:
+                last_meta_sync = _maybe_sync_meta_pages_to_env(last_meta_sync)
                 sync_tasks_with_db()
                 process_due_scheduled_posts(WORKER_ID)
             else:

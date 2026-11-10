@@ -27,26 +27,33 @@ class FacebookAdapter(BasePlatformAdapter):
         super().__init__(platform_key='facebook', display_name='Facebook Pages')
 
     def get_configured_pages(self) -> Dict[str, Dict[str, Any]]:
-        """Returns map of configured Facebook Pages from environment/config."""
+        """Returns map of configured Facebook Pages from config and synced FB_PAGE_ID_* env vars."""
         pages = {}
-        if config.FB_PAGE_ID_SUITE:
-            pages['suite'] = {
-                'page_id': str(config.FB_PAGE_ID_SUITE),
-                'name': 'Nexora Suite',
-                'env_key': 'FB_PAGE_ID_SUITE'
-            }
-        if config.FB_PAGE_ID_PHOENIX:
-            pages['phoenix'] = {
-                'page_id': str(config.FB_PAGE_ID_PHOENIX),
-                'name': 'Phoenix International',
-                'env_key': 'FB_PAGE_ID_PHOENIX'
-            }
-        if getattr(config, 'FB_PAGE_ID_GAATHA_AI', None):
-            pages['gaatha_ai'] = {
-                'page_id': str(config.FB_PAGE_ID_GAATHA_AI),
-                'name': 'Gaatha AI',
-                'env_key': 'FB_PAGE_ID_GAATHA_AI'
-            }
+        known_defs = [
+            ('suite', 'FB_PAGE_ID_SUITE', 'GAATHA Suite', getattr(config, 'FB_PAGE_ID_SUITE', None)),
+            ('phoenix', 'FB_PAGE_ID_PHOENIX', 'Phoenix by Aidni Global LLP', getattr(config, 'FB_PAGE_ID_PHOENIX', None)),
+            ('gaatha_ai', 'FB_PAGE_ID_GAATHA_AI', 'Gaatha AI', getattr(config, 'FB_PAGE_ID_GAATHA_AI', None)),
+            ('gaatha', 'FB_PAGE_ID_GAATHA', 'Gaatha', None),
+            ('grahak_chetna', 'FB_PAGE_ID_GRAHAK_CHETNA', 'Grahak Chetna', None),
+        ]
+        for key, env_key, label, cfg_val in known_defs:
+            val = os.getenv(env_key) or cfg_val
+            if val and str(val).strip():
+                pages[key] = {
+                    'page_id': str(val).strip(),
+                    'name': label,
+                    'env_key': env_key
+                }
+
+        for env_key, env_val in sorted(os.environ.items()):
+            if env_key.startswith('FB_PAGE_ID_') and env_val and str(env_val).strip():
+                slug = env_key[len('FB_PAGE_ID_'):].lower()
+                if slug and slug not in pages:
+                    pages[slug] = {
+                        'page_id': str(env_val).strip(),
+                        'name': slug.replace('_', ' ').title(),
+                        'env_key': env_key
+                    }
         return pages
 
     def resolve_page_id(self, target_identifier: Optional[str] = None, brand_id: Optional[int] = None, organization_id: int = 1) -> Optional[str]:
@@ -93,7 +100,7 @@ class FacebookAdapter(BasePlatformAdapter):
             'token_configured': token_configured,
             'active_page_id': target_pid,
             'pages_count': len(pages),
-            'publishing_enabled': config.is_publishing_enabled()
+            'publishing_enabled': config.is_platform_publishing_enabled('facebook')
         }
 
     def validate_content(self, content: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -146,7 +153,7 @@ class FacebookAdapter(BasePlatformAdapter):
         image_filename = payload.get('image_filename') or payload.get('media_filename')
 
         # Safety Guardrail: Intercept when publishing is disabled
-        if not config.is_publishing_enabled():
+        if not config.is_platform_publishing_enabled('facebook'):
             sim_id = f"fb_post_sim_{int(time.time() * 1000)}"
             logger.info(
                 f"🛡️ [SAFETY] Facebook publishing simulated (POSTPILOT_PUBLISHING_ENABLED=0): "
@@ -214,6 +221,6 @@ class FacebookAdapter(BasePlatformAdapter):
             'platform': self.platform_key,
             'display_name': self.display_name,
             'configured': conn['configured'],
-            'publishing_enabled': config.is_publishing_enabled(),
+            'publishing_enabled': config.is_platform_publishing_enabled('facebook'),
             'pages': self.get_configured_pages()
         }

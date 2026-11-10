@@ -133,7 +133,13 @@ def _cleanup_single_image(filename):
         return
     try:
         with database.get_db_connection() as conn:
-            row = conn.execute("SELECT COUNT(*) as count FROM posts WHERE image_filename = ?", (filename,)).fetchone()
+            row = conn.execute("""
+                SELECT (
+                    (SELECT COUNT(*) FROM posts WHERE image_filename = ?) +
+                    (SELECT COUNT(*) FROM scheduled_posts WHERE image_filename = ?) +
+                    (SELECT COUNT(*) FROM media_assets WHERE filename = ?)
+                ) as count
+            """, (filename, filename, filename)).fetchone()
             if row and row['count'] > 0:
                 return
     except Exception as e:
@@ -156,6 +162,8 @@ def _cleanup_images_worker():
                 rows = conn.execute("""
                     SELECT DISTINCT image_filename FROM posts WHERE image_filename IS NOT NULL AND image_filename != ''
                     UNION
+                    SELECT DISTINCT image_filename FROM scheduled_posts WHERE image_filename IS NOT NULL AND image_filename != ''
+                    UNION
                     SELECT DISTINCT filename as image_filename FROM media_assets WHERE filename IS NOT NULL AND filename != ''
                 """).fetchall()
                 db_images = {r['image_filename'] for r in rows}
@@ -164,7 +172,7 @@ def _cleanup_images_worker():
             if upload_dir.exists():
                 for file_path in upload_dir.iterdir():
                     if file_path.is_file() and not file_path.name.startswith('.'):
-                        if file_path.name not in db_images:
+                        if file_path.name not in db_images and (time.time() - file_path.stat().st_mtime) > 604800:
                             file_path.unlink()
                             logger.info(f"Purged orphan media: {file_path.name}")
         except Exception as e:
@@ -642,6 +650,130 @@ def linkedin_publish_post():
         logger.error(f"Error publishing LinkedIn post: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/publish', methods=['POST'])
+@login_required
+@csrf_protect
+def immediate_publish_post():
+    """Immediately publishes a post via PlatformRegistry with per-platform guardrails, idempotency, and audit recording."""
+    import requests
+    import facebook_api
+    from platform_adapters import PlatformRegistry
+
+    org_id = session.get('organization_id', 1)
+    user_id = session.get('user_id')
+    data = request.get_json(silent=True) or {}
+
+    post_type = config._normalize_platform_key(data.get('post_type') or data.get('platform') or '')
+    if post_type not in ('facebook', 'instagram', 'linkedin', 'whatsapp'):
+        return jsonify({'error': f"Unsupported platform '{post_type}'"}), 400
+
+    if not config.is_platform_publishing_enabled(post_type):
+        return jsonify({
+            'success': False,
+            'platform': post_type,
+            'blocked_by_guardrail': True,
+            'error': f"Publishing is currently disabled for platform '{post_type}'."
+        }), 403
+
+    brand_id = data.get('brand_id')
+    if brand_id is not None and str(brand_id).strip() != '':
+        try:
+            brand_id = int(brand_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid brand_id'}), 400
+    else:
+        brand_id = None
+
+    message = data.get('message') or data.get('caption') or data.get('text') or ''
+    image_filename = data.get('image_filename')
+    idempotency_key = data.get('idempotency_key')
+
+    if idempotency_key:
+        with database.get_db_connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM scheduled_posts WHERE idempotency_key = ? AND organization_id = ?",
+                (idempotency_key, org_id)
+            ).fetchone()
+            if existing:
+                rec = database.get_scheduled_post_by_id(existing['id'], organization_id=org_id)
+                return jsonify({
+                    'success': rec['status'] == 'published',
+                    'deduplicated': True,
+                    'external_post_id': rec.get('external_post_id'),
+                    'record': rec
+                }), 200
+
+    adapter = PlatformRegistry.get_adapter(post_type)
+    if not adapter:
+        return jsonify({'error': f"No adapter registered for '{post_type}'"}), 400
+
+    payload = {
+        'organization_id': org_id,
+        'brand_id': brand_id,
+        'post_type': post_type,
+        'message': message,
+        'image_filename': image_filename,
+        'image_url': data.get('image_url'),
+        'page_id': data.get('page_id'),
+        'ig_user_id': data.get('ig_user_id'),
+        'linkedin_org_id': data.get('linkedin_org_id'),
+        'app_key': data.get('app_key'),
+    }
+    valid, val_err = adapter.validate_content(payload)
+    if not valid:
+        return jsonify({'success': False, 'error': val_err or 'Content validation failed'}), 400
+
+    res = adapter.publish(payload)
+    if not res.get('success') or res.get('simulated'):
+        return jsonify({
+            'success': False,
+            'platform': post_type,
+            'simulated': bool(res.get('simulated')),
+            'error': res.get('error') or res.get('message') or 'Live publishing rejected'
+        }), 400
+
+    ext_id = res.get('external_post_id') or res.get('post_id')
+    if not ext_id:
+        return jsonify({'success': False, 'error': 'Provider did not return a valid post ID'}), 502
+
+    permalink_url = res.get('permalink_url')
+    page_id = res.get('page_id')
+    if post_type == 'facebook' and not permalink_url and page_id:
+        try:
+            ptok = facebook_api.get_page_token(facebook_api.get_access_token(), page_id)
+            if ptok:
+                vresp = requests.get(
+                    f"https://graph.facebook.com/v19.0/{ext_id}",
+                    params={'fields': 'id,permalink_url,created_time,message', 'access_token': ptok},
+                    timeout=15
+                )
+                if vresp.status_code == 200:
+                    permalink_url = vresp.json().get('permalink_url')
+        except Exception as ve:
+            logger.warning(f"Post verification lookup warning for {ext_id}: {ve}")
+
+    record = database.record_immediate_publication(
+        post_type=post_type,
+        message=message,
+        external_post_id=ext_id,
+        brand_id=brand_id,
+        organization_id=org_id,
+        created_by=user_id,
+        image_filename=image_filename,
+        idempotency_key=idempotency_key,
+        permalink_url=permalink_url,
+        provider_response={'external_post_id': ext_id, 'page_id': page_id, 'permalink_url': permalink_url},
+        reason='Immediate live publication via /api/publish'
+    )
+    return jsonify({
+        'success': True,
+        'platform': post_type,
+        'page_id': page_id,
+        'external_post_id': ext_id,
+        'permalink_url': permalink_url,
+        'record': record
+    }), 200
+
 # --- Social Account Management Endpoints (Phase 2 & Part F) ---
 
 @app.route('/api/accounts', methods=['GET'])
@@ -771,10 +903,14 @@ def get_integrations_status_route():
     linkedin_data = integrations_service.get_linkedin_integration_status(organization_id=org_id)
     whatsapp_data = integrations_service.get_whatsapp_integration_status(organization_id=org_id)
 
+    controls = config.get_publishing_controls_summary()
     return jsonify({
         'success': True,
         'organization_id': org_id,
         'publishing_enabled': config.is_publishing_enabled(),
+        'publishing_controls': controls,
+        'publishing_platforms': controls['platforms'],
+        'enabled_publishing_platforms': controls['allowed_platforms'],
         'meta': meta_data,
         'linkedin': linkedin_data,
         'whatsapp': whatsapp_data
@@ -1351,6 +1487,11 @@ def get_status():
         response[f'{task_name}_status'] = t_state.get('status', 'Stopped')
         response[f'{task_name}_current_post'] = t_state.get('current_post_summary')
         response[f'{task_name}_interval'] = t_state.get('interval', 1800)
+    controls = config.get_publishing_controls_summary()
+    response['publishing_enabled'] = config.is_publishing_enabled()
+    response['publishing_controls'] = controls
+    response['publishing_platforms'] = controls['platforms']
+    response['enabled_publishing_platforms'] = controls['allowed_platforms']
     return jsonify(response)
 
 @app.route('/api/interval/<post_type>', methods=['GET'])

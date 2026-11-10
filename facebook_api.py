@@ -339,9 +339,11 @@ def _request_with_retry(method, url, **kwargs):
     """
     # Publishing Safety Guardrail: Intercept mutating publish calls when disabled
     if method.upper() in ('POST', 'PUT', 'DELETE'):
-        if not config.is_publishing_enabled():
-            is_publish_endpoint = any(ep in url for ep in ('/feed', '/photos', '/videos', '/media', '/media_publish'))
-            if is_publish_endpoint:
+        is_ig_endpoint = any(ep in url for ep in ('/media', '/media_publish'))
+        is_fb_endpoint = any(ep in url for ep in ('/feed', '/photos', '/videos'))
+        if is_ig_endpoint or is_fb_endpoint:
+            target_plat = 'instagram' if is_ig_endpoint else 'facebook'
+            if not config.is_platform_publishing_enabled(target_plat):
                 logger.info(f"🛡️ [SAFETY] External Meta publishing intercepted (POSTPILOT_PUBLISHING_ENABLED=0): {method} {url}")
                 simulated_id = f"simulated_meta_{int(time.time() * 1000)}"
                 return {
@@ -403,4 +405,141 @@ def _request_with_retry(method, url, **kwargs):
             time.sleep(backoff)
             backoff *= 2
 
-    return {'error': {'message': 'Max retries exceeded', 'category': 'RATE_LIMIT'}}
+    return {'error': {'message': 'Max retries exceeded', 'category': 'RATE_LIMIT'}}
+
+KNOWN_PAGE_ENV_ALIASES = {
+    '967550829768297': 'SUITE',
+    '954901604381882': 'PHOENIX',
+    '1028368893692590': 'GAATHA_AI',
+    '178168346255851': 'GAATHA',
+    '374211199112915': 'GRAHAK_CHETNA',
+}
+
+def get_canonical_page_slug(page_id, page_name=''):
+    """Returns a stable uppercase env-var suffix for a Meta Page ID/name."""
+    pid = str(page_id or '').strip()
+    if pid in KNOWN_PAGE_ENV_ALIASES:
+        return KNOWN_PAGE_ENV_ALIASES[pid]
+    slug = re.sub(r'[^A-Z0-9]+', '_', str(page_name or '').strip().upper()).strip('_')
+    return slug or f"PAGE_{pid}"
+
+def safely_update_env_vars(updates, env_path=None):
+    """
+    Atomically updates non-secret Page/IG ID keys in .env and os.environ
+    without altering existing tokens, secrets, comments, or safety flags.
+    """
+    import tempfile
+    from pathlib import Path
+
+    if not updates:
+        return False
+
+    target_path = Path(env_path) if env_path else Path(os.getenv('POSTPILOT_ENV_FILE') or (Path(__file__).resolve().parent / '.env'))
+    lines = []
+    if target_path.exists():
+        lines = target_path.read_text(encoding='utf-8').splitlines(keepends=True)
+
+    new_lines = []
+    pending = {str(k): str(v) for k, v in updates.items()}
+    changed = False
+    for line in lines:
+        stripped = line.strip()
+        if '=' in stripped and not stripped.startswith('#'):
+            key, existing_val = stripped.split('=', 1)
+            key = key.strip()
+            if key in pending:
+                val = pending.pop(key)
+                if existing_val != val:
+                    changed = True
+                new_lines.append(f"{key}={val}\n")
+                continue
+        new_lines.append(line)
+
+    if pending:
+        changed = True
+        if new_lines and not new_lines[-1].endswith('\n'):
+            new_lines[-1] += '\n'
+        for key, val in pending.items():
+            new_lines.append(f"{key}={val}\n")
+
+    if changed or not target_path.exists():
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix='.env_sync_', dir=str(target_path.parent))
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as tf:
+                tf.writelines(new_lines)
+            if os.name == 'posix':
+                os.chmod(tmp_name, 0o600)
+            os.replace(tmp_name, str(target_path))
+        except Exception:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
+            raise
+
+    for key, val in updates.items():
+        os.environ[str(key)] = str(val)
+    return changed
+
+def sync_connected_pages_to_env(env_path=None, timeout=15):
+    """
+    Discovers all Facebook Pages (and linked Instagram accounts) connected through
+    the active FB_ACCESS_TOKEN and maps their non-secret IDs into .env & os.environ.
+    """
+    token = get_access_token()
+    if not token:
+        return {'success': False, 'skipped': True, 'reason': 'No FB_ACCESS_TOKEN configured'}
+
+    next_url = f"{BASE_URL}/me/accounts"
+    params = {
+        'access_token': token,
+        'fields': 'id,name,instagram_business_account{id,username,name},whatsapp_number',
+        'limit': 100
+    }
+    all_pages = []
+    while next_url:
+        resp = requests.get(next_url, params=params, timeout=timeout)
+        data = resp.json()
+        if resp.status_code != 200 or 'error' in data:
+            err = data.get('error', {}).get('message', resp.text) if isinstance(data, dict) else resp.text
+            return {'success': False, 'error': sanitize_log_message(str(err))}
+        all_pages.extend(data.get('data', []))
+        next_url = (data.get('paging') or {}).get('next')
+        params = None
+
+    if not all_pages:
+        return {'success': True, 'pages_count': 0, 'pages': [], 'updated': False}
+
+    updates = {}
+    page_ids = []
+    pages_summary = []
+    for page in all_pages:
+        pid = str(page.get('id') or '').strip()
+        pname = str(page.get('name') or '').strip()
+        if not pid:
+            continue
+        slug = get_canonical_page_slug(pid, pname)
+        updates[f"FB_PAGE_ID_{slug}"] = pid
+        if pid not in page_ids:
+            page_ids.append(pid)
+        ig = page.get('instagram_business_account')
+        ig_id = str(ig.get('id') or '').strip() if isinstance(ig, dict) else ''
+        if ig_id:
+            updates[f"INSTA_ID_{slug}"] = ig_id
+        pages_summary.append({
+            'id': pid,
+            'name': pname,
+            'slug': slug,
+            'instagram_id': ig_id or None,
+            'whatsapp_number': page.get('whatsapp_number')
+        })
+
+    updates['FB_CONNECTED_PAGE_IDS'] = ','.join(page_ids)
+    changed = safely_update_env_vars(updates, env_path=env_path)
+    return {
+        'success': True,
+        'pages_count': len(pages_summary),
+        'updated': changed,
+        'env_keys': sorted(updates.keys()),
+        'pages': pages_summary,
+    }
+

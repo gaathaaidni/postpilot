@@ -113,9 +113,78 @@ LINKEDIN_ACCESS_TOKEN = os.getenv('LINKEDIN_ACCESS_TOKEN') or LINKEDIN_ACCESS_TO
 # are strictly blocked, returning safe simulations. Must be explicitly set to '1' to publish.
 POSTPILOT_PUBLISHING_ENABLED = (os.getenv('POSTPILOT_PUBLISHING_ENABLED') or os.getenv('PUBLISHING_ENABLED', '0')).strip().lower() in ('1', 'true', 'yes')
 
+PUBLISHING_CONTROL_PLATFORMS = ('facebook', 'instagram', 'linkedin', 'whatsapp')
+_PLATFORM_ALIASES = {
+    'fb': 'facebook',
+    'facebook': 'facebook',
+    'ig': 'instagram',
+    'insta': 'instagram',
+    'instagram': 'instagram',
+    'li': 'linkedin',
+    'linkedin': 'linkedin',
+    'wa': 'whatsapp',
+    'whatsapp': 'whatsapp',
+}
+
+def _parse_optional_bool_env(var_name):
+    raw = os.getenv(var_name)
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw).strip().lower() in ('1', 'true', 'yes')
+
+def _normalize_platform_key(platform):
+    raw = str(platform or '').strip().lower()
+    return _PLATFORM_ALIASES.get(raw, raw)
+
 def is_publishing_enabled():
     """Checks whether external social media publishing is currently authorized."""
     return (os.getenv('POSTPILOT_PUBLISHING_ENABLED') or os.getenv('PUBLISHING_ENABLED', '0')).strip().lower() in ('1', 'true', 'yes')
+
+def is_platform_publishing_enabled(platform):
+    """
+    Fail-closed per-platform publishing guardrail check.
+    - Respects global POSTPILOT_PUBLISHING_ENABLED first.
+    - Enforces POSTPILOT_ALLOWED_PLATFORMS comma-separated allowlist when set.
+    - WhatsApp NEVER activates from the global switch alone; it always requires
+      WHATSAPP_PUBLISHING_ENABLED=1 (and allowlist inclusion if allowlist is set).
+    - Respects POSTPILOT_<PLATFORM>_PUBLISHING_ENABLED when explicitly configured.
+    """
+    if not is_publishing_enabled():
+        return False
+
+    plat = _normalize_platform_key(platform)
+    if not plat:
+        return False
+
+    allowed_raw = (os.getenv('POSTPILOT_ALLOWED_PLATFORMS') or '').strip()
+    allowed_set = None
+    if allowed_raw:
+        allowed_set = {_normalize_platform_key(p) for p in allowed_raw.split(',') if p.strip()}
+        if plat not in allowed_set:
+            return False
+
+    if plat == 'whatsapp':
+        return _parse_optional_bool_env('WHATSAPP_PUBLISHING_ENABLED') is True
+
+    plat_flag = _parse_optional_bool_env(f'POSTPILOT_{plat.upper()}_PUBLISHING_ENABLED')
+    if plat_flag is not None:
+        return plat_flag
+
+    return True
+
+def get_enabled_publishing_platforms():
+    """Returns canonical platform keys currently authorized for live dispatch."""
+    return [p for p in PUBLISHING_CONTROL_PLATFORMS if is_platform_publishing_enabled(p)]
+
+def get_publishing_controls_summary():
+    """Returns non-secret runtime publishing control summary across all supported channels."""
+    platforms = {p: is_platform_publishing_enabled(p) for p in PUBLISHING_CONTROL_PLATFORMS}
+    return {
+        'global_enabled': is_publishing_enabled(),
+        'allowed_platforms': [p for p, enabled in platforms.items() if enabled],
+        'platforms': platforms,
+        'whatsapp_enabled': platforms['whatsapp'],
+    }
 
 # Default posting intervals in seconds
 TOUR_INTERVAL = int(os.getenv('TOUR_INTERVAL', 1800))

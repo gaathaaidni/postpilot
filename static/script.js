@@ -549,12 +549,21 @@ async function updateStatus() {
         const data = await res.json();
         cachedStatus = data;
 
-        // Global status pulse based on engine status and safety guardrail
+        // Global status pulse based on engine status and scoped platform guardrails
         const pubEnabled = Boolean(data.publishing_enabled);
+        const enabledPlats = Array.isArray(data.enabled_publishing_platforms) ? data.enabled_publishing_platforms : [];
         const dot = document.getElementById('system-pulsing-dot');
         const indicator = document.getElementById('global-status-indicator');
         if (dot) dot.style.backgroundColor = pubEnabled ? 'var(--success)' : '#10b981';
-        if (indicator) indicator.textContent = pubEnabled ? 'Publishing Enabled' : 'Engine Ready (Safe)';
+        if (indicator) {
+            if (!pubEnabled) {
+                indicator.textContent = 'Engine Ready (Safe)';
+            } else if (enabledPlats.length > 0 && enabledPlats.length < 4) {
+                indicator.textContent = `Live: ${enabledPlats.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')}`;
+            } else {
+                indicator.textContent = 'Publishing Enabled';
+            }
+        }
 
         // Update active view
         if (currentTab === 'dashboard') {
@@ -950,9 +959,16 @@ function openComposerForPlatform(platform) {
 
 function updateGatewayTilesFromBackend(intData, statusData, accounts) {
     const pubEnabled = Boolean(statusData && statusData.publishing_enabled);
-    const guardHtml = pubEnabled
-        ? '<i class="fa-solid fa-circle-check" style="color: var(--success);"></i> Live Dispatch Enabled'
-        : '<i class="fa-solid fa-shield-halved" style="color: var(--warning);"></i> Guardrail Safe Mode (Off)';
+    const platFlags = (intData && intData.publishing_platforms) || (statusData && statusData.publishing_platforms) || {};
+    const makeGuardHtml = (plat) => {
+        const active = Object.prototype.hasOwnProperty.call(platFlags, plat) ? Boolean(platFlags[plat]) : pubEnabled;
+        return active
+            ? '<i class="fa-solid fa-circle-check" style="color: var(--success);"></i> Live Dispatch Enabled'
+            : '<i class="fa-solid fa-shield-halved" style="color: var(--warning);"></i> Platform Guardrail Off (Disabled)';
+    };
+    const fbGuardHtml = makeGuardHtml('facebook');
+    const igGuardHtml = makeGuardHtml('instagram');
+    const liGuardHtml = makeGuardHtml('linkedin');
 
     // Meta (Facebook + Instagram)
     const meta = (intData && intData.meta) || {};
@@ -974,7 +990,7 @@ function updateGatewayTilesFromBackend(intData, statusData, accounts) {
             ? `<span><strong>Accessible Pages:</strong> ${fbPages.slice(0, 3).map(p => escapeHtml(p.name || p.id)).join(', ')}${fbPages.length > 3 ? ` (+${fbPages.length - 3})` : ''}</span>`
             : `<span>No active Pages returned by Meta Graph API check.</span>`;
     }
-    if (fbGuard) fbGuard.innerHTML = guardHtml;
+    if (fbGuard) fbGuard.innerHTML = fbGuardHtml;
 
     const igBadge = document.getElementById('tile-instagram-badge');
     const igMeta = document.getElementById('tile-instagram-meta');
@@ -991,7 +1007,7 @@ function updateGatewayTilesFromBackend(intData, statusData, accounts) {
             ? `<span><strong>Linked Profiles:</strong> ${igAccounts.slice(0, 3).map(a => `@${escapeHtml(a.username || a.id)}`).join(', ')}</span>`
             : `<span>Link an Instagram Professional profile via Facebook Page settings.</span>`;
     }
-    if (igGuard) igGuard.innerHTML = guardHtml;
+    if (igGuard) igGuard.innerHTML = igGuardHtml;
 
     // LinkedIn (Dual App accuracy)
     const li = (intData && intData.linkedin) || {};
@@ -1023,7 +1039,7 @@ function updateGatewayTilesFromBackend(intData, statusData, accounts) {
             liMeta.innerHTML = `<span>${escapeHtml(li.status_label || 'LinkedIn OAuth pending setup.')}</span>`;
         }
     }
-    if (liGuard) liGuard.innerHTML = guardHtml;
+    if (liGuard) liGuard.innerHTML = liGuardHtml;
     if (liCap) {
         liCap.textContent = liCompanyReady.length > 0 ? 'Company & Member API Ready' : 'Company Posting Pending Review';
     }
@@ -1680,10 +1696,14 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
         }
         const brands = brandsRes.ok ? await brandsRes.json() : [];
 
-        // Update Guardrail pill
+        // Update Guardrail pill with per-platform precision
         const guardrailPill = document.getElementById('badge-publishing-guardrail');
         if (guardrailPill) {
-            if (intData.publishing_enabled) {
+            const enabledPlats = Array.isArray(intData.enabled_publishing_platforms) ? intData.enabled_publishing_platforms : [];
+            if (intData.publishing_enabled && enabledPlats.length > 0 && enabledPlats.length < 4) {
+                guardrailPill.className = 'badge badge-published';
+                guardrailPill.innerHTML = `<i class="fa-solid fa-tower-broadcast"></i> Scoped Live: ${enabledPlats.map(p => escapeHtml(p.toUpperCase())).join(', ')} (WhatsApp Off)`;
+            } else if (intData.publishing_enabled) {
                 guardrailPill.className = 'badge badge-published';
                 guardrailPill.innerHTML = '<i class="fa-solid fa-tower-broadcast"></i> Live Publishing Enabled';
             } else {

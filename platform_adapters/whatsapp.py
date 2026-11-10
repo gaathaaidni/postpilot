@@ -64,7 +64,7 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
             'has_phone_number_id': has_phone_id,
             'has_waba_id': has_waba,
             'waba_id': creds['waba_id'],
-            'publishing_enabled': config.is_publishing_enabled()
+            'publishing_enabled': config.is_platform_publishing_enabled('whatsapp')
         }
 
     def validate_phone_number(self, phone_number: str) -> Tuple[bool, str]:
@@ -162,7 +162,7 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
         phone_number_id = creds['phone_number_id'] or "sim_phone_id"
 
         # Safety Guardrail: Intercept when publishing is disabled
-        if not config.is_publishing_enabled():
+        if not config.is_platform_publishing_enabled('whatsapp'):
             sim_msg_id = f"wamid.sim_{int(time.time() * 1000)}_{normalized_phone[-4:]}"
             logger.info(
                 f"🛡️ [SAFETY] WhatsApp template dispatch simulated (POSTPILOT_PUBLISHING_ENABLED=0): "
@@ -264,6 +264,6 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
             'display_name': self.display_name,
             'configured': conn['configured'],
             'waba_id': creds['waba_id'],
-            'publishing_enabled': config.is_publishing_enabled(),
+            'publishing_enabled': config.is_platform_publishing_enabled('whatsapp'),
             'templates_count': len(self.get_templates())
         }

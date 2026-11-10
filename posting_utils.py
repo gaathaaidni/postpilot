@@ -46,7 +46,7 @@ def post_on_facebook(message, image_filename, page_id, access_token, image_folde
         return False
 
     # Publishing Safety Guardrail: Block direct Facebook publishing when disabled
-    if not config.is_publishing_enabled():
+    if not config.is_platform_publishing_enabled('facebook'):
         logger.warning(f"🛡️ [SAFETY] Facebook direct publishing is blocked (POSTPILOT_PUBLISHING_ENABLED=0) for page {page_id}.")
         return False
 
@@ -143,7 +143,7 @@ def run_posting_loop(stop_event, status_callback, get_interval_func, callback_ke
     post_count = 0
     resolved_channel = channel_key or callback_key
     while not stop_event.is_set():
-        if not config.is_publishing_enabled():
+        if not config.is_platform_publishing_enabled('facebook'):
             logger.info(f"🛡️ [SAFETY] Posting loop for {callback_key} paused: POSTPILOT_PUBLISHING_ENABLED=0.")
             if status_callback:
                 status_callback(callback_key, True, "Paused (Publishing disabled)", None)

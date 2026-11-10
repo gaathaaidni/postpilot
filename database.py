@@ -1566,6 +1566,73 @@ def create_scheduled_post(post_type, scheduled_for, message="", image_filename=N
             )
         return created_rec
 
+def record_immediate_publication(post_type, message, external_post_id, brand_id=None,
+                                 organization_id=1, created_by=1, image_filename=None,
+                                 idempotency_key=None, permalink_url=None,
+                                 provider_response=None, reason=None):
+    """
+    Idempotently records an immediate live publication in scheduled_posts and post_audit_logs
+    so it appears in PostPilot publishing history, audit trails, and dashboard KPIs.
+    """
+    if post_type not in HISTORICAL_QUERY_PLATFORMS:
+        raise ValueError(f"Unsupported post_type: '{post_type}'.")
+    if brand_id is not None:
+        validate_brand_ownership(brand_id, organization_id)
+    safe_image = validate_media_reference(image_filename) if image_filename else None
+
+    now_utc = _utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    if not idempotency_key:
+        idempotency_key = f"imm-{organization_id}-{post_type}-{brand_id or 'org'}-{int(time.time())}-{secrets.token_hex(4)}"
+
+    meta = {'mode': 'immediate', 'external_post_id': external_post_id}
+    if permalink_url:
+        meta['permalink_url'] = permalink_url
+    if provider_response is not None:
+        meta['provider_response'] = provider_response
+
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT * FROM scheduled_posts WHERE idempotency_key = ?",
+            (idempotency_key,)
+        ).fetchone()
+        if existing:
+            if existing['organization_id'] != organization_id:
+                raise ValueError("Idempotency key collision across organizations.")
+            return get_scheduled_post_by_id(existing['id'], organization_id=organization_id)
+
+        msg_val = message if message is not None else ""
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, message, image_filename, "
+                "scheduled_for, timezone, status, published_at, external_post_id, idempotency_key, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'UTC', 'published', ?, ?, ?, ?) RETURNING id",
+                (organization_id, brand_id, post_type, msg_val, safe_image,
+                 now_utc, now_utc, external_post_id, idempotency_key, created_by)
+            )
+            new_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO scheduled_posts (organization_id, brand_id, post_type, message, image_filename, "
+                "scheduled_for, timezone, status, published_at, external_post_id, idempotency_key, created_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'UTC', 'published', ?, ?, ?, ?)",
+                (organization_id, brand_id, post_type, msg_val, safe_image,
+                 now_utc, now_utc, external_post_id, idempotency_key, created_by)
+            )
+            new_id = cur.lastrowid
+
+        log_post_transition(
+            scheduled_post_id=new_id,
+            from_status=None,
+            to_status='published',
+            changed_by=created_by,
+            reason=reason or 'Immediate live publication via platform adapter',
+            metadata=meta,
+            organization_id=organization_id,
+            conn=conn
+        )
+        conn.commit()
+        return get_scheduled_post_by_id(new_id, post_type=post_type, organization_id=organization_id)
+
 VALID_SCHEDULED_POST_TYPES = HISTORICAL_QUERY_PLATFORMS
 
 def get_scheduled_posts(organization_id=1, post_type=None, status=None, brand_id=None,
@@ -1797,34 +1864,48 @@ def delete_scheduled_post(schedule_id, post_type=None, organization_id=None):
         conn.commit()
         return res.rowcount > 0
 
-def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
+def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300, allowed_platforms=None):
     """
     Atomically claims due scheduled posts across processes without race conditions.
     Also handles stale-lock recovery if a worker crashed while publishing.
     Only claims posts in 'scheduled' status (drafts, pending_approval, rejected, cancelled are NEVER claimed).
+    When allowed_platforms is supplied, restricts claiming strictly to those post_types.
     """
     now = _utcnow()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
     stale_str = (now - timedelta(seconds=lock_timeout_seconds)).strftime("%Y-%m-%d %H:%M:%S")
 
+    platform_filter_sql = ""
+    platform_params = []
+    if allowed_platforms is not None:
+        normalized = [str(p).strip().lower() for p in allowed_platforms if p and str(p).strip()]
+        if not normalized:
+            return []
+        placeholders = ",".join("?" for _ in normalized)
+        platform_filter_sql = f" AND post_type IN ({placeholders})"
+        platform_params = normalized
+
     with get_db_connection() as conn:
         cur = conn.execute(
             "SELECT id FROM scheduled_posts "
-            "WHERE (status = 'scheduled' AND scheduled_for <= ?) "
-            "   OR (status = 'publishing' AND locked_at <= ? AND retry_count < max_retries) "
+            "WHERE ((status = 'scheduled' AND scheduled_for <= ?) "
+            "   OR (status = 'publishing' AND locked_at <= ? AND retry_count < max_retries))"
+            f"{platform_filter_sql} "
             "ORDER BY scheduled_for ASC LIMIT ?",
-            (now_str, stale_str, limit)
+            tuple([now_str, stale_str] + platform_params + [limit])
         )
         candidate_ids = [r['id'] for r in cur.fetchall()]
         claimed = []
         for cid in candidate_ids:
+            post_before = conn.execute("SELECT status, organization_id FROM scheduled_posts WHERE id = ?", (cid,)).fetchone()
             res = conn.execute(
                 "UPDATE scheduled_posts SET status = 'publishing', locked_by = ?, locked_at = ?, updated_at = ? "
                 "WHERE id = ? AND ("
                 "  (status = 'scheduled' AND scheduled_for <= ?) OR "
                 "  (status = 'publishing' AND (locked_by = ? OR locked_at <= ?))"
-                ")",
-                (worker_id, now_str, now_str, cid, now_str, worker_id, stale_str)
+                ")"
+                f"{platform_filter_sql}",
+                tuple([worker_id, now_str, now_str, cid, now_str, worker_id, stale_str] + platform_params)
             )
             if res.rowcount > 0:
                 row = conn.execute("SELECT * FROM scheduled_posts WHERE id = ?", (cid,)).fetchone()
@@ -1833,7 +1914,7 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300):
                     claimed.append(row_dict)
                     log_post_transition(
                         scheduled_post_id=cid,
-                        from_status='scheduled',
+                        from_status=post_before['status'] if post_before else 'scheduled',
                         to_status='publishing',
                         reason=f"Claimed by worker {worker_id}",
                         organization_id=row_dict.get('organization_id', 1),
@@ -1896,7 +1977,7 @@ def complete_scheduled_post(schedule_id, worker_id, success=True, error_message=
                 scheduled_post_id=schedule_id,
                 from_status='publishing',
                 to_status='published',
-                reason='Published successfully to Meta channel',
+                reason='Published successfully',
                 organization_id=post['organization_id'],
                 conn=conn
             )

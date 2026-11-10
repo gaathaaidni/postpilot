@@ -29,20 +29,33 @@ class InstagramAdapter(BasePlatformAdapter):
         super().__init__(platform_key='instagram', display_name='Instagram Professional')
 
     def get_configured_accounts(self) -> Dict[str, Dict[str, Any]]:
-        """Returns map of configured Instagram Professional accounts."""
+        """Returns map of configured Instagram Professional accounts from config and synced INSTA_ID_* env vars."""
         accounts = {}
-        if config.INSTA_ID_SUITE:
-            accounts['suite'] = {
-                'ig_user_id': str(config.INSTA_ID_SUITE),
-                'username': '@nexora_suite',
-                'linked_page_id': config.FB_PAGE_ID_SUITE
-            }
-        if config.INSTA_ID_PHOENIX:
-            accounts['phoenix'] = {
-                'ig_user_id': str(config.INSTA_ID_PHOENIX),
-                'username': '@phoenixbygaatha',
-                'linked_page_id': config.FB_PAGE_ID_PHOENIX
-            }
+        known_defs = [
+            ('suite', 'INSTA_ID_SUITE', '@gaathasuite', getattr(config, 'INSTA_ID_SUITE', None), os.getenv('FB_PAGE_ID_SUITE') or getattr(config, 'FB_PAGE_ID_SUITE', None)),
+            ('phoenix', 'INSTA_ID_PHOENIX', '@phoenixbygaatha', getattr(config, 'INSTA_ID_PHOENIX', None), os.getenv('FB_PAGE_ID_PHOENIX') or getattr(config, 'FB_PAGE_ID_PHOENIX', None)),
+            ('grahak_chetna', 'INSTA_ID_GRAHAK_CHETNA', '@grahak.chetna', None, os.getenv('FB_PAGE_ID_GRAHAK_CHETNA')),
+        ]
+        for key, env_key, username, cfg_val, linked_pid in known_defs:
+            val = os.getenv(env_key) or cfg_val
+            if val and str(val).strip():
+                accounts[key] = {
+                    'ig_user_id': str(val).strip(),
+                    'username': username,
+                    'linked_page_id': linked_pid,
+                    'env_key': env_key
+                }
+
+        for env_key, env_val in sorted(os.environ.items()):
+            if env_key.startswith('INSTA_ID_') and env_val and str(env_val).strip():
+                slug = env_key[len('INSTA_ID_'):].lower()
+                if slug and slug not in accounts:
+                    accounts[slug] = {
+                        'ig_user_id': str(env_val).strip(),
+                        'username': f"@{slug}",
+                        'linked_page_id': os.getenv(f"FB_PAGE_ID_{slug.upper()}"),
+                        'env_key': env_key
+                    }
         return accounts
 
     def resolve_ig_user_id(
@@ -92,7 +105,7 @@ class InstagramAdapter(BasePlatformAdapter):
             'token_configured': token_configured,
             'active_ig_user_id': target_ig,
             'accounts_count': len(accounts),
-            'publishing_enabled': config.is_publishing_enabled()
+            'publishing_enabled': config.is_platform_publishing_enabled('instagram')
         }
 
     def verify_public_media_url(self, url: Optional[str]) -> Tuple[bool, Optional[str]]:
@@ -145,7 +158,7 @@ class InstagramAdapter(BasePlatformAdapter):
         Step 1: Creates an Instagram media container.
         POST /{ig-user-id}/media
         """
-        if not config.is_publishing_enabled():
+        if not config.is_platform_publishing_enabled('instagram'):
             sim_container_id = f"ig_container_sim_{int(time.time() * 1000)}"
             return {'success': True, 'container_id': sim_container_id, 'simulated': True}
 
@@ -182,7 +195,7 @@ class InstagramAdapter(BasePlatformAdapter):
         Step 2: Polls container processing status until FINISHED or ERROR.
         GET /{container-id}?fields=status_code,status
         """
-        if not config.is_publishing_enabled() or container_id.startswith('ig_container_sim_'):
+        if not config.is_platform_publishing_enabled('instagram') or container_id.startswith('ig_container_sim_'):
             return True, 'FINISHED'
 
         token = access_token or facebook_api.get_access_token()
@@ -215,7 +228,7 @@ class InstagramAdapter(BasePlatformAdapter):
         Step 3: Publishes an approved, finished container to Instagram.
         POST /{ig-user-id}/media_publish
         """
-        if not config.is_publishing_enabled() or container_id.startswith('ig_container_sim_'):
+        if not config.is_platform_publishing_enabled('instagram') or container_id.startswith('ig_container_sim_'):
             sim_media_id = f"ig_media_sim_{int(time.time() * 1000)}"
             return {'success': True, 'media_id': sim_media_id, 'simulated': True}
 
@@ -276,7 +289,7 @@ class InstagramAdapter(BasePlatformAdapter):
             image_url = f"{base_url}/{filename}" if filename else None
 
         # Safety Guardrail: Intercept when publishing is disabled
-        if not config.is_publishing_enabled():
+        if not config.is_platform_publishing_enabled('instagram'):
             sim_container_id = f"ig_container_sim_{int(time.time() * 1000)}"
             sim_id = f"ig_media_sim_{int(time.time() * 1000)}"
             logger.info(
@@ -353,6 +366,6 @@ class InstagramAdapter(BasePlatformAdapter):
             'platform': self.platform_key,
             'display_name': self.display_name,
             'configured': conn['configured'],
-            'publishing_enabled': config.is_publishing_enabled(),
+            'publishing_enabled': config.is_platform_publishing_enabled('instagram'),
             'accounts': self.get_configured_accounts()
         }

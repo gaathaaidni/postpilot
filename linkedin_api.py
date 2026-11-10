@@ -786,7 +786,7 @@ def audit_linkedin_status() -> Dict[str, Any]:
 
     return {
         'apps': apps_status,
-        'publishing_enabled': config.is_publishing_enabled(),
+        'publishing_enabled': config.is_platform_publishing_enabled('linkedin'),
         # Backwards compatibility top-level aliases
         'configured': all(a['configured'] for a in apps_status.values()),
         'authenticated': any(a['authenticated'] for a in apps_status.values()),
@@ -831,7 +831,7 @@ def create_organization_post(organization_id: str,
             resolved_app = APP_GAATHA_VENTURES
 
     # Publishing Safety Guardrail
-    if not config.is_publishing_enabled():
+    if not config.is_platform_publishing_enabled('linkedin'):
         logger.info(
             f"🛡️ [SAFETY] LinkedIn organization publishing blocked/simulated (POSTPILOT_PUBLISHING_ENABLED=0): "
             f"Organization ID {clean_org_id} (App: {resolved_app})"
@@ -943,7 +943,7 @@ def initialize_image_upload(organization_id: str,
     clean_org_id = str(organization_id).replace("urn:li:organization:", "").strip()
     resolved_app = normalize_app_key(app_key) if app_key else APP_GAATHA_VENTURES
 
-    if not config.is_publishing_enabled():
+    if not config.is_platform_publishing_enabled('linkedin'):
         return {
             'success': True,
             'upload_url': f"https://api.linkedin.com/mediaUpload/simulated_{int(time.time())}",
@@ -992,7 +992,7 @@ def upload_image_file(upload_url: str, file_path: str, access_token: Optional[st
     Step 2: Uploads raw image binary to the designated LinkedIn uploadUrl.
     PUT {upload_url}
     """
-    if not config.is_publishing_enabled() or 'simulated' in upload_url:
+    if not config.is_platform_publishing_enabled('linkedin') or 'simulated' in upload_url:
         return True
 
     if not os.path.isfile(file_path):

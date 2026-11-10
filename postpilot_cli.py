@@ -163,7 +163,7 @@ def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] 
             print(f"[{i}] {p_name}")
             print(f"    Page ID:   {p_id}")
 
-            var_base = p_name.upper().replace(' ', '_').replace('.', '_')
+            var_base = facebook_api.get_canonical_page_slug(p_id, p_name)
             updates[f"FB_PAGE_ID_{var_base}"] = p_id
 
             ig = page.get('instagram_business_account')
@@ -184,6 +184,7 @@ def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] 
 
         # 3. Optional .env update
         if update_env and updates:
+            updates['FB_CONNECTED_PAGE_IDS'] = ','.join([str(p.get('id')) for p in pages if p.get('id')])
             _safely_update_env(updates)
 
         return 0
@@ -196,28 +197,7 @@ def cmd_list_pages(update_env: bool = False, args: Optional[argparse.Namespace] 
 
 def _safely_update_env(updates: Dict[str, str]):
     """Safely updates non-secret Page IDs in .env without overwriting existing secrets."""
-    env_path = Path('.env')
-    lines = []
-    if env_path.exists():
-        with open(env_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-    new_lines = []
-    pending_updates = dict(updates)
-    for line in lines:
-        stripped = line.strip()
-        if '=' in stripped and not stripped.startswith('#'):
-            k = stripped.split('=', 1)[0].strip()
-            if k in pending_updates:
-                new_lines.append(f"{k}={pending_updates.pop(k)}\n")
-                continue
-        new_lines.append(line)
-
-    for k, v in pending_updates.items():
-        new_lines.append(f"{k}={v}\n")
-
-    with open(env_path, 'w', encoding='utf-8') as f:
-        f.writelines(new_lines)
+    facebook_api.safely_update_env_vars(updates, env_path=Path('.env'))
     print("\n[OK] Updated .env with detected page identifiers.")
 
 def cmd_inspect_account(args: Optional[argparse.Namespace] = None) -> int:

@@ -132,12 +132,12 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
         elif not assigned_brand_id:
             status_label = STATUS_CONNECTED
             action_required = "Page accessible and verified. Assign to a GAATHA brand workspace to enable publishing."
-        elif config.is_publishing_enabled():
+        elif config.is_platform_publishing_enabled('facebook'):
             status_label = STATUS_LIVE_READY
             action_required = None
         else:
             status_label = STATUS_CONNECTED
-            action_required = "Connected and verified (Safe Standby: POSTPILOT_PUBLISHING_ENABLED=0)."
+            action_required = "Connected and verified (Safe Standby: Facebook publishing disabled)."
 
         page_record = {
             'id': pid,
@@ -182,12 +182,12 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
                 elif not ig_brand_id:
                     ig_status_label = STATUS_CONNECTED
                     ig_action = f"Linked to '{name}'. Assign to a GAATHA brand workspace to enable publishing."
-                elif config.is_publishing_enabled():
+                elif config.is_platform_publishing_enabled('instagram'):
                     ig_status_label = STATUS_LIVE_READY
                     ig_action = None
                 else:
                     ig_status_label = STATUS_CONNECTED
-                    ig_action = "Connected and verified (Safe Standby: POSTPILOT_PUBLISHING_ENABLED=0)."
+                    ig_action = "Connected and verified (Instagram publishing disabled / media required)."
 
                 discovered_ig_accounts.append({
                     'id': ig_id,
@@ -318,12 +318,12 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
         elif not company_publishing_ready:
             status_label = STATUS_CONNECTED_LIMITED
             action_required = "User authenticated. Company Page publishing requires LinkedIn 'Community Management API' approval (w_organization_social)."
-        elif config.is_publishing_enabled():
+        elif config.is_platform_publishing_enabled('linkedin'):
             status_label = STATUS_LIVE_READY
             action_required = None
         else:
             status_label = STATUS_CONNECTED
-            action_required = "Connected and authorized for organization publishing (Safe Standby: POSTPILOT_PUBLISHING_ENABLED=0)."
+            action_required = "Connected and authorized for organization publishing (Safe Standby: LinkedIn publishing disabled)."
 
         connect_url = f"/api/auth/linkedin/connect?app={app_key}"
 
@@ -454,12 +454,12 @@ def get_whatsapp_integration_status(organization_id: int = 1, include_discovery:
     elif templates_count == 0:
         status_label = STATUS_CONNECTED_LIMITED
         action_required = "Phone is connected, but 0 approved Meta message templates exist. Broadcast marketing requires approved templates."
-    elif config.is_publishing_enabled():
+    elif config.is_platform_publishing_enabled('whatsapp'):
         status_label = STATUS_LIVE_READY
         action_required = None
     else:
         status_label = STATUS_CONNECTED
-        action_required = "Connected and verified (Safe Standby: POSTPILOT_PUBLISHING_ENABLED=0)."
+        action_required = "Connected and verified (Safe Standby: WHATSAPP_PUBLISHING_ENABLED=0)."
 
     return {
         'success': True,
@@ -474,6 +474,7 @@ def get_whatsapp_integration_status(organization_id: int = 1, include_discovery:
         'platform_type': plat_type,
         'phone_status': phone_status,
         'approved_templates_count': templates_count,
+        'publishing_enabled': config.is_platform_publishing_enabled('whatsapp'),
         'status_label': status_label,
         'action_required': action_required,
         'discovered_wabas': discovered_wabas,

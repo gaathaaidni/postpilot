@@ -27,7 +27,7 @@ def mark_post_as_synced(post_id):
 
 def post_to_instagram(image_url, caption, ig_user_id=None, access_token=None):
     """Top-level function for Instagram posting, used by modules."""
-    if not config.is_publishing_enabled():
+    if not config.is_platform_publishing_enabled('instagram'):
         logger.warning(f"🛡️ [SAFETY] Instagram direct publishing is blocked (POSTPILOT_PUBLISHING_ENABLED=0) for user {ig_user_id}.")
         return False
 
@@ -91,7 +91,7 @@ class InstaSync:
         """Background loop to fetch new Facebook posts and cross-post to Instagram."""
         post_count = 0
         while not self.stop_event.is_set():
-            if not config.is_publishing_enabled():
+            if not config.is_platform_publishing_enabled('instagram'):
                 logger.info(f"🛡️ [SAFETY] Instagram background sync for {self.name} paused: POSTPILOT_PUBLISHING_ENABLED=0.")
                 if status_callback:
                     status_callback(self.name, True, "Paused (Publishing disabled)", None)
