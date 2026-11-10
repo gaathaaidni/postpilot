@@ -132,16 +132,16 @@ def get_app_config(app_key: str) -> Dict[str, Any]:
     else:
         raise ValueError(f"Unsupported LinkedIn application: '{app_key}'. Supported: 'aidni_global', 'gaatha_ventures'")
 
-    # Single-app fallback if dedicated app credentials are not yet set
+    # Never cross-contaminate credentials across apps via config backward-compatibility aliases.
     if not cid:
-        cid = getattr(config, 'LINKEDIN_CLIENT_ID', None) or os.getenv('LINKEDIN_CLIENT_ID')
+        cid = os.getenv('LINKEDIN_CLIENT_ID')
     if not csec:
-        csec = getattr(config, 'LINKEDIN_CLIENT_SECRET', None) or os.getenv('LINKEDIN_CLIENT_SECRET')
+        csec = os.getenv('LINKEDIN_CLIENT_SECRET')
 
     red_uri = (
         getattr(config, 'LINKEDIN_REDIRECT_URI', None)
         or os.getenv('LINKEDIN_REDIRECT_URI')
-        or 'http://127.0.0.1:5000/api/auth/linkedin/callback'
+        or 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'
     )
 
     clean_org_id = str(org_id).replace("urn:li:organization:", "").strip() if org_id else None
@@ -444,6 +444,7 @@ def exchange_code_for_token(code: str,
             'display_name': cfg['display_name'],
             'access_token': token,
             'expires_in': expires_in,
+            'expires_at': token_record['expires_at'],
             'scope': scope,
             'member': member if member.get('success') else None
         }

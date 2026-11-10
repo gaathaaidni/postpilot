@@ -337,6 +337,12 @@ class TestLinkedInDualIntegration(unittest.TestCase):
              patch.object(config, 'LINKEDIN_CLIENT_ID_GAATHA_VENTURES', 'gaatha_id_777'), \
              patch.object(config, 'LINKEDIN_CLIENT_SECRET_GAATHA_VENTURES', 'gaatha_sec_777'):
 
+            with self.client.session_transaction() as sess:
+                sess['user_id'] = 1
+                sess['username'] = 'admin'
+                sess['role'] = 'admin'
+                sess['organization_id'] = 1
+
             # Test Connect for Aidni
             resp_aidni = self.client.get('/api/auth/linkedin/connect?app=aidni_global&format=json')
             self.assertEqual(resp_aidni.status_code, 200)
@@ -360,6 +366,86 @@ class TestLinkedInDualIntegration(unittest.TestCase):
             self.assertIn('apps', status_json)
             self.assertIn('aidni_global', status_json['apps'])
             self.assertIn('gaatha_ventures', status_json['apps'])
+
+    # --------------------------------------------------------------------------
+    # 13. Redirect URI Exactness & Session/Credential Isolation
+    # --------------------------------------------------------------------------
+    def test_13_redirect_uri_exactness_and_token_isolation(self):
+        """Verifies exact production redirect_uri match across both apps and strict token isolation."""
+        import urllib.parse
+        expected_uri = 'https://postpilot.gaatha.tech/api/auth/linkedin/callback'
+
+        with patch.object(config, 'LINKEDIN_REDIRECT_URI', expected_uri), \
+             patch.object(config, 'LINKEDIN_CLIENT_ID_AIDNI_GLOBAL_LLP', 'aidni_cid_exact'), \
+             patch.object(config, 'LINKEDIN_CLIENT_SECRET_AIDNI_GLOBAL_LLP', 'aidni_sec_exact'), \
+             patch.object(config, 'LINKEDIN_CLIENT_ID_GAATHA_VENTURES', 'gaatha_cid_exact'), \
+             patch.object(config, 'LINKEDIN_CLIENT_SECRET_GAATHA_VENTURES', 'gaatha_sec_exact'):
+
+            with self.client.session_transaction() as sess:
+                sess['user_id'] = 1
+                sess['username'] = 'admin'
+                sess['role'] = 'admin'
+                sess['organization_id'] = 1
+
+            # Initiate both OAuth flows sequentially before completing callbacks
+            r_aidni = self.client.get('/api/auth/linkedin/connect?app=aidni_global&format=json')
+            r_gaatha = self.client.get('/api/auth/linkedin/connect?app=gaatha_ventures&format=json')
+            self.assertEqual(r_aidni.status_code, 200)
+            self.assertEqual(r_gaatha.status_code, 200)
+
+            d_aidni = r_aidni.get_json()
+            d_gaatha = r_gaatha.get_json()
+
+            for d in (d_aidni, d_gaatha):
+                parsed = urllib.parse.urlparse(d['authorization_url'])
+                qs = urllib.parse.parse_qs(parsed.query)
+                self.assertEqual(qs['redirect_uri'][0], expected_uri)
+                self.assertFalse(qs['redirect_uri'][0].endswith('/'))
+                self.assertTrue(qs['redirect_uri'][0].startswith('https://'))
+                self.assertEqual(qs['scope'][0], 'openid profile email w_member_social')
+
+            # Complete callback for Aidni Global while Gaatha Ventures OAuth is still pending
+            with patch('linkedin_api.exchange_code_for_token') as mock_exch, \
+                 patch('linkedin_api.check_organization_publishing_eligibility', return_value={'company_publishing_authorized': False}), \
+                 patch('linkedin_api.get_authenticated_member', return_value={'success': True, 'name': 'Aidni User'}), \
+                 patch('database.upsert_social_account'):
+
+                mock_exch.return_value = {
+                    'success': True,
+                    'app_key': 'aidni_global',
+                    'display_name': 'Aidni Global LLP',
+                    'access_token': 'TOK_AIDNI_ONLY',
+                    'expires_in': 5184000,
+                    'expires_at': time.time() + 5184000,
+                    'scope': 'openid profile email w_member_social',
+                    'member': {'success': True, 'name': 'Aidni User'}
+                }
+
+                cb_aidni = self.client.get(
+                    f"/api/auth/linkedin/callback?code=code_a&state={urllib.parse.quote(d_aidni['state'])}&format=json"
+                )
+                self.assertEqual(cb_aidni.status_code, 200)
+
+                # Now complete callback for Gaatha Ventures — its CSRF state must still be valid!
+                mock_exch.return_value = {
+                    'success': True,
+                    'app_key': 'gaatha_ventures',
+                    'display_name': 'Gaatha Ventures Sh.p.k.',
+                    'access_token': 'TOK_GAATHA_ONLY',
+                    'expires_in': 5184000,
+                    'expires_at': time.time() + 5184000,
+                    'scope': 'openid profile email w_member_social',
+                    'member': {'success': True, 'name': 'Gaatha User'}
+                }
+                cb_gaatha = self.client.get(
+                    f"/api/auth/linkedin/callback?code=code_g&state={urllib.parse.quote(d_gaatha['state'])}&format=json"
+                )
+                self.assertEqual(cb_gaatha.status_code, 200)
+
+            with self.client.session_transaction() as sess:
+                self.assertEqual(sess.get('linkedin_access_token_aidni_global'), 'TOK_AIDNI_ONLY')
+                self.assertEqual(sess.get('linkedin_access_token_gaatha_ventures'), 'TOK_GAATHA_ONLY')
+                self.assertNotIn('linkedin_access_token', sess)
 
 
 if __name__ == '__main__':

@@ -470,26 +470,33 @@ def linkedin_callback():
 
     token = token_res['access_token']
     session[f'linkedin_access_token_{app_key}'] = token
-    session['linkedin_access_token'] = token
 
     eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=token)
     member = token_res.get('member') or linkedin_api.get_authenticated_member(token)
 
-    # Persist verified token and status to database social_accounts
+    # Persist verified token and status to database social_accounts without overwriting existing brand mapping
     try:
         cfg = linkedin_api.get_app_config(app_key)
-        target_org = cfg.get('org_id')
+        target_org = str(cfg.get('org_id'))
+        org_scope = session.get('organization_id', 1)
+        existing_accounts = database.get_social_accounts(organization_id=org_scope, platform='linkedin')
+        matched = next((a for a in existing_accounts if str(a.get('account_identifier')) == target_org), None)
+        target_brand_id = matched['brand_id'] if matched else 1
+
+        exp_ts = token_res.get('expires_at')
+        exp_str = datetime.fromtimestamp(float(exp_ts), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if exp_ts else None
+
         database.upsert_social_account(
-            organization_id=session.get('organization_id', 1),
-            brand_id=1,
+            organization_id=org_scope,
+            brand_id=target_brand_id,
             platform='linkedin',
             account_name=token_res.get('display_name', cfg['display_name']),
-            account_identifier=str(target_org),
+            account_identifier=target_org,
             status='connected',
             permissions_scope=token_res.get('scope'),
             app_identifier=app_key,
             access_token=token,
-            token_expires_at=token_res.get('expires_at')
+            token_expires_at=exp_str
         )
     except Exception as e:
         logger.warning(f"Could not persist LinkedIn account to database: {e}")
@@ -558,11 +565,18 @@ def linkedin_publish_post():
     if not text:
         return jsonify({'error': 'Post text is required', 'code': 'MISSING_TEXT'}), 400
 
+    # Strictly isolate access token selection to the specific target LinkedIn application
+    clean_org = str(org_id).replace("urn:li:organization:", "").strip()
+    if app_key:
+        resolved_app = linkedin_api.normalize_app_key(app_key)
+    elif clean_org == linkedin_api.DEFAULT_ORG_ID_AIDNI_GLOBAL:
+        resolved_app = linkedin_api.APP_AIDNI_GLOBAL
+    else:
+        resolved_app = linkedin_api.APP_GAATHA_VENTURES
+
     token = (
-        session.get(f'linkedin_access_token_{app_key}')
-        or session.get('linkedin_access_token')
-        or (linkedin_api.get_active_token(app_key) if app_key else None)
-        or config.LINKEDIN_ACCESS_TOKEN
+        session.get(f'linkedin_access_token_{resolved_app}')
+        or linkedin_api.get_active_token(resolved_app)
     )
 
     try:
