@@ -601,12 +601,86 @@ function setDashboardDateFilter(filter) {
     loadDashboardExecutiveMetrics();
 }
 
+function parseUtcTimestamp(raw) {
+    if (raw === null || raw === undefined || raw === '') return null;
+    if (raw instanceof Date) {
+        return Number.isNaN(raw.getTime()) ? null : raw;
+    }
+    if (typeof raw === 'number') {
+        if (!Number.isFinite(raw)) return null;
+        const ms = raw < 1e12 ? raw * 1000 : raw;
+        const d = new Date(ms);
+        return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    const str = String(raw).trim();
+    if (!str) return null;
+
+    // Naive SQLite/backend UTC timestamps (e.g. "2026-11-04 06:30:13") have no offset; parse explicitly as UTC
+    const naiveMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?)?$/);
+    if (naiveMatch) {
+        const year = Number(naiveMatch[1]);
+        const month = Number(naiveMatch[2]);
+        const day = Number(naiveMatch[3]);
+        const hour = Number(naiveMatch[4] || 0);
+        const minute = Number(naiveMatch[5] || 0);
+        const second = Number(naiveMatch[6] || 0);
+        const ms = naiveMatch[7] ? Number(naiveMatch[7].slice(0, 3).padEnd(3, '0')) : 0;
+        const d = new Date(Date.UTC(year, month - 1, day, hour, minute, second, ms));
+        if (
+            Number.isNaN(d.getTime()) ||
+            d.getUTCFullYear() !== year ||
+            d.getUTCMonth() !== month - 1 ||
+            d.getUTCDate() !== day ||
+            d.getUTCHours() !== hour ||
+            d.getUTCMinutes() !== minute ||
+            d.getUTCSeconds() !== second
+        ) {
+            return null;
+        }
+        return d;
+    }
+
+    const parsed = new Date(str);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatReadableDateTime(raw, fallback = '—') {
+    const dt = parseUtcTimestamp(raw);
+    if (!dt) return fallback;
+
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Kolkata',
+            day: '2-digit',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        }).formatToParts(dt);
+        const partMap = {};
+        parts.forEach(p => { partMap[p.type] = p.value; });
+        const period = (partMap.dayPeriod || '').toUpperCase();
+        return `${partMap.day} ${partMap.month} ${partMap.year}, ${partMap.hour}:${partMap.minute} ${period} IST`.trim();
+    } catch (e) {
+        // Fallback manual UTC+05:30 offset if Intl timeZone is unavailable
+        const ist = new Date(dt.getTime() + (330 * 60 * 1000));
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const dd = String(ist.getUTCDate()).padStart(2, '0');
+        const mmm = months[ist.getUTCMonth()];
+        const yyyy = ist.getUTCFullYear();
+        let hh = ist.getUTCHours();
+        const min = String(ist.getUTCMinutes()).padStart(2, '0');
+        const period = hh >= 12 ? 'PM' : 'AM';
+        hh = hh % 12 || 12;
+        return `${dd} ${mmm} ${yyyy}, ${String(hh).padStart(2, '0')}:${min} ${period} IST`;
+    }
+}
+
 function parsePostDate(item) {
     const raw = item && (item.published_at || item.scheduled_for || item.updated_at || item.created_at);
-    if (!raw) return null;
-    const normalized = String(raw).trim().replace(' ', 'T');
-    const parsed = new Date(normalized);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    return parseUtcTimestamp(raw);
 }
 
 function filterItemsByDateRange(items, rangeKey) {
@@ -5682,7 +5756,7 @@ function renderStudioDraftCard(draft) {
                         <i class="fa-solid fa-clock-rotate-left"></i> History
                     </button>
                     <span style="font-size: 0.72rem; color: var(--text-muted);">
-                        ${escapeHtml(draft.ai_provider || 'ai')} · ${draft.created_at ? formatReadableDateTime(draft.created_at) : 'Draft'}
+                        ${escapeHtml(draft.ai_provider || 'ai')} · ${formatReadableDateTime(draft.created_at, 'Draft')}
                     </span>
                 </div>
             </div>
@@ -5954,7 +6028,7 @@ function renderStrategyDataInModal(strat) {
 
     const lastUpdated = strat.updated_at || strat.created_at;
     if (lastUpdated) {
-        document.getElementById('strategy-last-updated').textContent = `Blueprint updated: ${new Date(lastUpdated).toLocaleString()}`;
+        document.getElementById('strategy-last-updated').textContent = `Blueprint updated: ${formatReadableDateTime(lastUpdated)}`;
     }
 
     STRATEGY_SECTIONS.forEach(field => {
@@ -6628,7 +6702,8 @@ async function renderMedia(container) {
         ]);
 
         const brands = brandsRes.ok ? await brandsRes.json() : [];
-        const mediaAssets = mediaRes.ok ? await mediaRes.json() : [];
+        const mediaPayload = mediaRes.ok ? await mediaRes.json() : [];
+        const mediaAssets = Array.isArray(mediaPayload) ? mediaPayload : (Array.isArray(mediaPayload && mediaPayload.assets) ? mediaPayload.assets : []);
 
         let html = `
             <div class="media-view-container">
@@ -6696,22 +6771,25 @@ async function renderMedia(container) {
                 const brand = brands.find(b => b.id === m.brand_id);
                 const brandName = brand ? brand.name : 'Global';
                 const sizeKb = m.file_size ? (m.file_size / 1024).toFixed(0) + ' KB' : '';
+                const assetName = m.original_filename || m.original_name || m.filename || 'Media Asset';
+                const assetUrl = m.file_url || (m.filename ? `/images/${encodeURIComponent(m.filename)}` : '');
+                const assetType = m.content_type || m.mime_type || m.file_type || 'image';
 
                 html += `
                     <div class="card media-asset-card" style="overflow: hidden; padding: 0; display: flex; flex-direction: column;">
                         <div style="height: 150px; background: var(--bg-surface-subtle); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; border-bottom: 1px solid var(--border);">
-                            ${m.file_url ? `<img src="${escapeHtml(m.file_url)}" alt="${escapeHtml(m.original_filename)}" style="width: 100%; height: 100%; object-fit: cover;">` : `<i class="fa-regular fa-image fa-2x" style="color: var(--text-muted);"></i>`}
+                            ${assetUrl ? `<img src="${escapeHtml(assetUrl)}" alt="${escapeHtml(assetName)}" style="width: 100%; height: 100%; object-fit: cover;">` : `<i class="fa-regular fa-image fa-2x" style="color: var(--text-muted);"></i>`}
                             <span class="badge" style="position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.7); color: #fff; font-size: 0.65rem;">
                                 ${escapeHtml(brandName)}
                             </span>
                         </div>
                         <div style="padding: 0.85rem; flex: 1; display: flex; flex-direction: column; justify-content: space-between; gap: 0.5rem;">
                             <div>
-                                <div style="font-weight: 600; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(m.original_filename)}">
-                                    ${escapeHtml(m.original_filename)}
+                                <div style="font-weight: 600; font-size: 0.82rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(assetName)}">
+                                    ${escapeHtml(assetName)}
                                 </div>
                                 <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem;">
-                                    ${sizeKb} · ${escapeHtml(m.content_type || 'image')}
+                                    ${sizeKb} · ${escapeHtml(assetType)}
                                 </div>
                             </div>
                             <div style="display: flex; justify-content: space-between; align-items: center; pt: 0.4rem; border-top: 1px solid var(--border);">

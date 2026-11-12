@@ -94,8 +94,17 @@ class TestLightUiRefresh(unittest.TestCase):
             'function renderHistory(',
             'function renderQueueTable(',
             'function renderSettings(',
+            'function parseUtcTimestamp(',
+            'function formatReadableDateTime(',
         ]:
             self.assertIn(required_symbol, js, f'script.js missing required function: {required_symbol}')
+
+        # Verify every format* helper call in script.js has a matching function definition
+        import re
+        defs = set(re.findall(r'function\s+([A-Za-z0-9_]+)\s*\(', js))
+        fmt_calls = set(re.findall(r'(?<!\.)\b(format[A-Za-z0-9_]*)\s*\(', js))
+        self.assertEqual(sorted(c for c in fmt_calls if c not in defs), [], 'Undefined format* helper found in script.js')
+
 
     def test_public_and_authenticated_routes_and_guardrail(self):
         with patch.object(config, 'LOCAL_MODE', False):
