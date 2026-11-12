@@ -416,6 +416,22 @@ def init_db():
             )
         ''')
 
+        # 8b. WhatsApp webhook delivery & inbound event log
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS whatsapp_webhook_events (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                waba_id TEXT,
+                phone_number_id TEXT,
+                event_type TEXT NOT NULL,
+                message_id TEXT,
+                status_value TEXT,
+                recipient_phone TEXT,
+                payload_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # 9. Brand marketing profiles (positioning, voice & tone, approved facts)
         conn.execute(f'''
             CREATE TABLE IF NOT EXISTS brand_marketing_profiles (
@@ -4205,3 +4221,38 @@ def check_organization_quota(organization_id, resource_type):
             msg = f"Subscription quota reached for {clean_type}s ({usage}/{limit}). Please upgrade your plan."
             return (False, usage, limit, msg)
         return (True, usage, limit, "Within subscription quota.")
+
+def record_whatsapp_webhook_event(event_type, waba_id=None, phone_number_id=None,
+                                  message_id=None, status_value=None, recipient_phone=None,
+                                  payload_json=None, organization_id=1):
+    """Records verified WhatsApp webhook status/inbound events safely."""
+    clean_payload = json.dumps(payload_json) if isinstance(payload_json, (dict, list)) else (str(payload_json) if payload_json else None)
+    with get_db_connection() as conn:
+        if is_postgres():
+            cur = conn.execute(
+                "INSERT INTO whatsapp_webhook_events (organization_id, waba_id, phone_number_id, event_type, "
+                "message_id, status_value, recipient_phone, payload_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                (organization_id, waba_id, phone_number_id, event_type, message_id, status_value, recipient_phone, clean_payload)
+            )
+            new_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute(
+                "INSERT INTO whatsapp_webhook_events (organization_id, waba_id, phone_number_id, event_type, "
+                "message_id, status_value, recipient_phone, payload_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (organization_id, waba_id, phone_number_id, event_type, message_id, status_value, recipient_phone, clean_payload)
+            )
+            new_id = cur.lastrowid
+        conn.commit()
+        return new_id
+
+def get_whatsapp_webhook_events(organization_id=1, limit=50):
+    """Returns recent WhatsApp webhook events scoped cleanly by organization."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM whatsapp_webhook_events WHERE organization_id = ? ORDER BY id DESC LIMIT ?",
+            (int(organization_id), int(limit))
+        ).fetchall()
+        return [dict(r) for r in rows]
+

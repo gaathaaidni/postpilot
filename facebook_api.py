@@ -339,10 +339,11 @@ def _request_with_retry(method, url, **kwargs):
     """
     # Publishing Safety Guardrail: Intercept mutating publish calls when disabled
     if method.upper() in ('POST', 'PUT', 'DELETE'):
+        is_wa_endpoint = '/messages' in url
         is_ig_endpoint = any(ep in url for ep in ('/media', '/media_publish'))
         is_fb_endpoint = any(ep in url for ep in ('/feed', '/photos', '/videos'))
-        if is_ig_endpoint or is_fb_endpoint:
-            target_plat = 'instagram' if is_ig_endpoint else 'facebook'
+        if is_wa_endpoint or is_ig_endpoint or is_fb_endpoint:
+            target_plat = 'whatsapp' if is_wa_endpoint else ('instagram' if is_ig_endpoint else 'facebook')
             if not config.is_platform_publishing_enabled(target_plat):
                 logger.info(f"🛡️ [SAFETY] External Meta publishing intercepted (POSTPILOT_PUBLISHING_ENABLED=0): {method} {url}")
                 simulated_id = f"simulated_meta_{int(time.time() * 1000)}"

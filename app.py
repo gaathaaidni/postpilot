@@ -101,7 +101,7 @@ def csrf_protect(f):
     def decorated_function(*args, **kwargs):
         if request.method in ('POST', 'PUT', 'DELETE'):
             # Allow login without CSRF token since session is not established yet
-            if request.path in ('/api/auth/login', '/api/auth/register-org'):
+            if request.path in ('/api/auth/login', '/api/auth/register-org', '/api/webhooks/whatsapp'):
                 return f(*args, **kwargs)
 
             # Check header, form, or JSON
@@ -933,6 +933,158 @@ def whatsapp_status_route():
     org_id = session.get('organization_id', 1)
     result = integrations_service.get_whatsapp_integration_status(organization_id=org_id)
     return jsonify(result)
+
+
+@app.route('/api/whatsapp/templates', methods=['GET'])
+@login_required
+def whatsapp_templates_route():
+    """Returns live Meta-approved templates separately from local sandbox previews."""
+    from platform_adapters.whatsapp import WhatsAppCloudAdapter, PRESERVED_WHATSAPP_NUMBERS
+
+    adapter = WhatsAppCloudAdapter()
+    creds = adapter.get_credentials()
+    waba_ids = []
+    for wid in [creds.get('waba_id'), '1370721214882653', '1471882524763501']:
+        if wid and wid not in waba_ids:
+            waba_ids.append(wid)
+
+    live_by_waba = {}
+    all_live_templates = []
+    for wid in waba_ids:
+        res = adapter.fetch_live_templates(waba_id=wid)
+        live_by_waba[wid] = res
+        for t in res.get('templates', []):
+            t_copy = dict(t)
+            t_copy['waba_id'] = wid
+            all_live_templates.append(t_copy)
+
+    approved_live = [t for t in all_live_templates if t.get('meta_approved')]
+    local_previews = adapter.get_local_template_previews()
+
+    return jsonify({
+        'success': True,
+        'configured_waba_id': creds.get('waba_id'),
+        'preserved_numbers': list(PRESERVED_WHATSAPP_NUMBERS.values()),
+        'meta_approved_count': len(approved_live),
+        'live_templates': all_live_templates,
+        'live_by_waba': live_by_waba,
+        'local_previews_count': len(local_previews),
+        'local_previews': local_previews,
+    })
+
+
+@app.route('/api/whatsapp/simulate', methods=['POST'])
+@login_required
+@csrf_protect
+def whatsapp_simulate_route():
+    """Validates formatting, template variables, E.164 phone, and sender isolation strictly in sandbox simulation."""
+    from platform_adapters.whatsapp import WhatsAppCloudAdapter
+
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    adapter = WhatsAppCloudAdapter()
+
+    recipient = data.get('recipient_phone') or data.get('phone') or ''
+    template_name = data.get('template_name') or 'client_welcome'
+    message_text = data.get('message') or data.get('text') or ''
+    variables = data.get('variables')
+    language_code = data.get('language_code') or 'en'
+    brand_id = data.get('brand_id')
+
+    if config.is_platform_publishing_enabled('whatsapp'):
+        return jsonify({
+            'success': False,
+            'error': 'Sandbox simulation endpoint only operates when WHATSAPP_PUBLISHING_ENABLED=0.'
+        }), 409
+
+    if brand_id is not None and str(brand_id).strip() != '':
+        res = adapter.publish({
+            'organization_id': org_id,
+            'brand_id': int(brand_id),
+            'recipient_phone': recipient,
+            'template_name': template_name,
+            'message': message_text,
+            'variables': variables,
+            'language_code': language_code,
+            'phone_number_id': data.get('phone_number_id'),
+        })
+        return jsonify(res), (200 if res.get('success') else 400)
+
+    valid, val_err = adapter.validate_content({
+        'recipient_phone': recipient,
+        'template_name': template_name,
+        'message': message_text,
+        'variables': variables,
+    })
+    if not valid:
+        return jsonify({'success': False, 'error': val_err}), 400
+
+    res = adapter.send_template(
+        recipient_phone=recipient,
+        template_name=template_name,
+        language_code=language_code,
+        variables=variables,
+        phone_number_id=data.get('phone_number_id'),
+    )
+    return jsonify(res), (200 if res.get('success') else 400)
+
+
+@app.route('/api/webhooks/whatsapp', methods=['GET', 'POST'])
+def whatsapp_webhook_route():
+    """Meta WhatsApp Cloud API webhook verification challenge and fail-closed HMAC-SHA256 event receiver."""
+    import hmac
+    import json as py_json
+    from platform_adapters.whatsapp import WhatsAppCloudAdapter
+
+    adapter = WhatsAppCloudAdapter()
+    creds = adapter.get_credentials()
+
+    if request.method == 'GET':
+        mode = request.args.get('hub.mode', '')
+        verify_token = request.args.get('hub.verify_token', '')
+        challenge = request.args.get('hub.challenge', '')
+        expected = creds.get('verify_token') or ''
+        if mode == 'subscribe' and expected and hmac.compare_digest(str(verify_token), str(expected)):
+            return challenge, 200
+        return jsonify({'error': 'Webhook verification token mismatch'}), 403
+
+    sig = request.headers.get('X-Hub-Signature-256', '')
+    raw_bytes = request.get_data()
+    if not adapter.verify_webhook_signature(raw_bytes, sig, app_secret=creds.get('app_secret')):
+        return jsonify({'error': 'Invalid or missing webhook signature'}), 403
+
+    payload = request.get_json(silent=True) or {}
+    recorded = 0
+    for entry in payload.get('entry', []):
+        waba_id = str(entry.get('id') or '')
+        for change in entry.get('changes', []):
+            val = change.get('value') or {}
+            meta_obj = val.get('metadata') or {}
+            phone_id = str(meta_obj.get('phone_number_id') or '')
+            for st in val.get('statuses', []):
+                database.record_whatsapp_webhook_event(
+                    event_type='status',
+                    waba_id=waba_id,
+                    phone_number_id=phone_id,
+                    message_id=st.get('id'),
+                    status_value=st.get('status'),
+                    recipient_phone=st.get('recipient_id'),
+                    payload_json=st,
+                )
+                recorded += 1
+            for msg in val.get('messages', []):
+                database.record_whatsapp_webhook_event(
+                    event_type='inbound_message',
+                    waba_id=waba_id,
+                    phone_number_id=phone_id,
+                    message_id=msg.get('id'),
+                    status_value=msg.get('type'),
+                    recipient_phone=msg.get('from'),
+                    payload_json=msg,
+                )
+                recorded += 1
+
+    return jsonify({'status': 'received', 'events_recorded': recorded}), 200
 
 
 @app.route('/api/integrations/map', methods=['POST'])

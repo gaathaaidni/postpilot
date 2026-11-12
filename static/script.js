@@ -7301,24 +7301,32 @@ const WA_TEMPLATES = {
         name: 'client_welcome',
         label: 'Client Welcome & Onboarding',
         category: 'UTILITY',
+        status: 'LOCAL_PREVIEW',
+        meta_approved: false,
         body: 'Welcome to Gaatha Ventures! We are delighted to partner with you on your strategic growth journey. Our advisory team will reach out shortly with your tailored roadmap.'
     },
     'consultation_reminder': {
         name: 'consultation_reminder',
         label: 'Consultation Session Reminder',
         category: 'UTILITY',
-        body: 'Reminder: Your upcoming strategic consultation with Gaatha Ventures is scheduled for tomorrow. Please let us know if you need to adjust your calendar.'
+        status: 'LOCAL_PREVIEW',
+        meta_approved: false,
+        body: 'Reminder: Your upcoming strategic consultation with Gaatha Ventures is scheduled for tomorrow at 11:00 AM IST. Please let us know if you need to adjust your calendar.'
     },
     'campaign_announcement': {
         name: 'campaign_announcement',
         label: 'Marketing Campaign Announcement',
         category: 'MARKETING',
-        body: 'Gaatha Ventures has officially released our new Global Business Intelligence suite. Discover how our narrative systems accelerate enterprise growth.'
+        status: 'LOCAL_PREVIEW',
+        meta_approved: false,
+        body: 'Gaatha Ventures & Aidni Global LLP have released our new digital operations suite at https://gaatha.tech/. Explore how our systems accelerate enterprise growth.'
     },
     'custom_direct': {
         name: 'custom_direct',
-        label: 'Custom Business Message',
+        label: 'Custom Business Message (24h Window Only)',
         category: 'CONVERSATIONAL',
+        status: 'LOCAL_PREVIEW',
+        meta_approved: false,
         body: 'Hello from Gaatha Ventures. Thank you for your inquiry. We are reviewing your requirements and will provide an update shortly.'
     }
 };
@@ -7342,22 +7350,41 @@ function renderWhatsAppView(container) {
                             </span>
                         </div>
                         <p id="wa-studio-subtitle" style="font-size: 0.88rem; margin: 0;">
-                            Isolated Meta WhatsApp Business sandbox studio. Verification and publishing flags control all outbound dispatches.
+                            Isolated Meta WhatsApp Business sandbox studio. Local previews are strictly separated from live Meta-approved templates.
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
                         <span id="wa-studio-guardrail-pill" class="badge badge-warning">
-                            <i class="fa-solid fa-lock"></i> Safe Mode (No Live Send)
+                            <i class="fa-solid fa-lock"></i> WHATSAPP_PUBLISHING_ENABLED=0
                         </span>
                     </div>
                 </div>
             </div>
 
             <!-- Safe Mode Banner -->
-            <div class="notice-callout notice-callout--info" style="margin-bottom: 1.5rem;">
+            <div class="notice-callout notice-callout--info" style="margin-bottom: 1.25rem;">
                 <i class="fa-solid fa-lock"></i>
                 <div>
-                    <strong>Publishing Safeguard Enforced:</strong> Actions in this studio simulate message formatting and template previews locally without triggering outbound Meta Cloud API billing or live messages.
+                    <strong>Publishing Safeguard Enforced:</strong> Actions in this studio simulate message formatting, E.164 recipient normalization, and template validation cleanly on the backend without triggering outbound Meta Cloud API billing or live messages (<code>WHATSAPP_PUBLISHING_ENABLED=0</code>).
+                </div>
+            </div>
+
+            <!-- Meta Readiness Snapshot Panel -->
+            <div id="wa-readiness-panel" class="card" style="padding: 1.15rem 1.35rem; margin-bottom: 1.5rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;">
+                    <div style="font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fa-solid fa-tower-observation" style="color: var(--primary);"></i> Live Meta Production Readiness &amp; Preserved Numbers
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <span id="wa-templates-meta-pill" class="badge badge-warning">Meta Templates: Checking...</span>
+                        <span id="wa-webhook-meta-pill" class="badge badge-warning">Webhook: Checking...</span>
+                        <span id="wa-token-meta-pill" class="badge badge-warning">Token: Checking...</span>
+                    </div>
+                </div>
+                <div id="wa-preserved-numbers-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.85rem; font-size: 0.82rem; color: var(--text-secondary);">
+                    <div style="padding: 0.7rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface-subtle);">
+                        Inspecting +91 90990 28291 (WABA 1370721214882653) and +91 98257 28291 (WABA 1471882524763501)...
+                    </div>
                 </div>
             </div>
 
@@ -7376,7 +7403,7 @@ function renderWhatsAppView(container) {
                                 WA
                             </div>
                             <div>
-                                <div id="wa-sender-name" style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);">WhatsApp Sandbox Sender</div>
+                                <div id="wa-sender-name" style="font-size: 0.85rem; font-weight: 700; color: var(--text-primary);">WhatsApp Sandbox Sender (No Auto Brand Binding)</div>
                                 <div id="wa-sender-meta" style="font-size: 0.75rem; color: var(--text-muted);">Loading backend sender metadata...</div>
                             </div>
                         </div>
@@ -7385,14 +7412,14 @@ function renderWhatsAppView(container) {
                     <div style="margin-bottom: 1rem;">
                         <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Test Recipient Phone (Sandbox Only)</label>
                         <input type="text" id="wa-recipient-input" class="form-control" value="+91 98257 28291" placeholder="+91XXXXXXXXXX" style="font-size: 0.88rem;">
-                        <small style="color: var(--text-muted); font-size: 0.74rem;">Include international country code prefix (e.g. +91, +1, +44)</small>
+                        <small style="color: var(--text-muted); font-size: 0.74rem;">Include international E.164 country code prefix (e.g. +91, +1, +44)</small>
                     </div>
 
                     <div style="margin-bottom: 1rem;">
-                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Message Template</label>
+                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Message Template (Local Previews — Not Meta-Approved)</label>
                         <select id="wa-template-select" class="form-control" style="font-size: 0.88rem;" onchange="handleWATemplateChange(this.value)">
                             ${Object.keys(WA_TEMPLATES).map(k => `
-                                <option value="${k}" ${k === waSelectedTemplate ? 'selected' : ''}>${WA_TEMPLATES[k].label} (${WA_TEMPLATES[k].category})</option>
+                                <option value="${k}" ${k === waSelectedTemplate ? 'selected' : ''}>${WA_TEMPLATES[k].label} (${WA_TEMPLATES[k].category} · Local Preview)</option>
                             `).join('')}
                         </select>
                     </div>
@@ -7409,7 +7436,7 @@ function renderWhatsAppView(container) {
                         <button type="button" class="btn btn-success" onclick="handleWASendSimulation()" style="flex: 1;">
                             <i class="fa-solid fa-paper-plane"></i> Simulate Send (Safe Mode)
                         </button>
-                        <button type="button" class="btn btn-secondary" onclick="showToast('Template payload verified locally.', 'success')">
+                        <button type="button" class="btn btn-secondary" onclick="handleWAValidateFormat()">
                             <i class="fa-solid fa-code"></i> Validate Format
                         </button>
                     </div>
@@ -7429,7 +7456,7 @@ function renderWhatsAppView(container) {
                                     <div style="font-size: 0.88rem; font-weight: 700; color: #e9edef; display: flex; align-items: center; gap: 0.3rem;">
                                         Gaatha Ventures <i class="fa-solid fa-circle-check" style="color: #25d366; font-size: 0.72rem;"></i>
                                     </div>
-                                    <div style="font-size: 0.72rem; color: #8696a0;">Official Business Account</div>
+                                    <div style="font-size: 0.72rem; color: #8696a0;">Sandbox Preview · Local Only</div>
                                 </div>
                             </div>
                             <div style="display: flex; gap: 0.85rem; color: #8696a0; font-size: 0.88rem;">
@@ -7442,7 +7469,7 @@ function renderWhatsAppView(container) {
                         <!-- Chat Area -->
                         <div style="min-height: 220px; display: flex; flex-direction: column; justify-content: flex-end; padding: 0.5rem 0;">
                             <div style="text-align: center; margin-bottom: 1rem;">
-                                <span style="background: #182229; color: #8696a0; font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 6px;">TODAY</span>
+                                <span style="background: #182229; color: #8696a0; font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 6px;">LOCAL PREVIEW</span>
                             </div>
 
                             <!-- WhatsApp Message Bubble -->
@@ -7479,8 +7506,8 @@ function renderWhatsAppView(container) {
                                         <span style="color: var(--text-muted); margin-left: 0.4rem;">${escapeHtml(l.template)}</span>
                                     </div>
                                     <div style="display: flex; align-items: center; gap: 0.4rem;">
-                                        <span class="badge badge-success" style="font-size: 0.68rem;">${l.status}</span>
-                                        <span style="color: var(--text-muted); font-size: 0.72rem;">${l.time}</span>
+                                        <span class="badge badge-success" style="font-size: 0.68rem;">${escapeHtml(l.status)}</span>
+                                        <span style="color: var(--text-muted); font-size: 0.72rem;">${escapeHtml(l.time)}</span>
                                     </div>
                                 </div>
                             `).join('')}
@@ -7493,36 +7520,76 @@ function renderWhatsAppView(container) {
 
     container.innerHTML = html;
 
-    // Async backend WhatsApp integration readiness check (honest status without modifying assets)
-    authFetch('/api/integrations/status')
-        .then(r => (r.ok ? r.json() : null))
-        .then(data => {
-            if (!data || !data.whatsapp) return;
-            const wa = data.whatsapp;
-            const badgeEl = document.getElementById('wa-studio-verification-badge');
-            const senderNameEl = document.getElementById('wa-sender-name');
-            const senderMetaEl = document.getElementById('wa-sender-meta');
-            const guardEl = document.getElementById('wa-studio-guardrail-pill');
-            if (badgeEl) {
-                badgeEl.className = `badge ${wa.status === 'connected' ? 'badge-published' : 'badge-warning'}`;
-                badgeEl.innerHTML = `<i class="fa-solid ${wa.status === 'connected' ? 'fa-circle-check' : 'fa-shield-halved'}"></i> ${escapeHtml(wa.status_label || 'Verification Required')}`;
-            }
-            if (senderNameEl) {
-                senderNameEl.textContent = wa.active_verified_name || 'Isolated Cloud API Sender (No Auto Brand Binding)';
-            }
-            if (senderMetaEl) {
-                const phone = wa.active_display_phone || wa.display_phone_number || 'Isolated';
-                const waba = wa.active_waba_id || wa.configured_waba_id || 'Unassigned';
-                senderMetaEl.textContent = `${phone} · WABA ${waba}`;
-            }
-            if (guardEl) {
-                guardEl.className = `badge ${wa.publishing_enabled ? 'badge-published' : 'badge-warning'}`;
-                guardEl.innerHTML = wa.publishing_enabled
-                    ? '<i class="fa-solid fa-tower-broadcast"></i> WhatsApp Broadcast Active'
-                    : '<i class="fa-solid fa-lock"></i> WHATSAPP_PUBLISHING_ENABLED=0';
-            }
-        })
-        .catch(() => {});
+    // Async backend WhatsApp readiness & templates check (never fabricates approvals)
+    Promise.all([
+        authFetch('/api/integrations/whatsapp/status').then(r => (r.ok ? r.json() : null)).catch(() => null),
+        authFetch('/api/whatsapp/templates').then(r => (r.ok ? r.json() : null)).catch(() => null),
+    ]).then(([wa, tplData]) => {
+        if (!wa) return;
+        const badgeEl = document.getElementById('wa-studio-verification-badge');
+        const senderNameEl = document.getElementById('wa-sender-name');
+        const senderMetaEl = document.getElementById('wa-sender-meta');
+        const guardEl = document.getElementById('wa-studio-guardrail-pill');
+        const tplPill = document.getElementById('wa-templates-meta-pill');
+        const whPill = document.getElementById('wa-webhook-meta-pill');
+        const tokPill = document.getElementById('wa-token-meta-pill');
+        const numsGrid = document.getElementById('wa-preserved-numbers-grid');
+
+        if (badgeEl) {
+            const healthy = wa.health_can_send === 'AVAILABLE' && wa.code_verification_status === 'VERIFIED';
+            badgeEl.className = `badge ${healthy ? 'badge-published' : 'badge-warning'}`;
+            badgeEl.innerHTML = `<i class="fa-solid ${healthy ? 'fa-circle-check' : 'fa-shield-halved'}"></i> ${escapeHtml(wa.status_label || 'Verification Required')}`;
+        }
+        if (senderNameEl) {
+            senderNameEl.textContent = `${wa.verified_name || 'WhatsApp Sandbox Sender'} (No Auto Brand Binding)`;
+        }
+        if (senderMetaEl) {
+            const phone = wa.display_phone_number || '+91 90990 28291';
+            const waba = wa.configured_waba_id || '1370721214882653';
+            senderMetaEl.textContent = `${phone} · WABA ${waba} · ${wa.platform_type || 'UNKNOWN'} / ${wa.phone_status || 'DISCONNECTED'}`;
+        }
+        if (guardEl) {
+            guardEl.className = `badge ${wa.publishing_enabled ? 'badge-published' : 'badge-warning'}`;
+            guardEl.innerHTML = wa.publishing_enabled
+                ? '<i class="fa-solid fa-tower-broadcast"></i> WhatsApp Broadcast Active'
+                : '<i class="fa-solid fa-lock"></i> WHATSAPP_PUBLISHING_ENABLED=0';
+        }
+        if (tplPill) {
+            const liveApproved = tplData ? (tplData.meta_approved_count ?? 0) : (wa.approved_templates_count ?? 0);
+            const localCount = tplData ? (tplData.local_previews_count ?? 4) : (wa.local_preview_templates_count ?? 4);
+            tplPill.className = `badge ${liveApproved > 0 ? 'badge-published' : 'badge-warning'}`;
+            tplPill.textContent = `Meta Templates: ${liveApproved} Approved · ${localCount} Local Previews`;
+        }
+        if (whPill && wa.webhook_status) {
+            const whReady = wa.webhook_status.app_secret_configured && wa.webhook_status.postpilot_app_subscribed;
+            whPill.className = `badge ${whReady ? 'badge-published' : 'badge-warning'}`;
+            whPill.textContent = whReady
+                ? 'Webhook: Subscribed & Signed'
+                : `Webhook: ${wa.webhook_status.app_secret_configured ? 'Secret OK' : 'Secret Missing'} · ${wa.webhook_status.postpilot_app_subscribed ? 'Subscribed' : 'Not Subscribed'}`;
+        }
+        if (tokPill && wa.token_health) {
+            const tokOk = !!wa.token_health.valid;
+            tokPill.className = `badge ${tokOk ? 'badge-published' : 'badge-danger'}`;
+            tokPill.textContent = tokOk ? 'Token: Valid (Scoped)' : 'Token: Needs Attention';
+        }
+        if (numsGrid && Array.isArray(wa.numbers) && wa.numbers.length > 0) {
+            numsGrid.innerHTML = wa.numbers.map(n => {
+                const errs = (n.health_errors || []).map(e => `${e.error_code || ''}`).filter(Boolean).join(', ');
+                return `
+                    <div style="padding: 0.75rem 0.9rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface-subtle);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+                            <strong style="color: var(--text-primary);">${escapeHtml(n.display_phone_number || n.phone_number_id)}</strong>
+                            <span class="badge ${n.health_can_send === 'AVAILABLE' ? 'badge-published' : 'badge-warning'}" style="font-size: 0.7rem;">
+                                ${escapeHtml(n.platform_type || 'UNKNOWN')} · ${escapeHtml(n.phone_status || 'UNKNOWN')}
+                            </span>
+                        </div>
+                        <div>WABA: <code>${escapeHtml(n.waba_id)}</code> (${escapeHtml(n.waba_name || n.business_name || '')})</div>
+                        <div>OTP: <strong>${escapeHtml(n.code_verification_status || 'NOT_VERIFIED')}</strong> · Name: ${escapeHtml(n.name_status || 'UNSET')} · Meta Health: <strong>${escapeHtml(n.health_can_send || 'UNKNOWN')}</strong>${errs ? ` (Errors: ${escapeHtml(errs)})` : ''}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+    });
 }
 
 function handleWATemplateChange(templateKey) {
@@ -7545,6 +7612,48 @@ function handleWAMessageInput(text) {
     if (prevEl) prevEl.textContent = text;
 }
 
+function _renderWASimulatedLogs() {
+    const logEl = document.getElementById('wa-activity-log');
+    if (!logEl) return;
+    logEl.innerHTML = waSimulatedLogs.map(l => `
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--bg-surface-subtle); border-radius: 6px; border: 1px solid var(--border);">
+            <div>
+                <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(l.recipient)}</span>
+                <span style="color: var(--text-muted); margin-left: 0.4rem;">${escapeHtml(l.template)}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.4rem;">
+                <span class="badge badge-success" style="font-size: 0.68rem;">${escapeHtml(l.status)}</span>
+                <span style="color: var(--text-muted); font-size: 0.72rem;">${escapeHtml(l.time)}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function handleWAValidateFormat() {
+    const recip = document.getElementById('wa-recipient-input')?.value || '';
+    const text = document.getElementById('wa-message-body')?.value || '';
+    authFetch('/api/whatsapp/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            recipient_phone: recip,
+            template_name: waSelectedTemplate,
+            message: text,
+        }),
+    })
+        .then(r => r.json().then(d => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (ok && d.success) {
+                showToast(`Format & E.164 validated (${d.recipient_phone}). Ready for sandbox simulation.`, 'success');
+            } else {
+                showToast(d.error || 'Template payload validation failed.', 'warning');
+            }
+        })
+        .catch(() => {
+            showToast('Validation request failed cleanly.', 'warning');
+        });
+}
+
 function handleWASendSimulation() {
     const recip = document.getElementById('wa-recipient-input')?.value || '+91 90990 28291';
     const text = document.getElementById('wa-message-body')?.value || '';
@@ -7553,31 +7662,34 @@ function handleWASendSimulation() {
         return;
     }
 
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    waSimulatedLogs.unshift({
-        time: now,
-        recipient: recip,
-        template: waSelectedTemplate,
-        status: 'Delivered (Simulated)'
-    });
-
-    showToast(`[SAFE MODE] WhatsApp message simulated successfully for ${recip}. (No live dispatch sent: POSTPILOT_PUBLISHING_ENABLED=0)`, "success");
-
-    const logEl = document.getElementById('wa-activity-log');
-    if (logEl) {
-        logEl.innerHTML = waSimulatedLogs.map(l => `
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.78rem; padding: 0.45rem 0.6rem; background: var(--bg-surface-subtle); border-radius: 6px; border: 1px solid var(--border);">
-                <div>
-                    <span style="font-weight: 600; color: var(--text-primary);">${escapeHtml(l.recipient)}</span>
-                    <span style="color: var(--text-muted); margin-left: 0.4rem;">${escapeHtml(l.template)}</span>
-                </div>
-                <div style="display: flex; align-items: center; gap: 0.4rem;">
-                    <span class="badge badge-success" style="font-size: 0.68rem;">${l.status}</span>
-                    <span style="color: var(--text-muted); font-size: 0.72rem;">${l.time}</span>
-                </div>
-            </div>
-        `).join('');
-    }
+    authFetch('/api/whatsapp/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            recipient_phone: recip,
+            template_name: waSelectedTemplate,
+            message: text,
+        }),
+    })
+        .then(r => r.json().then(d => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok || !d.success) {
+                showToast(d.error || "Sandbox simulation validation failed.", "warning");
+                return;
+            }
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            waSimulatedLogs.unshift({
+                time: now,
+                recipient: d.recipient_phone || recip,
+                template: `${waSelectedTemplate} (${d.external_message_id || 'sim'})`,
+                status: 'Delivered (Simulated)',
+            });
+            showToast(`[SAFE MODE] WhatsApp simulated cleanly for ${d.recipient_phone || recip}. (WHATSAPP_PUBLISHING_ENABLED=0)`, "success");
+            _renderWASimulatedLogs();
+        })
+        .catch(() => {
+            showToast("Sandbox simulation failed cleanly.", "warning");
+        });
 }
 
 

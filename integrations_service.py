@@ -357,99 +357,208 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
 
 def get_whatsapp_integration_status(organization_id: int = 1, include_discovery: bool = False) -> Dict[str, Any]:
     """
-    Evaluates WhatsApp Business integration directly against Meta Graph API.
-    Inspects configured WABA (1370721214882653) and discovers all accessible WABAs and phone numbers.
-    Explains NOT_VERIFIED, ON_PREMISE, and approved template requirements.
+    Evaluates WhatsApp Business Cloud API readiness honestly against Meta Graph API.
+    Inspects BOTH preserved sender lines (+91 90990 28291 / 1171737406016871 and
+    +91 98257 28291 / 1298748379987770), token health/scopes, live approved templates
+    vs local previews, webhook readiness, and remaining Meta requirements.
     """
-    token = getattr(config, 'FB_ACCESS_TOKEN', None) or os.getenv('FB_ACCESS_TOKEN')
+    from platform_adapters.whatsapp import WhatsAppCloudAdapter, PRESERVED_WHATSAPP_NUMBERS
+
+    adapter = WhatsAppCloudAdapter()
+    creds = adapter.get_credentials()
+    token = creds.get('access_token')
     headers = {'Authorization': f'Bearer {token}'} if token else {}
 
-    configured_waba_id = os.getenv('WHATSAPP_BUSINESS_ACCOUNT_ID') or os.getenv('WHATSAPP_WABA_ID', '1370721214882653')
-    configured_phone_id = os.getenv('WHATSAPP_PHONE_NUMBER_ID', '1171737406016871')
-    configured_phone_display = '+91 90990 28291'
+    configured_waba_id = creds.get('waba_id') or '1370721214882653'
+    configured_phone_id = creds.get('phone_number_id') or '1171737406016871'
+    configured_phone_display = PRESERVED_WHATSAPP_NUMBERS.get(configured_phone_id, {}).get('display_phone_number', '+91 90990 28291')
 
-    # 1. Fetch metadata on primary phone ID (1171737406016871)
-    primary_phone_info = {}
-    if token:
+    phone_fields = (
+        'id,display_phone_number,verified_name,code_verification_status,quality_rating,'
+        'platform_type,throughput,status,name_status,account_mode,messaging_limit_tier,'
+        'is_pin_enabled,health_status'
+    )
+
+    def _inspect_line(phone_id: str, waba_id: str, meta_defaults: Dict[str, Any]) -> Dict[str, Any]:
+        info = dict(meta_defaults)
+        p_data: Dict[str, Any] = {}
+        w_data: Dict[str, Any] = {}
+        templates: list = []
+        subscribed_apps: list = []
+        if not token:
+            info.update({
+                'phone_status': 'UNKNOWN',
+                'code_verification_status': 'UNKNOWN',
+                'platform_type': 'UNKNOWN',
+                'approved_templates_count': 0,
+                'health_can_send': 'UNKNOWN',
+                'health_errors': [],
+                'subscribed_apps': [],
+            })
+            return info
+
         try:
-            fields = 'id,display_phone_number,verified_name,code_verification_status,quality_rating,platform_type,throughput,status,name_status'
-            pr = requests.get(f"{GRAPH_BASE_URL}/{configured_phone_id}?fields={fields}", headers=headers, timeout=5).json()
-            if 'id' in pr:
-                primary_phone_info = pr
+            pr = requests.get(f"{GRAPH_BASE_URL}/{phone_id}?fields={phone_fields}", headers=headers, timeout=5).json()
+            if isinstance(pr, dict) and 'id' in pr:
+                p_data = pr
         except Exception as e:
-            logger.warning(f"Error querying primary WhatsApp phone: {facebook_api.sanitize_log_message(str(e))}")
+            logger.warning(f"Error querying WhatsApp phone {phone_id}: {facebook_api.sanitize_log_message(str(e))}")
 
-    # 2. Check templates under configured WABA
-    templates_count = 0
-    if token and configured_waba_id:
         try:
-            tr = requests.get(f"{GRAPH_BASE_URL}/{configured_waba_id}/message_templates?fields=name,status,category,language", headers=headers, timeout=5).json()
-            templates = tr.get('data', [])
-            templates_count = len([t for t in templates if t.get('status') == 'APPROVED'])
+            wr = requests.get(
+                f"{GRAPH_BASE_URL}/{waba_id}?fields=id,name,business_verification_status,account_review_status,timezone_id,ownership_type",
+                headers=headers,
+                timeout=5,
+            ).json()
+            if isinstance(wr, dict) and 'id' in wr:
+                w_data = wr
         except Exception as e:
-            logger.warning(f"Error querying WhatsApp templates: {facebook_api.sanitize_log_message(str(e))}")
+            logger.warning(f"Error querying WABA {waba_id}: {facebook_api.sanitize_log_message(str(e))}")
 
-    # 3. Discover all accessible WABAs and phones
+        try:
+            tr = requests.get(
+                f"{GRAPH_BASE_URL}/{waba_id}/message_templates?fields=id,name,status,category,language&limit=100",
+                headers=headers,
+                timeout=5,
+            ).json()
+            if isinstance(tr, dict):
+                templates = tr.get('data', [])
+        except Exception as e:
+            logger.warning(f"Error querying WABA {waba_id} templates: {facebook_api.sanitize_log_message(str(e))}")
+
+        try:
+            sr = requests.get(f"{GRAPH_BASE_URL}/{waba_id}/subscribed_apps", headers=headers, timeout=5).json()
+            if isinstance(sr, dict):
+                for row in sr.get('data', []):
+                    app_obj = row.get('whatsapp_business_api_data') or row
+                    subscribed_apps.append({
+                        'id': str(app_obj.get('id') or ''),
+                        'name': app_obj.get('name') or 'Unknown App',
+                    })
+        except Exception as e:
+            logger.warning(f"Error querying WABA {waba_id} subscribed_apps: {facebook_api.sanitize_log_message(str(e))}")
+
+        health_obj = p_data.get('health_status') or {}
+        health_errors = []
+        business_entity_available = None
+        for ent in health_obj.get('entities', []):
+            if ent.get('entity_type') == 'BUSINESS':
+                business_entity_available = (ent.get('can_send_message') == 'AVAILABLE')
+            for err in ent.get('errors', []):
+                health_errors.append({
+                    'entity_type': ent.get('entity_type'),
+                    'error_code': err.get('error_code'),
+                    'error_description': err.get('error_description'),
+                })
+
+        approved_cnt = len([t for t in templates if str(t.get('status', '')).upper() == 'APPROVED'])
+        info.update({
+            'display_phone_number': p_data.get('display_phone_number', meta_defaults.get('display_phone_number')),
+            'verified_name': p_data.get('verified_name', meta_defaults.get('business_name')),
+            'phone_status': p_data.get('status', 'DISCONNECTED'),
+            'code_verification_status': p_data.get('code_verification_status', 'NOT_VERIFIED'),
+            'platform_type': p_data.get('platform_type', 'UNKNOWN'),
+            'name_status': p_data.get('name_status'),
+            'quality_rating': p_data.get('quality_rating'),
+            'account_mode': p_data.get('account_mode'),
+            'messaging_limit_tier': p_data.get('messaging_limit_tier'),
+            'is_pin_enabled': p_data.get('is_pin_enabled'),
+            'waba_name': w_data.get('name') or meta_defaults.get('business_name'),
+            'business_verification_status': w_data.get('business_verification_status'),
+            'account_review_status': w_data.get('account_review_status'),
+            'timezone_id': w_data.get('timezone_id'),
+            'approved_templates_count': approved_cnt,
+            'total_meta_templates_count': len(templates),
+            'health_can_send': health_obj.get('can_send_message', 'UNKNOWN'),
+            'business_entity_available': business_entity_available,
+            'health_errors': health_errors,
+            'subscribed_apps': subscribed_apps,
+            'postpilot_webhook_subscribed': any(str(a.get('id')) == '1397769361108621' for a in subscribed_apps),
+            '_raw_phone': p_data,
+        })
+        return info
+
+    preserved_targets = [
+        PRESERVED_WHATSAPP_NUMBERS['1171737406016871'],
+        PRESERVED_WHATSAPP_NUMBERS['1298748379987770'],
+    ]
+    # Ensure active configured sender is inspected if non-preserved override is set
+    if configured_phone_id and configured_phone_id not in PRESERVED_WHATSAPP_NUMBERS:
+        preserved_targets.insert(0, {
+            'phone_number_id': configured_phone_id,
+            'waba_id': configured_waba_id,
+            'display_phone_number': configured_phone_display,
+            'business_name': 'Configured Sender',
+            'role': 'configured_override',
+        })
+
+    inspected_numbers = [_inspect_line(t['phone_number_id'], t['waba_id'], t) for t in preserved_targets]
+    primary_line = next((n for n in inspected_numbers if n['phone_number_id'] == configured_phone_id), inspected_numbers[0])
+    primary_phone_info = primary_line.get('_raw_phone') or {}
+    for n in inspected_numbers:
+        n.pop('_raw_phone', None)
+
+    templates_count = primary_line.get('approved_templates_count', 0)
+    total_approved_across_wabas = sum(n.get('approved_templates_count', 0) for n in inspected_numbers)
+    token_health = adapter.check_token_health() if token else {'valid': False, 'expired': False, 'error': 'Missing access token.', 'scopes': [], 'missing_scopes': ['whatsapp_business_messaging', 'whatsapp_business_management']}
+
+    # Discover all accessible WABAs cleanly
     discovered_wabas = []
     if token and include_discovery:
         try:
-            me_biz = requests.get(f"{GRAPH_BASE_URL}/me/businesses", headers=headers, timeout=5).json()
+            me_biz = requests.get(f"{GRAPH_BASE_URL}/me/businesses?fields=id,name,verification_status", headers=headers, timeout=5).json()
             for b in me_biz.get('data', []):
                 bid = b['id']
                 bname = b['name']
                 wr = requests.get(
                     f"{GRAPH_BASE_URL}/{bid}/owned_whatsapp_business_accounts?fields=id,name,phone_numbers{{id,display_phone_number,verified_name,code_verification_status,quality_rating,platform_type,status}}",
                     headers=headers,
-                    timeout=5
+                    timeout=5,
                 ).json()
                 for w in wr.get('data', []):
                     phones = w.get('phone_numbers', {}).get('data', [])
                     discovered_wabas.append({
+                        'business_id': bid,
                         'business_name': bname,
+                        'business_verification_status': b.get('verification_status'),
                         'waba_id': w['id'],
                         'waba_name': w['name'],
-                        'phones': phones
+                        'phones': phones,
                     })
         except Exception as e:
             logger.warning(f"Error discovering Meta WABAs: {facebook_api.sanitize_log_message(str(e))}")
     elif token:
-        # Include known verified alternative discovered WABA (Aidni Global)
-        discovered_wabas = [
-            {
-                'business_name': 'Hrdk Gajjar / Gaatha Ventures',
-                'waba_id': '1370721214882653',
-                'waba_name': 'Gaatha Ventures',
-                'phones': [primary_phone_info] if primary_phone_info else []
-            },
-            {
-                'business_name': 'Aidni Global / Sizzlecraft',
-                'waba_id': '1471882524763501',
-                'waba_name': 'Aidni Global',
+        for line in inspected_numbers:
+            discovered_wabas.append({
+                'business_name': line.get('waba_name') or line.get('business_name'),
+                'waba_id': line['waba_id'],
+                'waba_name': line.get('waba_name') or line.get('business_name'),
                 'phones': [{
-                    'id': '1298748379987770',
-                    'display_phone_number': '+91 98257 28291',
-                    'verified_name': 'Aidni Global',
-                    'status': 'CONNECTED',
-                    'code_verification_status': 'NOT_VERIFIED',
-                    'platform_type': 'CLOUD_API'
-                }]
-            }
-        ]
+                    'id': line['phone_number_id'],
+                    'display_phone_number': line.get('display_phone_number'),
+                    'verified_name': line.get('verified_name'),
+                    'status': line.get('phone_status'),
+                    'code_verification_status': line.get('code_verification_status'),
+                    'platform_type': line.get('platform_type'),
+                    'health_can_send': line.get('health_can_send'),
+                }],
+            })
 
-    # Determine status label and exact diagnostic cause
-    code_ver = primary_phone_info.get('code_verification_status', 'NOT_VERIFIED')
-    plat_type = primary_phone_info.get('platform_type', 'ON_PREMISE')
-    phone_status = primary_phone_info.get('status', 'DISCONNECTED')
+    code_ver = primary_line.get('code_verification_status', 'NOT_VERIFIED')
+    plat_type = primary_line.get('platform_type', 'ON_PREMISE')
+    phone_status = primary_line.get('phone_status', 'DISCONNECTED')
+    health_can_send = primary_line.get('health_can_send', 'BLOCKED')
 
     if not token:
         status_label = STATUS_CREDENTIALS_MISSING
         action_required = "Meta Access Token missing in .env"
-    elif code_ver == 'NOT_VERIFIED' or plat_type == 'ON_PREMISE':
+    elif code_ver == 'NOT_VERIFIED' or plat_type == 'ON_PREMISE' or health_can_send == 'BLOCKED':
         status_label = STATUS_VERIFICATION_REQUIRED
         action_required = (
-            "Phone +91 90990 28291 has platform_type 'ON_PREMISE' and status 'DISCONNECTED'. "
-            "To activate Cloud API: 1) Verify phone via SMS/Voice OTP in Meta WhatsApp Manager. "
-            "2) Migrate to Cloud API. 3) Submit and obtain approval for message templates."
+            f"Configured sender {configured_phone_display} ({plat_type}/{phone_status}) and Cloud API line "
+            f"+91 98257 28291 both currently report Meta health_status '{health_can_send}'. "
+            "Business portfolio 560075574375818 is verified, but WABA billing/payment (141006), timezone (141007), "
+            "phone OTP/PIN verification, Meta template approval (0 approved), and PostPilot webhook secret/subscription remain pending."
         )
     elif templates_count == 0:
         status_label = STATUS_CONNECTED_LIMITED
@@ -460,6 +569,16 @@ def get_whatsapp_integration_status(organization_id: int = 1, include_discovery:
     else:
         status_label = STATUS_CONNECTED
         action_required = "Connected and verified (Safe Standby: WHATSAPP_PUBLISHING_ENABLED=0)."
+
+    local_previews = adapter.get_local_template_previews()
+    manual_checklist = [
+        "1. Add a valid Billing / Payment Method on target WABA in Meta Business Suite -> Billing & Payments (clears Meta error 141006).",
+        "2. Set the WABA Timezone in WhatsApp Manager -> Business Account Settings (clears Meta error 141007).",
+        "3. Verify target phone number via SMS/Voice OTP and enable 2-Step Verification PIN in WhatsApp Manager (clears code_verification_status=NOT_VERIFIED & enables display name approval).",
+        "4. Submit at least 1 Utility/Marketing template (client_welcome, consultation_reminder, or campaign_announcement) under WhatsApp Manager -> Message Templates and await Meta APPROVED status.",
+        "5. Confirm whether +91 90990 28291 (WABA 1370721214882653) should be migrated/linked under verified Business Portfolio 560075574375818 or whether +91 98257 28291 (WABA 1471882524763501, already under verified portfolio 560075574375818) is the primary live sender.",
+        "6. Configure WHATSAPP_APP_SECRET in VPS .env and subscribe Meta App 1397769361108621 to https://postpilot.gaatha.tech/api/webhooks/whatsapp (messages & message_template_status_update fields).",
+    ]
 
     return {
         'success': True,
@@ -473,18 +592,25 @@ def get_whatsapp_integration_status(organization_id: int = 1, include_discovery:
         'code_verification_status': code_ver,
         'platform_type': plat_type,
         'phone_status': phone_status,
+        'health_can_send': health_can_send,
+        'health_errors': primary_line.get('health_errors', []),
         'approved_templates_count': templates_count,
+        'total_approved_templates_count': total_approved_across_wabas,
+        'local_preview_templates_count': len(local_previews),
         'publishing_enabled': config.is_platform_publishing_enabled('whatsapp'),
+        'automatic_brand_binding': False,
+        'token_health': token_health,
+        'webhook_status': {
+            'endpoint': '/api/webhooks/whatsapp',
+            'app_secret_configured': bool(creds.get('app_secret')),
+            'verify_token_configured': bool(creds.get('verify_token')),
+            'postpilot_app_subscribed': any(n.get('postpilot_webhook_subscribed') for n in inspected_numbers),
+        },
+        'numbers': inspected_numbers,
         'status_label': status_label,
         'action_required': action_required,
         'discovered_wabas': discovered_wabas,
-        'manual_action_checklist': [
-            "Log in to Meta Business Manager (business.facebook.com) as an Administrator.",
-            "Navigate to WhatsApp Manager -> Account Tools -> Phone Numbers.",
-            "Locate +91 90990 28291 and click 'Verify' to receive an SMS or Voice OTP.",
-            "Complete 2-step verification and confirm Cloud API registration.",
-            "Navigate to Message Templates and submit templates for approval (e.g. client_welcome, campaign_announcement)."
-        ]
+        'manual_action_checklist': manual_checklist,
     }
 
 
