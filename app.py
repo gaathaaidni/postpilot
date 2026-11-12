@@ -1019,13 +1019,22 @@ def whatsapp_simulate_route():
     if not valid:
         return jsonify({'success': False, 'error': val_err}), 400
 
+    from platform_adapters.whatsapp import PRESERVED_WHATSAPP_NUMBERS, PREFERRED_PHONE_NUMBER_ID, LEGACY_DISCONNECTED_PHONE_NUMBER_ID
+    requested_pid = str(data.get('phone_number_id') or PREFERRED_PHONE_NUMBER_ID).strip()
+    if requested_pid not in PRESERVED_WHATSAPP_NUMBERS:
+        return jsonify({'success': False, 'error': f"Unknown WhatsApp sender phone_number_id '{requested_pid}'."}), 400
     res = adapter.send_template(
         recipient_phone=recipient,
         template_name=template_name,
         language_code=language_code,
         variables=variables,
-        phone_number_id=data.get('phone_number_id'),
+        phone_number_id=requested_pid,
     )
+    if res.get('success'):
+        res['selected_account'] = PRESERVED_WHATSAPP_NUMBERS[requested_pid]
+        if requested_pid == LEGACY_DISCONNECTED_PHONE_NUMBER_ID:
+            res['sender_warning'] = 'Selected account +91 90990 28291 is ON_PREMISE/DISCONNECTED and preserved in standby only.'
+
     return jsonify(res), (200 if res.get('success') else 400)
 
 

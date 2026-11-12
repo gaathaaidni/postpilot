@@ -24,23 +24,37 @@ logger = logging.getLogger(__name__)
 GRAPH_API_VERSION = "v19.0"
 WHATSAPP_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
-# Preserved WABA / Phone assets (never removed, reassigned, or modified automatically)
-DEFAULT_WABA_ID = "1370721214882653"
-DEFAULT_PHONE_NUMBER = "+919099028291"
+# Preserved WABA / Phone assets (never removed, reassigned, migrated, or auto-bound to brands)
+PREFERRED_PHONE_NUMBER_ID = "1298748379987770"
+PREFERRED_WABA_ID = "1471882524763501"
+LEGACY_DISCONNECTED_PHONE_NUMBER_ID = "1171737406016871"
+LEGACY_DISCONNECTED_WABA_ID = "1370721214882653"
+
+DEFAULT_WABA_ID = LEGACY_DISCONNECTED_WABA_ID
+DEFAULT_PHONE_NUMBER = "+919825728291"
+
 PRESERVED_WHATSAPP_NUMBERS = {
-    "1171737406016871": {
-        "phone_number_id": "1171737406016871",
-        "waba_id": "1370721214882653",
-        "display_phone_number": "+91 90990 28291",
-        "business_name": "Gaatha Ventures",
-        "role": "configured_default",
-    },
     "1298748379987770": {
         "phone_number_id": "1298748379987770",
         "waba_id": "1471882524763501",
         "display_phone_number": "+91 98257 28291",
         "business_name": "Aidni Global",
-        "role": "preserved_cloud_api_line",
+        "role": "preferred_candidate",
+        "is_preferred_candidate": True,
+        "is_disconnected_legacy": False,
+        "expected_platform_type": "CLOUD_API",
+        "notes": "Cloud API connected candidate retained for future broadcasting once Meta verification, billing, timezone, and templates are ready.",
+    },
+    "1171737406016871": {
+        "phone_number_id": "1171737406016871",
+        "waba_id": "1370721214882653",
+        "display_phone_number": "+91 90990 28291",
+        "business_name": "Gaatha Ventures",
+        "role": "preserved_disconnected",
+        "is_preferred_candidate": False,
+        "is_disconnected_legacy": True,
+        "expected_platform_type": "ON_PREMISE",
+        "notes": "Preserved ON_PREMISE/DISCONNECTED account currently referenced in .env WHATSAPP_PHONE_NUMBER_ID. Never activated for dispatch.",
     },
 }
 
@@ -69,7 +83,7 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
         self._templates_cache: List[Dict[str, Any]] = []
 
     def get_credentials(self) -> Dict[str, Any]:
-        """Resolves WhatsApp Cloud API credentials and sender pinning from environment without exposing secrets."""
+        """Resolves WhatsApp credentials and dual-account metadata without exposing secrets."""
         wa_tok = (os.getenv('WHATSAPP_ACCESS_TOKEN') or '').strip()
         fb_tok = (getattr(config, 'FB_ACCESS_TOKEN', None) or os.getenv('FB_ACCESS_TOKEN') or '').strip()
         token = wa_tok or fb_tok or None
@@ -77,13 +91,13 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
 
         active_override = (os.getenv('WHATSAPP_ACTIVE_PHONE_NUMBER_ID') or '').strip()
         configured_phone_id = (os.getenv('WHATSAPP_PHONE_NUMBER_ID') or '').strip()
-        phone_id = active_override or configured_phone_id or None
+        phone_id = active_override or configured_phone_id or PREFERRED_PHONE_NUMBER_ID
 
+        configured_waba_id = (os.getenv('WHATSAPP_BUSINESS_ACCOUNT_ID') or os.getenv('WHATSAPP_WABA_ID') or '').strip()
         waba_id = (
             os.getenv('WHATSAPP_ACTIVE_WABA_ID')
-            or os.getenv('WHATSAPP_BUSINESS_ACCOUNT_ID')
-            or os.getenv('WHATSAPP_WABA_ID')
-            or DEFAULT_WABA_ID
+            or configured_waba_id
+            or PREFERRED_WABA_ID
         ).strip()
 
         inactive_raw = (os.getenv('WHATSAPP_INACTIVE_PHONE_NUMBER_IDS') or '').strip()
@@ -95,28 +109,44 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
             'access_token': token,
             'token_source': token_source,
             'phone_number_id': phone_id,
+            'env_phone_number_id': configured_phone_id or None,
+            'env_waba_id': configured_waba_id or None,
+            'preferred_phone_number_id': PREFERRED_PHONE_NUMBER_ID,
+            'preferred_waba_id': PREFERRED_WABA_ID,
             'waba_id': waba_id,
             'inactive_phone_number_ids': inactive_ids,
             'app_secret': app_secret,
             'verify_token': verify_token,
         }
 
-    def validate_sender(self, requested_phone_number_id: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
+    def validate_sender(
+        self,
+        requested_phone_number_id: Optional[str] = None,
+        allow_preserved_sandbox: bool = False,
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Enforces strict sender-number isolation without mutating .env or falling back silently.
-        Returns (is_valid, resolved_phone_number_id, error_message).
+        Live publishing NEVER activates the disconnected ON_PREMISE account (1171737406016871).
+        Sandbox previews may inspect/simulate either registered account when allow_preserved_sandbox=True.
         """
         creds = self.get_credentials()
         configured = creds.get('phone_number_id')
+        active_override = (os.getenv('WHATSAPP_ACTIVE_PHONE_NUMBER_ID') or '').strip() or None
         inactive_ids = creds.get('inactive_phone_number_ids') or set()
 
-        target = str(requested_phone_number_id).strip() if requested_phone_number_id else configured
+        target = str(requested_phone_number_id).strip() if requested_phone_number_id else (active_override or PREFERRED_PHONE_NUMBER_ID if allow_preserved_sandbox else configured)
         if not target:
             return False, None, "No WhatsApp sender phone_number_id is configured."
         if target in inactive_ids:
             return False, None, f"Sender phone_number_id '{target}' is explicitly marked inactive and cannot dispatch."
+
+        if allow_preserved_sandbox and target in PRESERVED_WHATSAPP_NUMBERS and not active_override:
+            return True, target, None
+
         if requested_phone_number_id and configured and target != configured:
             return False, None, f"Sender mismatch: '{target}' does not match configured active sender '{configured}'."
+        if target == LEGACY_DISCONNECTED_PHONE_NUMBER_ID and config.is_platform_publishing_enabled('whatsapp'):
+            return False, None, "Account +91 90990 28291 (1171737406016871) is ON_PREMISE/DISCONNECTED and preserved in standby; cannot activate for live messaging."
         return True, target, None
 
     def validate_connection(self, **kwargs) -> Dict[str, Any]:
@@ -454,7 +484,8 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
         if not valid_phone:
             return {'success': False, 'error': normalized_phone}
 
-        sender_ok, phone_number_id, sender_err = self.validate_sender(kwargs.get('phone_number_id'))
+        is_sandbox = not config.is_platform_publishing_enabled('whatsapp')
+        sender_ok, phone_number_id, sender_err = self.validate_sender(kwargs.get('phone_number_id'), allow_preserved_sandbox=is_sandbox)
         if not sender_ok:
             return {'success': False, 'error': sender_err}
 

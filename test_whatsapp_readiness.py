@@ -285,6 +285,70 @@ class TestWhatsAppReadiness(unittest.TestCase):
         self.assertFalse(brand_res['success'])
         self.assertIn('Cross-brand inheritance blocked', brand_res['error'])
 
+    def test_09_dual_account_representation_and_policy(self):
+        import integrations_service
+        from pathlib import Path
+
+        with patch.dict(os.environ, {'FB_ACCESS_TOKEN': ''}):
+            status = integrations_service.get_whatsapp_integration_status(organization_id=1)
+
+        self.assertTrue(status['success'])
+        self.assertFalse(status['automatic_brand_binding'])
+        self.assertEqual(status['preferred_phone_id'], '1298748379987770')
+        self.assertEqual(status['preferred_waba_id'], '1471882524763501')
+        self.assertIn('why_90990_appeared', status['config_diagnosis'])
+
+        accounts = status.get('accounts') or []
+        self.assertEqual(len(accounts), 2)
+        by_pid = {a['phone_number_id']: a for a in accounts}
+        self.assertIn('1298748379987770', by_pid)
+        self.assertIn('1171737406016871', by_pid)
+
+        pref = by_pid['1298748379987770']
+        disc = by_pid['1171737406016871']
+        self.assertEqual(pref['waba_id'], '1471882524763501')
+        self.assertEqual(disc['waba_id'], '1370721214882653')
+        self.assertTrue(pref['is_preferred_candidate'])
+        self.assertFalse(pref['messaging_eligibility']['eligible'])
+        self.assertFalse(disc['messaging_eligibility']['eligible'])
+        self.assertIsNone(pref['brand_assignment'])
+        self.assertIsNone(disc['brand_assignment'])
+
+        # Disconnected legacy number 1171737406016871 must never be activated for live dispatch
+        with patch.object(config, 'is_platform_publishing_enabled', return_value=True), \
+             patch.dict(os.environ, {'WHATSAPP_PHONE_NUMBER_ID': '1171737406016871'}):
+            ok_live, _, err_live = self.adapter.validate_sender('1171737406016871', allow_preserved_sandbox=False)
+            self.assertFalse(ok_live)
+            self.assertIn('DISCONNECTED', err_live)
+
+        # Sandbox simulate defaults to preferred candidate 1298748379987770 and warns if disconnected selected
+        self._login()
+        with patch.object(config, 'is_platform_publishing_enabled', return_value=False):
+            r_def = self.client.post(
+                '/api/whatsapp/simulate',
+                json={'recipient_phone': '+91 98257 28291', 'template_name': 'client_welcome', 'message': 'Hi'},
+                headers={'X-CSRFToken': 'test_csrf_token'},
+            )
+            self.assertEqual(r_def.status_code, 200)
+            self.assertEqual(json.loads(r_def.data)['sender_phone_number_id'], '1298748379987770')
+
+            r_leg = self.client.post(
+                '/api/whatsapp/simulate',
+                json={'recipient_phone': '+91 98257 28291', 'template_name': 'client_welcome', 'message': 'Hi', 'phone_number_id': '1171737406016871'},
+                headers={'X-CSRFToken': 'test_csrf_token'},
+            )
+            self.assertEqual(r_leg.status_code, 200)
+            d_leg = json.loads(r_leg.data)
+            self.assertEqual(d_leg['sender_phone_number_id'], '1171737406016871')
+            self.assertIn('sender_warning', d_leg)
+
+        # UI safety: simulated dispatches never labeled as delivered; dual accounts & selector present
+        js_src = (Path(__file__).resolve().parent / 'static/script.js').read_text(encoding='utf-8')
+        self.assertNotIn('Delivered (Simulated)', js_src)
+        for token in ('wa-sender-select', '1298748379987770', '1471882524763501', '1171737406016871', '1370721214882653', 'Billing Readiness', 'Messaging Eligibility'):
+            self.assertIn(token, js_src)
+
 
 if __name__ == '__main__':
     unittest.main()
+
