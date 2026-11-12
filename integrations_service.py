@@ -36,61 +36,124 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
     """
     Discovers all Facebook Pages and linked Instagram Professional accounts
     accessible with the configured Meta token.
-    Determines publishing permissions, linked Instagram accounts, and active brand mappings.
-    Zero credential exposure.
+    Distinguishes Connected, Read-Access Verified, Publishing-Ready,
+    Publishing-Disabled, and Authentication-Failure states without exposing secrets.
     """
     token = getattr(config, 'FB_ACCESS_TOKEN', None) or os.getenv('FB_ACCESS_TOKEN')
     if not token or not token.strip():
         return {
             'success': False,
+            'authentication_failure': True,
+            'token_valid': False,
+            'token_health': {'valid': False, 'error': 'Meta Access Token (FB_ACCESS_TOKEN) missing'},
             'error': 'Meta Access Token (FB_ACCESS_TOKEN) is not configured in .env',
             'status_label': STATUS_CREDENTIALS_MISSING,
             'pages': [],
-            'instagram_accounts': []
+            'instagram_accounts': [],
+            'configured_pages_inventory': getattr(config, 'VERIFIED_META_PAGES', {}),
+            'configured_instagram_inventory': getattr(config, 'VERIFIED_META_INSTAGRAM_ACCOUNTS', {}),
         }
 
     headers = {'Authorization': f'Bearer {token.strip()}'}
 
-    # 1. Inspect token debug information
+    # 1. Inspect token debug information cleanly (no secrets logged or returned)
     token_valid = False
-    token_scopes = []
+    token_scopes: List[str] = []
+    token_health: Dict[str, Any] = {'valid': False, 'expired': False, 'scopes': []}
     try:
         dbg_res = requests.get(
             f"{GRAPH_BASE_URL}/debug_token",
             params={'input_token': token.strip(), 'access_token': token.strip()},
             timeout=10
         ).json()
-        dbg_data = dbg_res.get('data', {})
-        token_valid = bool(dbg_data.get('is_valid'))
-        token_scopes = dbg_data.get('scopes', [])
+        dbg_data = dbg_res.get('data', {}) if isinstance(dbg_res, dict) else {}
+        if 'error' in dbg_res or not dbg_data:
+            dbg_err = (dbg_res.get('error') or {}).get('message', 'Token inspection failed') if isinstance(dbg_res, dict) else 'Invalid response'
+            token_health = {'valid': False, 'expired': False, 'error': facebook_api.sanitize_log_message(dbg_err), 'scopes': []}
+        else:
+            expires_at = int(dbg_data.get('expires_at') or 0)
+            is_expired = (expires_at > 0 and expires_at <= int(time.time()))
+            token_valid = bool(dbg_data.get('is_valid')) and not is_expired
+            token_scopes = dbg_data.get('scopes', []) or []
+            token_health = {
+                'valid': token_valid,
+                'expired': is_expired,
+                'type': dbg_data.get('type'),
+                'app_id': dbg_data.get('app_id'),
+                'application': dbg_data.get('application'),
+                'expires_at': expires_at,
+                'expires_never': expires_at == 0,
+                'data_access_expires_at': dbg_data.get('data_access_expires_at'),
+                'scopes': token_scopes,
+                'error': facebook_api.sanitize_log_message(str((dbg_data.get('error') or {}).get('message') or '')) if dbg_data.get('error') else None,
+            }
     except Exception as e:
-        logger.warning(f"Could not query Meta debug_token: {facebook_api.sanitize_log_message(str(e))}")
+        safe_err = facebook_api.sanitize_log_message(str(e))
+        token_health = {'valid': False, 'expired': False, 'error': safe_err, 'scopes': []}
+        logger.warning(f"Could not query Meta debug_token: {safe_err}")
 
-    # 2. Retrieve all accessible Facebook Pages
+    if token_health.get('error') and not token_valid and token_health.get('app_id'):
+        return {
+            'success': False,
+            'authentication_failure': True,
+            'token_valid': False,
+            'token_health': token_health,
+            'error': token_health['error'],
+            'status_label': STATUS_AUTHENTICATION_REQUIRED,
+            'pages': [],
+            'instagram_accounts': [],
+            'configured_pages_inventory': getattr(config, 'VERIFIED_META_PAGES', {}),
+            'configured_instagram_inventory': getattr(config, 'VERIFIED_META_INSTAGRAM_ACCOUNTS', {}),
+        }
+
+    # 2. Retrieve all accessible Facebook Pages & linked Instagram Business Accounts
     try:
         pages_res = requests.get(
-            f"{GRAPH_BASE_URL}/me/accounts?fields=id,name,category,tasks,is_published,can_post",
+            f"{GRAPH_BASE_URL}/me/accounts",
+            params={
+                'fields': (
+                    'id,name,category,tasks,is_published,can_post,'
+                    'connected_instagram_account{id,username,name,profile_picture_url,followers_count,media_count},'
+                    'instagram_business_account{id,username,name,profile_picture_url,followers_count,media_count}'
+                ),
+                'limit': 100,
+            },
             headers=headers,
             timeout=15
         ).json()
-        if 'error' in pages_res:
-            err_msg = pages_res['error'].get('message', 'Failed to retrieve accounts from Meta Graph API')
+        if isinstance(pages_res, dict) and 'error' in pages_res:
+            err_obj = pages_res.get('error') or {}
+            err_msg = facebook_api.sanitize_log_message(str(err_obj.get('message') or 'Failed to retrieve accounts from Meta Graph API'))
+            err_code = err_obj.get('code')
+            is_auth_fail = (err_code in (190, 102, 2500)) or ('oauth' in str(err_obj.get('type', '')).lower()) or ('token' in err_msg.lower()) or not token_valid
+            token_health['valid'] = False
+            token_health['error'] = err_msg
             return {
                 'success': False,
+                'authentication_failure': is_auth_fail,
+                'token_valid': False,
+                'token_health': token_health,
                 'error': err_msg,
-                'status_label': STATUS_DISCONNECTED,
+                'status_label': STATUS_AUTHENTICATION_REQUIRED if is_auth_fail else STATUS_DISCONNECTED,
                 'pages': [],
-                'instagram_accounts': []
+                'instagram_accounts': [],
+                'configured_pages_inventory': getattr(config, 'VERIFIED_META_PAGES', {}),
+                'configured_instagram_inventory': getattr(config, 'VERIFIED_META_INSTAGRAM_ACCOUNTS', {}),
             }
-        raw_pages = pages_res.get('data', [])
+        raw_pages = pages_res.get('data', []) if isinstance(pages_res, dict) else []
     except Exception as e:
         safe_e = facebook_api.sanitize_log_message(str(e))
         return {
             'success': False,
+            'authentication_failure': False,
+            'token_valid': token_valid,
+            'token_health': token_health,
             'error': f"Network error contacting Meta Graph API: {safe_e}",
             'status_label': STATUS_DISCONNECTED,
             'pages': [],
-            'instagram_accounts': []
+            'instagram_accounts': [],
+            'configured_pages_inventory': getattr(config, 'VERIFIED_META_PAGES', {}),
+            'configured_instagram_inventory': getattr(config, 'VERIFIED_META_INSTAGRAM_ACCOUNTS', {}),
         }
 
     # Get existing mappings from database
@@ -98,10 +161,12 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
     fb_mappings = {str(a['account_identifier']): a for a in existing_accounts if a['platform'] == 'facebook'}
     ig_mappings = {str(a['account_identifier']): a for a in existing_accounts if a['platform'] == 'instagram'}
 
-    # Get brands map
     with database.get_db_connection() as conn:
         brands_rows = conn.execute("SELECT id, name, slug FROM brands WHERE organization_id = ?", (organization_id,)).fetchall()
         brands_map = {b['id']: dict(b) for b in brands_rows}
+
+    fb_pub_enabled = config.is_platform_publishing_enabled('facebook')
+    ig_pub_enabled = config.is_platform_publishing_enabled('instagram')
 
     discovered_pages = []
     discovered_ig_accounts = []
@@ -111,33 +176,35 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
         name = p.get('name', 'Unnamed Page')
         category = p.get('category', 'General')
         tasks = p.get('tasks', [])
-        can_post = bool(p.get('can_post', True))
 
-        # Check publishing permissions
-        # In Meta Graph API, administrative publishing as the Page requires CREATE_CONTENT or MANAGE task
-        # and pages_manage_posts scope on the token (can_post field only refers to visitor wall posting).
         has_manage = 'MANAGE' in tasks or 'CREATE_CONTENT' in tasks
         has_scope = 'pages_manage_posts' in token_scopes or len(token_scopes) == 0
         can_publish = has_manage and has_scope
 
-        # Mapping status
         mapping = fb_mappings.get(pid)
         assigned_brand_id = mapping['brand_id'] if mapping else None
         assigned_brand_name = brands_map.get(assigned_brand_id, {}).get('name') if assigned_brand_id else None
 
-        # Determine status label
+        read_verified = True
+        pub_disabled = not fb_pub_enabled
+        pub_ready = bool(can_publish and assigned_brand_id and fb_pub_enabled and (token_valid or len(token_scopes) == 0))
+
         if not can_publish:
             status_label = STATUS_CONNECTED_LIMITED
             action_required = "Page lacks CREATE_CONTENT or MANAGE task permission on Meta."
+            account_state = 'read_access_verified'
+        elif pub_disabled:
+            status_label = STATUS_CONNECTED
+            action_required = "Connected and read-verified (Safe Standby: Facebook publishing disabled)."
+            account_state = 'publishing_disabled'
         elif not assigned_brand_id:
             status_label = STATUS_CONNECTED
             action_required = "Page accessible and verified. Assign to a GAATHA brand workspace to enable publishing."
-        elif config.is_platform_publishing_enabled('facebook'):
+            account_state = 'read_access_verified'
+        else:
             status_label = STATUS_LIVE_READY
             action_required = None
-        else:
-            status_label = STATUS_CONNECTED
-            action_required = "Connected and verified (Safe Standby: Facebook publishing disabled)."
+            account_state = 'publishing_ready'
 
         page_record = {
             'id': pid,
@@ -146,6 +213,12 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
             'category': category,
             'tasks': tasks,
             'can_publish': can_publish,
+            'connected': True,
+            'read_access_verified': read_verified,
+            'publishing_ready': pub_ready,
+            'publishing_disabled': pub_disabled,
+            'authentication_failure': False,
+            'account_state': account_state,
             'assigned_brand_id': assigned_brand_id,
             'assigned_brand_name': assigned_brand_name,
             'account_id': mapping['id'] if mapping else None,
@@ -155,69 +228,90 @@ def discover_meta_properties(organization_id: int = 1) -> Dict[str, Any]:
         }
         discovered_pages.append(page_record)
 
-        # Check linked Instagram account
-        try:
-            ig_res = requests.get(
-                f"{GRAPH_BASE_URL}/{pid}?fields=instagram_business_account{{id,username,name,profile_picture_url,followers_count,media_count}}",
-                headers=headers,
-                timeout=10
-            ).json()
-            ig_data = ig_res.get('instagram_business_account')
-            if ig_data:
-                ig_id = str(ig_data['id'])
-                ig_user = ig_data.get('username', '')
-                ig_name = ig_data.get('name', '')
-                followers = ig_data.get('followers_count', 0)
-                media_count = ig_data.get('media_count', 0)
+        # Check linked Instagram account (inline first, fallback query only when omitted)
+        ig_data = p.get('connected_instagram_account') or p.get('instagram_business_account')
+        if ig_data is None:
+            try:
+                ig_res = requests.get(
+                    f"{GRAPH_BASE_URL}/{pid}?fields=connected_instagram_account{{id,username,name,profile_picture_url,followers_count,media_count}},instagram_business_account{{id,username,name,profile_picture_url,followers_count,media_count}}",
+                    headers=headers,
+                    timeout=10
+                ).json()
+                ig_data = ig_res.get('connected_instagram_account') or ig_res.get('instagram_business_account')
+            except Exception as e:
+                logger.warning(f"Could not fetch linked Instagram for page {pid}: {facebook_api.sanitize_log_message(str(e))}")
 
-                ig_mapping = ig_mappings.get(ig_id)
-                ig_brand_id = ig_mapping['brand_id'] if ig_mapping else None
-                ig_brand_name = brands_map.get(ig_brand_id, {}).get('name') if ig_brand_id else None
+        if isinstance(ig_data, dict) and ig_data.get('id'):
+            ig_id = str(ig_data['id'])
+            ig_user = ig_data.get('username', '')
+            ig_name = ig_data.get('name', '')
+            followers = ig_data.get('followers_count', 0)
+            media_count = ig_data.get('media_count', 0)
 
-                ig_can_publish = ('instagram_content_publish' in token_scopes or len(token_scopes) == 0) and can_publish
+            ig_mapping = ig_mappings.get(ig_id)
+            ig_brand_id = ig_mapping['brand_id'] if ig_mapping else None
+            ig_brand_name = brands_map.get(ig_brand_id, {}).get('name') if ig_brand_id else None
 
-                if not ig_can_publish:
-                    ig_status_label = STATUS_CONNECTED_LIMITED
-                    ig_action = "Missing instagram_content_publish scope on Meta."
-                elif not ig_brand_id:
-                    ig_status_label = STATUS_CONNECTED
-                    ig_action = f"Linked to '{name}'. Assign to a GAATHA brand workspace to enable publishing."
-                elif config.is_platform_publishing_enabled('instagram'):
-                    ig_status_label = STATUS_LIVE_READY
-                    ig_action = None
-                else:
-                    ig_status_label = STATUS_CONNECTED
-                    ig_action = "Connected and verified (Instagram publishing disabled / media required)."
+            ig_can_publish = ('instagram_content_publish' in token_scopes or len(token_scopes) == 0) and can_publish
+            ig_read_verified = True
+            ig_pub_disabled = not ig_pub_enabled
+            ig_pub_ready = bool(ig_can_publish and ig_brand_id and ig_pub_enabled and (token_valid or len(token_scopes) == 0))
 
-                discovered_ig_accounts.append({
-                    'id': ig_id,
-                    'username': f"@{ig_user}" if ig_user and not ig_user.startswith('@') else ig_user,
-                    'name': ig_name or f"@{ig_user}",
-                    'platform': 'instagram',
-                    'linked_facebook_page_id': pid,
-                    'linked_facebook_page_name': name,
-                    'followers_count': followers,
-                    'media_count': media_count,
-                    'can_publish': ig_can_publish,
-                    'assigned_brand_id': ig_brand_id,
-                    'assigned_brand_name': ig_brand_name,
-                    'account_id': ig_mapping['id'] if ig_mapping else None,
-                    'status_label': ig_status_label,
-                    'action_required': ig_action,
-                    'last_verified_at': ig_mapping.get('last_verified_at') if ig_mapping else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                })
-        except Exception as e:
-            logger.warning(f"Could not fetch linked Instagram for page {pid}: {facebook_api.sanitize_log_message(str(e))}")
+            if not ig_can_publish:
+                ig_status_label = STATUS_CONNECTED_LIMITED
+                ig_action = "Missing instagram_content_publish scope on Meta."
+                ig_state = 'read_access_verified'
+            elif ig_pub_disabled:
+                ig_status_label = STATUS_CONNECTED
+                ig_action = f"Linked to '{name}' and read-verified (Instagram publishing disabled)."
+                ig_state = 'publishing_disabled'
+            elif not ig_brand_id:
+                ig_status_label = STATUS_CONNECTED
+                ig_action = f"Linked to '{name}'. Assign to a GAATHA brand workspace to enable publishing."
+                ig_state = 'read_access_verified'
+            else:
+                ig_status_label = STATUS_LIVE_READY
+                ig_action = None
+                ig_state = 'publishing_ready'
+
+            discovered_ig_accounts.append({
+                'id': ig_id,
+                'username': f"@{ig_user}" if ig_user and not ig_user.startswith('@') else ig_user,
+                'name': ig_name or f"@{ig_user}",
+                'platform': 'instagram',
+                'linked_facebook_page_id': pid,
+                'linked_facebook_page_name': name,
+                'followers_count': followers,
+                'media_count': media_count,
+                'can_publish': ig_can_publish,
+                'connected': True,
+                'read_access_verified': ig_read_verified,
+                'publishing_ready': ig_pub_ready,
+                'publishing_disabled': ig_pub_disabled,
+                'authentication_failure': False,
+                'account_state': ig_state,
+                'assigned_brand_id': ig_brand_id,
+                'assigned_brand_name': ig_brand_name,
+                'account_id': ig_mapping['id'] if ig_mapping else None,
+                'status_label': ig_status_label,
+                'action_required': ig_action,
+                'last_verified_at': ig_mapping.get('last_verified_at') if ig_mapping else datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            })
 
     return {
         'success': True,
+        'authentication_failure': False,
         'organization_id': organization_id,
         'token_valid': token_valid,
+        'token_health': token_health,
         'token_scopes': token_scopes,
+        'status_label': STATUS_LIVE_READY if fb_pub_enabled else STATUS_CONNECTED,
         'pages_count': len(discovered_pages),
         'instagram_count': len(discovered_ig_accounts),
         'pages': discovered_pages,
-        'instagram_accounts': discovered_ig_accounts
+        'instagram_accounts': discovered_ig_accounts,
+        'configured_pages_inventory': getattr(config, 'VERIFIED_META_PAGES', {}),
+        'configured_instagram_inventory': getattr(config, 'VERIFIED_META_INSTAGRAM_ACCOUNTS', {}),
     }
 
 

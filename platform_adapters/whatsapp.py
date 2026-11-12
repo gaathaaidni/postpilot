@@ -136,10 +136,10 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
         target = str(requested_phone_number_id).strip() if requested_phone_number_id else configured
         if not target:
             return False, None, "No WhatsApp sender phone_number_id is configured."
-        if target in inactive_ids:
-            return False, None, f"Sender phone_number_id '{target}' is explicitly marked inactive and cannot dispatch."
         if target == LEGACY_DISCONNECTED_PHONE_NUMBER_ID:
             return False, None, "Secondary account +91 90990 28291 (1171737406016871) is preserved in read-only standby and is not offered for broadcasting."
+        if target in inactive_ids:
+            return False, None, f"Sender phone_number_id '{target}' is explicitly marked inactive and cannot dispatch."
         if requested_phone_number_id and configured and target != configured:
             return False, None, f"Sender mismatch: '{target}' does not match preferred sender '{configured}'."
         return True, target, None

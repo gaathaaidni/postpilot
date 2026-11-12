@@ -79,14 +79,32 @@ LOCAL_MODE = (os.getenv('LOCAL_MODE', '1') == '1') if APP_ENV in ('development',
 ADMIN_USERNAME = os.getenv('ADMIN_USERNAME', 'admin')
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123' if APP_ENV in ('development', 'termux') else '')
 
-# Social API Credentials & Page IDs
+# Social API Credentials & Verified Meta Assets (Business Portfolio: 560075574375818)
+META_BUSINESS_PORTFOLIO_ID = os.getenv('META_BUSINESS_PORTFOLIO_ID', '560075574375818')
 FB_ACCESS_TOKEN = os.getenv('FB_ACCESS_TOKEN') or os.getenv('FB_TOKEN')
 FB_PAGE_ID_SUITE = os.getenv('FB_PAGE_ID_SUITE', os.getenv('TOUR_PAGE_ID', '967550829768297'))
 FB_PAGE_ID_PHOENIX = os.getenv('FB_PAGE_ID_PHOENIX', os.getenv('VISA_PAGE_ID', '954901604381882'))
-FB_PAGE_ID_GAATHA_AI = os.getenv('FB_PAGE_ID_GAATHA_AI', os.getenv('FB_PAGE_ID_GAATHA', '1028368893692590'))
+FB_PAGE_ID_GAATHA_AI = os.getenv('FB_PAGE_ID_GAATHA_AI', '1028368893692590')
+FB_PAGE_ID_GRAHAK_CHETNA = os.getenv('FB_PAGE_ID_GRAHAK_CHETNA', '374211199112915')
+FB_PAGE_ID_GAATHA = os.getenv('FB_PAGE_ID_GAATHA', '178168346255851')
 
 INSTA_ID_SUITE = os.getenv('INSTA_ID_SUITE', '17841449080283492')
-INSTA_ID_PHOENIX = os.getenv('INSTA_ID_PHOENIX', '17841472248438802')
+INSTA_ID_PHOENIX = os.getenv('INSTA_ID_PHOENIX', '17841471822022390')
+INSTA_ID_GRAHAK_CHETNA = os.getenv('INSTA_ID_GRAHAK_CHETNA', '17841467723671727')
+
+VERIFIED_META_PAGES = {
+    '1028368893692590': {'name': 'Gaatha AI', 'env_key': 'FB_PAGE_ID_GAATHA_AI', 'slug': 'gaatha_ai', 'instagram_id': None},
+    '954901604381882': {'name': 'Pheonix by Aidni Global LLP', 'env_key': 'FB_PAGE_ID_PHOENIX', 'slug': 'phoenix', 'instagram_id': '17841471822022390'},
+    '967550829768297': {'name': 'Gaatha Suite', 'env_key': 'FB_PAGE_ID_SUITE', 'slug': 'suite', 'instagram_id': '17841449080283492'},
+    '374211199112915': {'name': 'Grahak Chetna', 'env_key': 'FB_PAGE_ID_GRAHAK_CHETNA', 'slug': 'grahak_chetna', 'instagram_id': '17841467723671727'},
+    '178168346255851': {'name': 'Gaatha', 'env_key': 'FB_PAGE_ID_GAATHA', 'slug': 'gaatha', 'instagram_id': None},
+}
+
+VERIFIED_META_INSTAGRAM_ACCOUNTS = {
+    '17841471822022390': {'username': 'phoenixbygaatha', 'brand': 'Phoenix', 'env_key': 'INSTA_ID_PHOENIX', 'facebook_page_id': '954901604381882'},
+    '17841449080283492': {'username': 'gaathasuite', 'brand': 'Gaatha Suite', 'env_key': 'INSTA_ID_SUITE', 'facebook_page_id': '967550829768297'},
+    '17841467723671727': {'username': 'grahak.chetna', 'brand': 'Grahak Chetna', 'env_key': 'INSTA_ID_GRAHAK_CHETNA', 'facebook_page_id': '374211199112915'},
+}
 
 # LinkedIn Dual-Application OAuth 2.0 & API Configuration
 LINKEDIN_REDIRECT_URI = os.getenv('LINKEDIN_REDIRECT_URI', 'https://postpilot.gaatha.tech/api/auth/linkedin/callback')

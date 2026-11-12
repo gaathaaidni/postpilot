@@ -860,12 +860,12 @@ def init_default_social_accounts():
 
         default_accounts = [
             (1, b1_id, 'facebook', 'GAATHA Suite', str(config.FB_PAGE_ID_SUITE or '967550829768297'), 'connected', 'pages_manage_posts,pages_read_engagement', None),
-            (1, b1_id, 'instagram', '@nexora_suite', str(config.INSTA_ID_SUITE or '17841471822022390'), 'connected', 'instagram_basic,instagram_content_publish', None),
+            (1, b1_id, 'instagram', '@gaathasuite', str(config.INSTA_ID_SUITE or '17841449080283492'), 'connected', 'instagram_basic,instagram_content_publish', None),
             (1, b1_id, 'linkedin', 'Aidni Global LLP', '145240694', 'connected', 'w_member_social,w_organization_social', 'aidni_global'),
             (1, b1_id, 'linkedin', 'Gaatha Ventures Sh.p.k.', '145250613', 'connected', 'w_member_social,w_organization_social', 'gaatha_ventures'),
             (1, b1_id, 'whatsapp', 'GAATHA WhatsApp Business', str(getattr(config, 'WHATSAPP_PHONE_NUMBER_ID', None) or '103290292839210'), 'connected', 'whatsapp_business_messaging', None),
-            (1, b5_id, 'facebook', 'Phoenix International', str(config.FB_PAGE_ID_PHOENIX or '100089146197321'), 'connected', 'pages_manage_posts,pages_read_engagement', None),
-            (1, b5_id, 'instagram', '@phoenixbygaatha', str(config.INSTA_ID_PHOENIX or '17841405309211880'), 'connected', 'instagram_basic,instagram_content_publish', None),
+            (1, b5_id, 'facebook', 'Pheonix by Aidni Global LLP', str(config.FB_PAGE_ID_PHOENIX or '954901604381882'), 'connected', 'pages_manage_posts,pages_read_engagement', None),
+            (1, b5_id, 'instagram', '@phoenixbygaatha', str(config.INSTA_ID_PHOENIX or '17841471822022390'), 'connected', 'instagram_basic,instagram_content_publish', None),
         ]
 
         for org_id, brand_id, platform, acct_name, acct_id, status, scope, app_id in default_accounts:
@@ -895,6 +895,60 @@ def init_default_social_accounts():
             except Exception as e:
                 logger.warning(f"Notice seeding social account {platform}:{acct_id}: {e}")
         conn.commit()
+
+
+def reconcile_verified_meta_accounts(organization_id: int = 1):
+    """
+    Non-destructively reconciles verified Facebook Pages & Instagram Business accounts
+    to matching organization brand workspaces without creating duplicates, altering Brands 2/3/4
+    isolation, modifying LinkedIn, or binding WhatsApp senders to brands.
+    """
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        brands = {
+            r['slug']: r['id']
+            for r in conn.execute("SELECT id, slug FROM brands WHERE organization_id = ?", (org_id,)).fetchall()
+        }
+
+        b_suite = brands.get('gaatha-suite') or 1
+        b_phoenix = brands.get('phoenix-by-gaatha')
+        b_ai = brands.get('gaatha-ai')
+
+        targets = [
+            (b_suite, 'facebook', 'Gaatha Suite', str(getattr(config, 'FB_PAGE_ID_SUITE', '967550829768297')), 'pages_manage_posts,pages_read_engagement'),
+            (b_suite, 'instagram', '@gaathasuite', str(getattr(config, 'INSTA_ID_SUITE', '17841449080283492')), 'instagram_basic,instagram_content_publish'),
+        ]
+        if b_phoenix:
+            targets.extend([
+                (b_phoenix, 'facebook', 'Pheonix by Aidni Global LLP', str(getattr(config, 'FB_PAGE_ID_PHOENIX', '954901604381882')), 'pages_manage_posts,pages_read_engagement'),
+                (b_phoenix, 'instagram', '@phoenixbygaatha', str(getattr(config, 'INSTA_ID_PHOENIX', '17841471822022390')), 'instagram_basic,instagram_content_publish'),
+            ])
+        if b_ai:
+            targets.append(
+                (b_ai, 'facebook', 'Gaatha AI', str(getattr(config, 'FB_PAGE_ID_GAATHA_AI', '1028368893692590')), 'pages_manage_posts,pages_read_engagement')
+            )
+
+        updated = 0
+        for brand_id, plat, acct_name, acct_id, scope in targets:
+            if not acct_id:
+                continue
+            existing = conn.execute(
+                "SELECT id FROM social_accounts WHERE organization_id = ? AND brand_id = ? AND platform = ? AND account_identifier = ?",
+                (org_id, brand_id, plat, acct_id),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE social_accounts SET account_name = ?, status = 'connected', permissions_scope = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (acct_name, scope, existing['id']),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO social_accounts (organization_id, brand_id, platform, account_name, account_identifier, status, permissions_scope) VALUES (?, ?, ?, ?, ?, 'connected', ?)",
+                    (org_id, brand_id, plat, acct_name, acct_id, scope),
+                )
+            updated += 1
+        conn.commit()
+        return updated
 
 def get_social_accounts(organization_id=1, brand_id=None, platform=None):
     """

@@ -30,11 +30,11 @@ class FacebookAdapter(BasePlatformAdapter):
         """Returns map of configured Facebook Pages from config and synced FB_PAGE_ID_* env vars."""
         pages = {}
         known_defs = [
-            ('suite', 'FB_PAGE_ID_SUITE', 'GAATHA Suite', getattr(config, 'FB_PAGE_ID_SUITE', None)),
-            ('phoenix', 'FB_PAGE_ID_PHOENIX', 'Phoenix by Aidni Global LLP', getattr(config, 'FB_PAGE_ID_PHOENIX', None)),
-            ('gaatha_ai', 'FB_PAGE_ID_GAATHA_AI', 'Gaatha AI', getattr(config, 'FB_PAGE_ID_GAATHA_AI', None)),
-            ('gaatha', 'FB_PAGE_ID_GAATHA', 'Gaatha', None),
-            ('grahak_chetna', 'FB_PAGE_ID_GRAHAK_CHETNA', 'Grahak Chetna', None),
+            ('suite', 'FB_PAGE_ID_SUITE', 'Gaatha Suite', getattr(config, 'FB_PAGE_ID_SUITE', '967550829768297')),
+            ('phoenix', 'FB_PAGE_ID_PHOENIX', 'Pheonix by Aidni Global LLP', getattr(config, 'FB_PAGE_ID_PHOENIX', '954901604381882')),
+            ('gaatha_ai', 'FB_PAGE_ID_GAATHA_AI', 'Gaatha AI', getattr(config, 'FB_PAGE_ID_GAATHA_AI', '1028368893692590')),
+            ('grahak_chetna', 'FB_PAGE_ID_GRAHAK_CHETNA', 'Grahak Chetna', getattr(config, 'FB_PAGE_ID_GRAHAK_CHETNA', '374211199112915')),
+            ('gaatha', 'FB_PAGE_ID_GAATHA', 'Gaatha', getattr(config, 'FB_PAGE_ID_GAATHA', '178168346255851')),
         ]
         for key, env_key, label, cfg_val in known_defs:
             val = os.getenv(env_key) or cfg_val

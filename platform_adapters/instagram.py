@@ -32,9 +32,9 @@ class InstagramAdapter(BasePlatformAdapter):
         """Returns map of configured Instagram Professional accounts from config and synced INSTA_ID_* env vars."""
         accounts = {}
         known_defs = [
-            ('suite', 'INSTA_ID_SUITE', '@gaathasuite', getattr(config, 'INSTA_ID_SUITE', None), os.getenv('FB_PAGE_ID_SUITE') or getattr(config, 'FB_PAGE_ID_SUITE', None)),
-            ('phoenix', 'INSTA_ID_PHOENIX', '@phoenixbygaatha', getattr(config, 'INSTA_ID_PHOENIX', None), os.getenv('FB_PAGE_ID_PHOENIX') or getattr(config, 'FB_PAGE_ID_PHOENIX', None)),
-            ('grahak_chetna', 'INSTA_ID_GRAHAK_CHETNA', '@grahak.chetna', None, os.getenv('FB_PAGE_ID_GRAHAK_CHETNA')),
+            ('phoenix', 'INSTA_ID_PHOENIX', '@phoenixbygaatha', getattr(config, 'INSTA_ID_PHOENIX', '17841471822022390'), os.getenv('FB_PAGE_ID_PHOENIX') or getattr(config, 'FB_PAGE_ID_PHOENIX', '954901604381882')),
+            ('suite', 'INSTA_ID_SUITE', '@gaathasuite', getattr(config, 'INSTA_ID_SUITE', '17841449080283492'), os.getenv('FB_PAGE_ID_SUITE') or getattr(config, 'FB_PAGE_ID_SUITE', '967550829768297')),
+            ('grahak_chetna', 'INSTA_ID_GRAHAK_CHETNA', '@grahak.chetna', getattr(config, 'INSTA_ID_GRAHAK_CHETNA', '17841467723671727'), os.getenv('FB_PAGE_ID_GRAHAK_CHETNA') or getattr(config, 'FB_PAGE_ID_GRAHAK_CHETNA', '374211199112915')),
         ]
         for key, env_key, username, cfg_val, linked_pid in known_defs:
             val = os.getenv(env_key) or cfg_val
@@ -57,6 +57,29 @@ class InstagramAdapter(BasePlatformAdapter):
                         'env_key': env_key
                     }
         return accounts
+
+    def get_linked_facebook_page_id(self, ig_user_id: Optional[str]) -> Optional[str]:
+        """Returns the verified linked Facebook Page ID for a configured Instagram account."""
+        target = str(ig_user_id or '').strip()
+        if not target:
+            return None
+        for info in self.get_configured_accounts().values():
+            if info.get('ig_user_id') == target and info.get('linked_page_id'):
+                return str(info['linked_page_id'])
+        verified = getattr(config, 'VERIFIED_META_INSTAGRAM_ACCOUNTS', {})
+        if target in verified:
+            return verified[target].get('facebook_page_id')
+        return None
+
+    def get_account_for_facebook_page(self, page_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Returns Instagram account metadata linked to a given Facebook Page ID."""
+        target_pid = str(page_id or '').strip()
+        if not target_pid:
+            return None
+        for key, info in self.get_configured_accounts().items():
+            if str(info.get('linked_page_id') or '').strip() == target_pid:
+                return {'key': key, **info}
+        return None
 
     def resolve_ig_user_id(
         self,

@@ -1048,21 +1048,28 @@ function updateGatewayTilesFromBackend(intData, statusData, accounts) {
     const meta = (intData && intData.meta) || {};
     const fbPages = Array.isArray(meta.pages) ? meta.pages : [];
     const igAccounts = Array.isArray(meta.instagram_accounts) ? meta.instagram_accounts : [];
-    const metaHealthy = meta.status === 'connected' || fbPages.length > 0;
+    const metaAuthFailed = Boolean(meta.authentication_failure || (meta.success === false && meta.token_valid === false));
+    const metaHealthy = !metaAuthFailed && (meta.status === 'connected' || fbPages.length > 0);
 
     const fbBadge = document.getElementById('tile-facebook-badge');
     const fbMeta = document.getElementById('tile-facebook-meta');
     const fbGuard = document.getElementById('tile-facebook-guardrail');
     if (fbBadge) {
-        fbBadge.className = `badge ${metaHealthy ? 'badge-published' : 'badge-warning'}`;
-        fbBadge.innerHTML = metaHealthy
-            ? `<i class="fa-solid fa-circle-check"></i> ${fbPages.length || 0} Page${fbPages.length === 1 ? '' : 's'} Linked`
-            : `<i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(meta.status_label || 'Check Meta Token')}`;
+        fbBadge.className = `badge ${metaAuthFailed ? 'badge-failed' : (metaHealthy ? 'badge-published' : 'badge-warning')}`;
+        fbBadge.innerHTML = metaAuthFailed
+            ? `<i class="fa-solid fa-key"></i> ${escapeHtml(meta.status_label || 'Authentication Failure')}`
+            : (metaHealthy
+                ? `<i class="fa-solid fa-circle-check"></i> ${fbPages.length || 0} Page${fbPages.length === 1 ? '' : 's'} Linked`
+                : `<i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(meta.status_label || 'Check Meta Token')}`);
     }
     if (fbMeta) {
-        fbMeta.innerHTML = fbPages.length > 0
-            ? `<span><strong>Accessible Pages:</strong> ${fbPages.slice(0, 3).map(p => escapeHtml(p.name || p.id)).join(', ')}${fbPages.length > 3 ? ` (+${fbPages.length - 3})` : ''}</span>`
-            : `<span>No active Pages returned by Meta Graph API check.</span>`;
+        if (metaAuthFailed) {
+            fbMeta.innerHTML = `<span style="color: var(--danger);"><strong>Auth Failure:</strong> ${escapeHtml(meta.error || 'Meta token validation failed')}</span>`;
+        } else {
+            fbMeta.innerHTML = fbPages.length > 0
+                ? `<span><strong>Accessible Pages (${fbPages.length}):</strong> ${fbPages.slice(0, 3).map(p => escapeHtml(p.name || p.id)).join(', ')}${fbPages.length > 3 ? ` (+${fbPages.length - 3})` : ''}</span>`
+                : `<span>No active Pages returned by Meta Graph API check.</span>`;
+        }
     }
     if (fbGuard) fbGuard.innerHTML = fbGuardHtml;
 
@@ -1070,16 +1077,22 @@ function updateGatewayTilesFromBackend(intData, statusData, accounts) {
     const igMeta = document.getElementById('tile-instagram-meta');
     const igGuard = document.getElementById('tile-instagram-guardrail');
     if (igBadge) {
-        const igOk = igAccounts.length > 0;
-        igBadge.className = `badge ${igOk ? 'badge-published' : 'badge-warning'}`;
-        igBadge.innerHTML = igOk
-            ? `<i class="fa-solid fa-circle-check"></i> ${igAccounts.length} Profile${igAccounts.length === 1 ? '' : 's'}`
-            : `<i class="fa-solid fa-triangle-exclamation"></i> No IG Profiles`;
+        const igOk = !metaAuthFailed && igAccounts.length > 0;
+        igBadge.className = `badge ${metaAuthFailed ? 'badge-failed' : (igOk ? 'badge-published' : 'badge-warning')}`;
+        igBadge.innerHTML = metaAuthFailed
+            ? `<i class="fa-solid fa-key"></i> Auth Failure`
+            : (igOk
+                ? `<i class="fa-solid fa-circle-check"></i> ${igAccounts.length} Profile${igAccounts.length === 1 ? '' : 's'} (Read Verified)`
+                : `<i class="fa-solid fa-triangle-exclamation"></i> No IG Profiles`);
     }
     if (igMeta) {
-        igMeta.innerHTML = igAccounts.length > 0
-            ? `<span><strong>Linked Profiles:</strong> ${igAccounts.slice(0, 3).map(a => `@${escapeHtml(a.username || a.id)}`).join(', ')}</span>`
-            : `<span>Link an Instagram Professional profile via Facebook Page settings.</span>`;
+        if (metaAuthFailed) {
+            igMeta.innerHTML = `<span style="color: var(--danger);"><strong>Auth Failure:</strong> ${escapeHtml(meta.error || 'Reconnect Meta token')}</span>`;
+        } else {
+            igMeta.innerHTML = igAccounts.length > 0
+                ? `<span><strong>Linked Profiles:</strong> ${igAccounts.slice(0, 3).map(a => `@${escapeHtml(String(a.username || a.id).replace(/^@/, ''))}`).join(', ')}</span>`
+                : `<span>Link an Instagram Professional profile via Facebook Page settings.</span>`;
+        }
     }
     if (igGuard) igGuard.innerHTML = igGuardHtml;
 
@@ -1810,12 +1823,21 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        ${getIntegrationsStatusBadge(meta.status_label || (meta.token_valid ? 'Connected' : 'Credentials Configured'), meta.action_required)}
+                        ${getIntegrationsStatusBadge(meta.authentication_failure ? 'Authentication Required' : (meta.status_label || (meta.token_valid ? 'Connected' : 'Credentials Configured')), meta.error)}
+                        <span class="badge ${meta.token_valid ? 'badge-info' : 'badge-failed'}">
+                            <i class="fa-solid ${meta.token_valid ? 'fa-shield-check' : 'fa-triangle-exclamation'}"></i> ${meta.token_valid ? `Token Valid (${meta.token_health && meta.token_health.expires_never ? 'Non-Expiring' : 'Scoped'})` : 'Authentication Failure'}
+                        </span>
                         <span class="badge badge-info">
                             <i class="fa-solid fa-layer-group"></i> ${pages.length} Pages &middot; ${igAccounts.length} Instagram
                         </span>
                     </div>
                 </div>
+                ${meta.authentication_failure && meta.error ? `
+                    <div class="notice-callout notice-callout--danger" style="margin-top: 0.85rem;">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <div><strong>Meta Token Error:</strong> ${escapeHtml(meta.error)}</div>
+                    </div>
+                ` : ''}
             </div>
 
             <!-- Facebook Pages Section -->
@@ -1853,6 +1875,15 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                                     <div class="account-detail-item">
                                         <span class="account-detail-label">Page ID</span>
                                         <code class="account-detail-value">${escapeHtml(p.id)}</code>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Account State</span>
+                                        <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                                            <span class="badge ${p.read_access_verified ? 'badge-info' : 'badge-neutral'}">${p.read_access_verified ? 'Read Verified' : 'Unverified'}</span>
+                                            <span class="badge ${p.publishing_ready ? 'badge-published' : (p.publishing_disabled ? 'badge-warning' : 'badge-neutral')}">
+                                                ${p.publishing_ready ? 'Publishing Ready' : (p.publishing_disabled ? 'Publishing Disabled' : 'Standby')}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div class="account-detail-item">
                                         <span class="account-detail-label">Publishing Capability</span>
@@ -1932,13 +1963,22 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                                     </div>
                                     <div class="account-detail-item">
                                         <span class="account-detail-label">Linked Facebook Page</span>
-                                        <span class="account-detail-value" style="font-size: 0.85rem;">${escapeHtml(ig.linked_facebook_page_name || 'N/A')}</span>
+                                        <span class="account-detail-value" style="font-size: 0.85rem;">${escapeHtml(ig.linked_facebook_page_name || 'N/A')} ${ig.linked_facebook_page_id ? `(<code>${escapeHtml(ig.linked_facebook_page_id)}</code>)` : ''}</span>
                                     </div>
                                     <div class="account-detail-item">
                                         <span class="account-detail-label">Audience &amp; Media</span>
                                         <span class="account-detail-value" style="font-size: 0.85rem;">
-                                            ${ig.followers_count !== undefined ? Number(ig.followers_count).toLocaleString() : '0'} followers · ${ig.media_count || 0} posts
+                                            ${ig.followers_count !== undefined ? Number(ig.followers_count).toLocaleString() : '0'} followers &middot; ${ig.media_count ?? 0} posts
                                         </span>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Account State</span>
+                                        <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                                            <span class="badge ${ig.read_access_verified ? 'badge-info' : 'badge-neutral'}">${ig.read_access_verified ? 'Read Verified' : 'Unverified'}</span>
+                                            <span class="badge ${ig.publishing_ready ? 'badge-published' : (ig.publishing_disabled ? 'badge-warning' : 'badge-neutral')}">
+                                                ${ig.publishing_ready ? 'Publishing Ready' : (ig.publishing_disabled ? 'Publishing Disabled' : 'Standby')}
+                                            </span>
+                                        </div>
                                     </div>
                                     <div class="account-detail-item">
                                         <span class="account-detail-label">Publishing Eligibility</span>
