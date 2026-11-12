@@ -7285,7 +7285,7 @@ let waDualAccountsCache = [
         timezone_status: 'UNKNOWN',
         health_can_send: 'UNKNOWN',
         approved_templates_count: 0,
-        messaging_eligibility: { status: 'UNKNOWN', eligible: false, reason: 'Cached placeholder â€” awaiting live Meta Graph API check' },
+        messaging_eligibility: { status: 'UNKNOWN', eligible: false, reason: 'Cached placeholder — awaiting live Meta Graph API check' },
         billing_readiness: { status: 'UNKNOWN', ready: 'UNKNOWN', reason: 'UNKNOWN (awaiting live Meta check)' },
         template_readiness: { status: 'UNKNOWN', meta_approved_count: 'UNKNOWN', local_preview_count: 4 }
     },
@@ -7361,7 +7361,7 @@ function _renderDualWhatsAppAccountCards(accounts) {
             ? '<span class="badge badge-info"><i class="fa-solid fa-star"></i> Only Preferred Sender</span>'
             : '<span class="badge badge-neutral"><i class="fa-solid fa-lock"></i> Preserved Secondary &middot; Not Offered</span>';
 
-        const regState = (acc.platform_type === 'UNKNOWN' || acc.phone_status === 'UNKNOWN') ? 'UNKNOWN' : `${acc.platform_type} Â· ${acc.phone_status}`;
+        const regState = (acc.platform_type === 'UNKNOWN' || acc.phone_status === 'UNKNOWN') ? 'UNKNOWN' : `${acc.platform_type} · ${acc.phone_status}`;
         const regBadgeCls = regState === 'UNKNOWN' ? 'badge-neutral' : (acc.phone_status === 'CONNECTED' ? 'badge-success' : 'badge-warning');
         const cacheBadge = isCached ? '<span class="badge badge-neutral">CACHED</span>' : '<span class="badge badge-info">CONFIRMED LIVE</span>';
 
@@ -7454,7 +7454,7 @@ function renderWhatsAppView(container) {
                         <i class="fa-solid fa-tower-observation" style="color: var(--primary);"></i> Registered WhatsApp Business Accounts (Independent Tracking)
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <span id="wa-cache-status-pill" class="badge badge-neutral">CACHED Â· Checking Live Meta...</span>
+                        <span id="wa-cache-status-pill" class="badge badge-neutral">CACHED · Checking Live Meta...</span>
                         <span id="wa-templates-meta-pill" class="badge badge-neutral">Meta Templates: UNKNOWN</span>
                         <span id="wa-webhook-meta-pill" class="badge badge-neutral">Webhook: UNKNOWN</span>
                         <span id="wa-token-meta-pill" class="badge badge-neutral">Token: UNKNOWN</span>
@@ -7499,10 +7499,10 @@ function renderWhatsAppView(container) {
                     </div>
 
                     <div style="margin-bottom: 1rem;">
-                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Message Template (Local Previews â€” Not Meta-Approved)</label>
+                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Message Template (Local Previews — Not Meta-Approved)</label>
                         <select id="wa-template-select" class="form-control" style="font-size: 0.88rem;" onchange="handleWATemplateChange(this.value)">
                             ${Object.keys(WA_TEMPLATES).map(k => `
-                                <option value="${k}" ${k === waSelectedTemplate ? 'selected' : ''}>${WA_TEMPLATES[k].label} (${WA_TEMPLATES[k].category} Â· Local Preview)</option>
+                                <option value="${k}" ${k === waSelectedTemplate ? 'selected' : ''}>${WA_TEMPLATES[k].label} (${WA_TEMPLATES[k].category} · Local Preview)</option>
                             `).join('')}
                         </select>
                     </div>
@@ -7538,14 +7538,14 @@ function renderWhatsAppView(container) {
                                     <div id="wa-mockup-header-name" style="font-size: 0.88rem; font-weight: 700; color: #e9edef; display: flex; align-items: center; gap: 0.3rem;">
                                         ${escapeHtml(selAcc.verified_name || 'Aidni Global')}
                                     </div>
-                                    <div id="wa-mockup-header-sub" style="font-size: 0.72rem; color: #fbbf24;">Sandbox Preview (${escapeHtml(selAcc.display_phone_number)}) Â· Not Sent</div>
+                                    <div id="wa-mockup-header-sub" style="font-size: 0.72rem; color: #fbbf24;">Sandbox Preview (${escapeHtml(selAcc.display_phone_number)}) · Not Sent</div>
                                 </div>
                             </div>
                         </div>
 
                         <div style="min-height: 220px; display: flex; flex-direction: column; justify-content: flex-end; padding: 0.5rem 0;">
                             <div style="text-align: center; margin-bottom: 1rem;">
-                                <span style="background: #182229; color: #fbbf24; font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 6px;">SANDBOX PREVIEW ONLY Â· NOT SENT TO META</span>
+                                <span style="background: #182229; color: #fbbf24; font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 6px;">SANDBOX PREVIEW ONLY · NOT SENT TO META</span>
                             </div>
 
                             <div style="align-self: flex-end; max-width: 90%; background: #005c4b; color: #e9edef; padding: 0.65rem 0.85rem; border-radius: 10px 10px 2px 10px; font-size: 0.84rem; line-height: 1.45; box-shadow: 0 1px 2px rgba(0,0,0,0.3); word-break: break-word; position: relative;">
@@ -7561,7 +7561,7 @@ function renderWhatsAppView(container) {
                     <!-- Sandbox Simulation Log (explicitly never shown as delivered) -->
                     <div class="card" style="margin-top: 1.25rem; padding: 1rem;">
                         <h4 style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.6rem; color: var(--text-muted); text-transform: uppercase;">
-                            <i class="fa-solid fa-flask"></i> Sandbox Simulation Log (Local Only Â· Not Meta Delivery)
+                            <i class="fa-solid fa-flask"></i> Sandbox Simulation Log (Local Only · Not Meta Delivery)
                         </h4>
                         <div id="wa-activity-log" style="display: flex; flex-direction: column; gap: 0.4rem;">
                             ${waSimulatedLogs.length === 0 ? '<div style="font-size: 0.78rem; color: var(--text-muted);">No sandbox simulations run yet. Local simulations never send external WhatsApp messages.</div>' : ''}
@@ -7620,14 +7620,14 @@ function renderWhatsAppView(container) {
             const liveApproved = tplData ? (tplData.meta_approved_count ?? 0) : (wa.approved_templates_count ?? 0);
             const localCount = tplData ? (tplData.local_previews_count ?? 4) : (wa.local_preview_templates_count ?? 4);
             tplPill.className = `badge ${liveApproved > 0 ? 'badge-published' : 'badge-warning'}`;
-            tplPill.textContent = `Meta Templates: ${liveApproved} Approved Â· ${localCount} Local Previews`;
+            tplPill.textContent = `Meta Templates: ${liveApproved} Approved · ${localCount} Local Previews`;
         }
         if (whPill && wa.webhook_status) {
             const whReady = wa.webhook_status.app_secret_configured && wa.webhook_status.postpilot_app_subscribed;
             whPill.className = `badge ${whReady ? 'badge-published' : 'badge-warning'}`;
             whPill.textContent = whReady
                 ? 'Webhook: Subscribed & Signed'
-                : `Webhook: ${wa.webhook_status.app_secret_configured ? 'Secret OK' : 'Secret Missing'} Â· ${wa.webhook_status.postpilot_app_subscribed ? 'Subscribed' : 'Not Subscribed'}`;
+                : `Webhook: ${wa.webhook_status.app_secret_configured ? 'Secret OK' : 'Secret Missing'} · ${wa.webhook_status.postpilot_app_subscribed ? 'Subscribed' : 'Not Subscribed'}`;
         }
         if (tokPill && wa.token_health) {
             const tokOk = !!wa.token_health.valid;
@@ -7650,17 +7650,17 @@ function handleWASenderChange(senderId, silent) {
         nameEl.textContent = `${acc.verified_name || acc.business_name || 'WhatsApp Business'} (${acc.is_preferred_candidate ? 'Preferred Candidate' : 'Preserved Disconnected'})`;
     }
     if (metaEl) {
-        metaEl.textContent = `${acc.display_phone_number} Â· WABA ${acc.waba_id} Â· ${acc.platform_type} / ${acc.phone_status} Â· No Auto Brand Binding`;
+        metaEl.textContent = `${acc.display_phone_number} · WABA ${acc.waba_id} · ${acc.platform_type} / ${acc.phone_status} · No Auto Brand Binding`;
     }
     if (noteEl) {
         if (acc.is_disconnected_legacy || acc.platform_type === 'ON_PREMISE') {
-            noteEl.innerHTML = '<span style="color: var(--warning);"><strong>Notice:</strong> +91 90990 28291 is ON_PREMISE / DISCONNECTED and preserved only â€” it will NEVER be activated. Sandbox preview stays local.</span>';
+            noteEl.innerHTML = '<span style="color: var(--warning);"><strong>Notice:</strong> +91 90990 28291 is ON_PREMISE / DISCONNECTED and preserved only — it will NEVER be activated. Sandbox preview stays local.</span>';
         } else {
             noteEl.textContent = 'Preferred future broadcasting candidate (+91 98257 28291) selected for sandbox simulation; live dispatch blocked pending readiness & WHATSAPP_PUBLISHING_ENABLED=0.';
         }
     }
     if (mockName) mockName.textContent = acc.verified_name || 'Aidni Global';
-    if (mockSub) mockSub.textContent = `Sandbox Preview (${acc.display_phone_number}) Â· Not Sent`;
+    if (mockSub) mockSub.textContent = `Sandbox Preview (${acc.display_phone_number}) · Not Sent`;
     if (!silent) {
         showToast(`Selected sender preview: ${acc.display_phone_number} (Sandbox Only)`, 'info');
     }

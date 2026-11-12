@@ -544,7 +544,7 @@ def get_whatsapp_integration_status(organization_id: int = 1, include_discovery:
                 blockers.append("0 approved templates")
             if not postpilot_wh_sub or postpilot_wh_sub == 'UNKNOWN':
                 blockers.append("PostPilot webhook unsubscribed")
-            elig_reason = f"CONNECTED is not send permission â€” restricted on Meta ({'; '.join(blockers)})"
+            elig_reason = f"CONNECTED is not send permission — restricted on Meta ({'; '.join(blockers)})"
         elif not pub_enabled:
             state_cls = 'CONFIRMED_STANDBY'
             elig_status = 'STANDBY'
@@ -617,7 +617,7 @@ def get_whatsapp_integration_status(organization_id: int = 1, include_discovery:
             'connection_status': {
                 'platform_type': plat_type,
                 'phone_status': phone_status,
-                'label': f"{plat_type} Â· {phone_status}",
+                'label': f"{plat_type} · {phone_status}",
             },
             'verification_status': {
                 'business_verified': (True if (biz_ver_status == 'verified' or business_entity_available is True) else ('UNKNOWN' if biz_ver_status == 'UNKNOWN' else False)),
