@@ -108,6 +108,7 @@ VERIFIED_META_INSTAGRAM_ACCOUNTS = {
 
 # LinkedIn Dual-Application OAuth 2.0 & API Configuration
 LINKEDIN_REDIRECT_URI = os.getenv('LINKEDIN_REDIRECT_URI', 'https://postpilot.gaatha.tech/api/auth/linkedin/callback')
+LINKEDIN_API_VERSION = os.getenv('LINKEDIN_API_VERSION', '202610').strip()
 
 # Aidni Global LLP
 LINKEDIN_CLIENT_ID_AIDNI_GLOBAL_LLP = os.getenv('LINKEDIN_CLIENT_ID_AIDNI_GLOBAL_LLP') or os.getenv('LINKEDIN_CLIENT_ID_AIDNI_GLOBAL')
@@ -194,6 +195,19 @@ def get_enabled_publishing_platforms():
     """Returns canonical platform keys currently authorized for live dispatch."""
     return [p for p in PUBLISHING_CONTROL_PLATFORMS if is_platform_publishing_enabled(p)]
 
+def is_linkedin_personal_publishing_enabled():
+    """Checks whether explicit user-approved personal LinkedIn profile sharing is enabled."""
+    if not is_publishing_enabled():
+        return False
+    return _parse_optional_bool_env('POSTPILOT_LINKEDIN_PERSONAL_PUBLISHING_ENABLED') is True
+
+def is_linkedin_company_publishing_enabled():
+    """Checks whether LinkedIn Company Page publishing is enabled (requires platform flag + non-zero company flag)."""
+    if not is_platform_publishing_enabled('linkedin'):
+        return False
+    explicit = _parse_optional_bool_env('POSTPILOT_LINKEDIN_COMPANY_PUBLISHING_ENABLED')
+    return True if explicit is None else explicit
+
 def get_publishing_controls_summary():
     """Returns non-secret runtime publishing control summary across all supported channels."""
     platforms = {p: is_platform_publishing_enabled(p) for p in PUBLISHING_CONTROL_PLATFORMS}
@@ -202,6 +216,8 @@ def get_publishing_controls_summary():
         'allowed_platforms': [p for p, enabled in platforms.items() if enabled],
         'platforms': platforms,
         'whatsapp_enabled': platforms['whatsapp'],
+        'linkedin_personal_enabled': is_linkedin_personal_publishing_enabled(),
+        'linkedin_company_enabled': is_linkedin_company_publishing_enabled(),
     }
 
 # Default posting intervals in seconds

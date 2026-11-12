@@ -2016,18 +2016,40 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
         `;
 
         // =========================================================================
-        // 2. LINKEDIN ENTERPRISE ECOSYSTEM (DUAL APPLICATIONS)
+        // 2. LINKEDIN ECOSYSTEM (PERSONAL PROFILE & INDEPENDENT COMPANY PAGES)
         // =========================================================================
         const liApps = linkedin.apps || [];
+        const liDestinations = linkedin.destinations || [];
+        const liApiVersion = linkedin.api_version || '202610';
+        const humanizeTtl = (secs) => {
+            const s = Number(secs || 0);
+            if (!s || s <= 0) return 'N/A';
+            const days = Math.floor(s / 86400);
+            const hrs = Math.floor((s % 86400) / 3600);
+            return days > 0 ? `${days}d ${hrs}h remaining` : `${hrs}h remaining`;
+        };
+        const getLinkedInDestinationBadge = (dest) => {
+            const label = String(dest?.status_label || 'Unknown');
+            if (label === 'Personal Publishing Ready' || label === 'Organization Publishing Ready') {
+                return `<span class="badge badge-published"><i class="fa-solid fa-circle-check"></i> ${escapeHtml(label)}</span>`;
+            }
+            if (label.includes('Expired') || label.includes('Reauthorization')) {
+                return `<span class="badge badge-failed"><i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(label)}</span>`;
+            }
+            if (label === 'Approval Pending' || label === 'Missing Permission') {
+                return `<span class="badge badge-warning"><i class="fa-solid fa-clock"></i> ${escapeHtml(label)}</span>`;
+            }
+            return `<span class="badge badge-neutral"><i class="fa-solid fa-lock"></i> ${escapeHtml(label)}</span>`;
+        };
         html += `
             <div class="hub-hero hub-hero--linkedin" style="margin-top: 2rem;">
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
                     <div>
                         <h2 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.3rem;">
-                            <i class="fa-brands fa-linkedin" style="color: #0a66c2;"></i> LinkedIn Enterprise Ecosystem (Dual Applications)
+                            <i class="fa-brands fa-linkedin" style="color: #0a66c2;"></i> LinkedIn Ecosystem (Personal Profile &amp; Independent Company Pages)
                         </h2>
                         <p style="font-size: 0.88rem;">
-                            Independent OAuth 2.0 company integrations for Aidni Global LLP and Gaatha Ventures Sh.p.k.
+                            Strict independent destination tracking across Personal LinkedIn Profile, Aidni Global LLP (145240694), and Gaatha Ventures Sh.p.k. (145250613).
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
@@ -2035,20 +2057,85 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                             <i class="fa-solid fa-shield-halved"></i> 3-Legged OAuth Mandatory
                         </span>
                         <span class="badge badge-neutral">
-                            <i class="fa-solid fa-code-branch"></i> REST Posts API
+                            <i class="fa-solid fa-code-branch"></i> REST Posts API (${escapeHtml(liApiVersion)})
                         </span>
                     </div>
                 </div>
             </div>
+
+            ${liDestinations.length ? `
+                <div class="accounts-grid" style="margin-bottom: 1.5rem;">
+                    ${liDestinations.map(dest => {
+                        const isPersonal = dest.destination_type === 'personal';
+                        const isReady = isPersonal ? Boolean(dest.personal_publishing_ready) : Boolean(dest.organization_publishing_ready);
+                        return `
+                            <div class="account-card" id="card-linkedin-dest-${escapeAttr(dest.key)}">
+                                <div class="account-card-header">
+                                    <div class="account-identity">
+                                        <div class="account-avatar" style="background: ${isPersonal ? '#0a66c2' : '#334155'}; color: #fff;">
+                                            <i class="${isPersonal ? 'fa-solid fa-user-tie' : 'fa-solid fa-building'}"></i>
+                                        </div>
+                                        <div class="account-meta">
+                                            <h3>${escapeHtml(dest.label)}</h3>
+                                            <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
+                                                <span class="platform-pill linkedin">
+                                                    <i class="fa-brands fa-linkedin"></i> ${isPersonal ? 'Personal Profile' : 'Company Page'}
+                                                </span>
+                                                ${dest.author_urn ? `<span class="badge badge-neutral">${escapeHtml(dest.author_urn)}</span>` : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    ${getLinkedInDestinationBadge(dest)}
+                                </div>
+                                <div class="account-details-list">
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">OAuth Connection</span>
+                                        <span class="badge ${dest.token_expired ? 'badge-failed' : (dest.connected ? 'badge-success' : 'badge-warning')}">
+                                            ${dest.token_expired ? 'Token Expired' : (dest.connected ? 'Connected' : 'Not Connected')}
+                                        </span>
+                                    </div>
+                                    <div class="account-detail-item">
+                                        <span class="account-detail-label">Identity / Scope State</span>
+                                        <div style="display: flex; gap: 0.3rem; flex-wrap: wrap;">
+                                            <span class="badge ${dest.read_identity_verified ? 'badge-info' : 'badge-warning'}">
+                                                ${dest.read_identity_verified ? 'Read / Identity Verified' : 'Identity Unverified'}
+                                            </span>
+                                            <span class="badge ${isReady ? 'badge-published' : (dest.approval_pending ? 'badge-warning' : 'badge-neutral')}">
+                                                ${isReady ? (isPersonal ? 'Personal Publishing Ready' : 'Organization Publishing Ready') : (dest.approval_pending ? 'Approval Pending' : (dest.publishing_disabled ? 'Publishing Disabled' : 'Missing Permission'))}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    ${dest.missing_permission ? `
+                                        <div class="account-detail-item">
+                                            <span class="account-detail-label">Missing Permission</span>
+                                            <code class="account-detail-value" style="font-size: 0.75rem;">${escapeHtml(dest.missing_permission)}</code>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : ''}
 
             <div class="accounts-grid" style="margin-bottom: 2rem;">
                 ${liApps.map(app => {
                     const scopes = (app.token_scopes && app.token_scopes.length)
                         ? app.token_scopes
                         : (app.requested_scopes || []);
-                    const hasCompanyScope = Boolean(app.company_publishing_ready || scopes.includes('w_organization_social'));
+                    const hasCompanyScope = Boolean(app.company_publishing_authorized || app.company_publishing_ready || scopes.includes('w_organization_social'));
                     let eligibilityBanner = '';
-                    if (!app.user_authenticated) {
+                    if (app.token_expired) {
+                        eligibilityBanner = `
+                            <div class="notice-callout notice-callout--danger" style="margin-top: 0.5rem;">
+                                <i class="fa-solid fa-clock-rotate-left"></i>
+                                <div>
+                                    <strong>Token Expired / Reauthorization Required</strong><br>
+                                    Reconnect this LinkedIn application via OAuth before publishing attempts.
+                                </div>
+                            </div>
+                        `;
+                    } else if (!app.user_authenticated) {
                         eligibilityBanner = `
                             <div class="notice-callout notice-callout--warning" style="margin-top: 0.5rem;">
                                 <i class="fa-solid fa-key"></i>
@@ -2063,8 +2150,8 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                             <div class="notice-callout notice-callout--info" style="margin-top: 0.5rem;">
                                 <i class="fa-solid fa-circle-info"></i>
                                 <div>
-                                    <strong>Personal Posting:</strong> Available via <code>w_member_social</code>.<br>
-                                    <strong>Company Page Posting:</strong> Pending <strong>Community Management API</strong> approval (<code>w_organization_social</code>) in LinkedIn Developer Portal.
+                                    <strong>Personal Posting:</strong> ${app.personal_publishing_ready ? 'Ready (<code>w_member_social</code> + verified identity)' : (app.member_identity_verified ? 'Authorized scope present (check publishing guardrail)' : 'Blocked — lacks OpenID identity scope to verify member URN')}.<br>
+                                    <strong>Company Page Posting:</strong> Blocked — Pending <strong>Community Management API</strong> approval (<code>w_organization_social</code>) with no silent fallback.
                                 </div>
                             </div>
                         `;
@@ -2089,7 +2176,7 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                                     <div class="account-meta">
                                         <h3>${escapeHtml(app.name)}</h3>
                                         <div style="display: flex; gap: 0.35rem; margin-top: 0.2rem; flex-wrap: wrap;">
-                                            <span class="platform-pill linkedin"><i class="fa-brands fa-linkedin"></i> Company Page</span>
+                                            <span class="platform-pill linkedin"><i class="fa-brands fa-linkedin"></i> OAuth App</span>
                                             <span class="badge badge-info">
                                                 Org ID: ${escapeHtml(app.organization_id)}
                                             </span>
@@ -2107,13 +2194,21 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                                     </span>
                                 </div>
                                 <div class="account-detail-item">
-                                    <span class="account-detail-label">Redirect URI</span>
-                                    <code class="account-detail-value" style="font-size: 0.75rem; word-break: break-all;">${escapeHtml(app.redirect_uri)}</code>
-                                </div>
-                                <div class="account-detail-item">
-                                    <span class="account-detail-label">User Authentication</span>
+                                    <span class="account-detail-label">User Authentication &amp; Author URN</span>
                                     <span class="account-detail-value" style="font-size: 0.85rem;">
                                         ${app.user_authenticated ? `<span class="badge badge-success"><i class="fa-solid fa-check"></i> ${escapeHtml(app.authenticated_member || 'Active Member')}</span>` : '<span class="badge badge-warning"><i class="fa-solid fa-key"></i> Unauthenticated (OAuth Required)</span>'}
+                                        ${app.author_urn ? `<br><code style="font-size: 0.72rem;">${escapeHtml(app.author_urn)}</code>` : ''}
+                                    </span>
+                                </div>
+                                <div class="account-detail-item">
+                                    <span class="account-detail-label">Token Lifecycle</span>
+                                    <span class="account-detail-value" style="font-size: 0.8rem;">
+                                        ${app.token_expired
+                                            ? '<span class="badge badge-failed">Expired</span>'
+                                            : (app.token_expires_in ? `<span class="badge badge-info">${escapeHtml(humanizeTtl(app.token_expires_in))}</span>` : '<span class="badge badge-neutral">Not Stored</span>')}
+                                        <span class="badge ${app.refresh_token_available ? 'badge-success' : 'badge-neutral'}" style="margin-left: 0.25rem;">
+                                            ${app.refresh_token_available ? 'Refresh Token Ready' : 'Re-auth Required on Expiry'}
+                                        </span>
                                     </span>
                                 </div>
                                 <div class="account-detail-item">
@@ -2134,6 +2229,11 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                                 <a class="btn btn-sm btn-primary" href="${app.connect_url}" style="flex: 1; text-align: center; text-decoration: none;">
                                     <i class="fa-brands fa-linkedin"></i> ${app.user_authenticated ? 'Reconnect OAuth' : 'Connect via LinkedIn OAuth'}
                                 </a>
+                                ${app.refresh_token_available ? `
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="refreshLinkedInAppToken('${escapeAttr(app.app_key)}')" title="Safely refresh OAuth token">
+                                        <i class="fa-solid fa-arrows-rotate"></i> Refresh
+                                    </button>
+                                ` : ''}
                                 <a class="btn btn-sm btn-secondary" href="${app.connect_url}" title="Start fresh OAuth authorization">
                                     <i class="fa-solid fa-arrow-rotate-right"></i> Re-authorize
                                 </a>
@@ -3621,6 +3721,25 @@ function handleComposerBrandChange(brandId) {
     if (waName) waName.textContent = b.wa;
 }
 
+async function refreshLinkedInAppToken(appKey) {
+    try {
+        const res = await authFetch('/api/linkedin/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ app: appKey })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
+            showToast('LinkedIn access token refreshed safely.', 'success');
+            loadIntegrationsDashboard(true);
+        } else {
+            showToast(data.error || 'LinkedIn refresh token unavailable; re-authorization required.', 'warning');
+        }
+    } catch (e) {
+        showToast('Network error while refreshing LinkedIn token.', 'danger');
+    }
+}
+
 function handleComposerChannelChange(channel) {
     const info = CHANNEL_INFO[channel] || CHANNEL_INFO.tour;
 
@@ -3637,6 +3756,15 @@ function handleComposerChannelChange(channel) {
     if (igPrefix) igPrefix.textContent = info.handle;
     if (igAvatar) igAvatar.textContent = info.name[0];
 
+    // Toggle LinkedIn destination selector & explicit Publish Now button
+    const liDestGroup = document.getElementById('linkedin-destination-group');
+    const publishNowBtn = document.getElementById('publish-now-post-btn');
+    if (liDestGroup) liDestGroup.style.display = channel === 'linkedin' ? 'block' : 'none';
+    if (publishNowBtn) publishNowBtn.style.display = channel === 'linkedin' ? 'inline-flex' : 'none';
+    if (channel === 'linkedin') {
+        syncLinkedInComposerDestinations();
+    }
+
     // Auto-switch preview tab to match selected channel
     const platMap = { 'facebook': 'fb', 'instagram': 'ig', 'linkedin': 'li', 'whatsapp': 'wa' };
     if (platMap[channel]) {
@@ -3646,6 +3774,62 @@ function handleComposerChannelChange(channel) {
     // Refresh char counter with platform limit
     const captionText = document.getElementById('post-message')?.value || '';
     handleCaptionInput(captionText);
+}
+
+let _cachedLinkedInDestinations = [];
+
+async function syncLinkedInComposerDestinations() {
+    const select = document.getElementById('post-linkedin-destination');
+    if (!select) return;
+    try {
+        const intData = await fetchIntegrationsStatusCached(false);
+        const dests = intData?.linkedin?.destinations || [];
+        if (dests.length > 0) {
+            _cachedLinkedInDestinations = dests;
+            const prevVal = select.value;
+            select.innerHTML = dests.map(d => {
+                const label = `${d.label} — ${d.status_label}`;
+                return `<option value="${escapeAttr(d.key)}">${escapeHtml(label)}</option>`;
+            }).join('');
+            if ([...select.options].some(o => o.value === prevVal)) {
+                select.value = prevVal;
+            }
+        }
+    } catch (e) {
+        // Fallback options remain intact
+    }
+    handleLinkedInDestinationChange(select.value);
+}
+
+function handleLinkedInDestinationChange(destValue) {
+    const hintEl = document.getElementById('linkedin-destination-status-hint');
+    const publishNowBtn = document.getElementById('publish-now-post-btn');
+    const dest = (_cachedLinkedInDestinations || []).find(d => d.key === destValue);
+    const liName = document.getElementById('li-preview-name');
+
+    if (dest) {
+        const isPersonal = dest.destination_type === 'personal';
+        const isReady = isPersonal ? Boolean(dest.personal_publishing_ready) : Boolean(dest.organization_publishing_ready);
+        if (liName) liName.textContent = dest.label || 'LinkedIn';
+        if (hintEl) {
+            if (isReady) {
+                hintEl.innerHTML = `<span class="badge badge-published"><i class="fa-solid fa-circle-check"></i> ${escapeHtml(dest.status_label)}</span> Explicit confirmation required before publishing. No fallback to Company Pages.`;
+            } else {
+                const reason = dest.missing_permission
+                    ? `Blocked (${dest.status_label} — missing ${escapeHtml(dest.missing_permission)}). Save as Draft/Schedule only.`
+                    : `Blocked (${dest.status_label}).`;
+                hintEl.innerHTML = `<span class="badge badge-warning"><i class="fa-solid fa-lock"></i> ${escapeHtml(dest.status_label)}</span> ${reason} No silent fallback.`;
+            }
+        }
+        if (publishNowBtn) {
+            publishNowBtn.disabled = !isReady;
+            publishNowBtn.title = isReady
+                ? 'Publish immediately with explicit confirmation'
+                : `Immediate publishing blocked: ${dest.status_label}`;
+        }
+    } else if (hintEl) {
+        hintEl.textContent = 'Strict destination selection enabled (Personal Profile vs Independent Company Pages).';
+    }
 }
 
 function switchPreviewPlatform(platform) {
@@ -3899,6 +4083,100 @@ async function savePost() {
         loadTab('calendar');
     } else if (currentTab === 'queue' && typeof renderQueueView === 'function') {
         loadTab('queue');
+    }
+}
+
+// Explicit User-Confirmed Immediate Publish (never auto-dispatches on Save/Draft)
+async function publishComposerPostNow() {
+    clearModalValidationAlert();
+    const type = document.getElementById('post-type')?.value;
+    const message = document.getElementById('post-message')?.value.trim() || '';
+    const fileInput = document.getElementById('post-file');
+    let filename = document.getElementById('current-image-filename')?.value || '';
+    const brandId = document.getElementById('post-brand')?.value || '1';
+    const destKey = document.getElementById('post-linkedin-destination')?.value || 'personal:aidni_global';
+    const pubBtn = document.getElementById('publish-now-post-btn');
+
+    if (type !== 'linkedin') {
+        showModalValidationAlert('Immediate composer publish here is scoped to LinkedIn destinations.');
+        return;
+    }
+
+    const hasNewFile = fileInput && fileInput.files && fileInput.files.length > 0;
+    if (!message && !hasNewFile && !filename) {
+        showModalValidationAlert('Please enter post copy or attach an image before publishing.');
+        return;
+    }
+
+    const destMeta = (_cachedLinkedInDestinations || []).find(d => d.key === destKey);
+    const isPersonal = destKey.startsWith('personal:');
+    if (destMeta) {
+        const isReady = isPersonal ? Boolean(destMeta.personal_publishing_ready) : Boolean(destMeta.organization_publishing_ready);
+        if (!isReady) {
+            showModalValidationAlert(`Destination is not authorized for publishing (${destMeta.status_label}). No silent fallback will occur.`);
+            return;
+        }
+    }
+
+    const destLabel = destMeta?.label || destKey;
+    const confirmed = window.confirm(
+        `Confirm immediate live LinkedIn publication to:\n\n${destLabel}\n\nClick OK only if you explicitly approve publishing now.`
+    );
+    if (!confirmed) return;
+
+    if (pubBtn) {
+        pubBtn.disabled = true;
+        pubBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Publishing...';
+    }
+
+    try {
+        if (hasNewFile) {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            const uploadRes = await authFetch('/api/upload', { method: 'POST', body: formData });
+            const uploadData = await uploadRes.json().catch(() => ({}));
+            if (!uploadRes.ok || !uploadData.filename) {
+                showModalValidationAlert(uploadData.error || 'Media upload failed before publishing.');
+                return;
+            }
+            filename = uploadData.filename;
+        }
+
+        const [destType, destIdent] = destKey.split(':');
+        const payload = {
+            platform: 'linkedin',
+            post_type: destType === 'personal' ? 'linkedin_personal' : 'linkedin',
+            destination: destType === 'personal' ? 'personal' : 'organization',
+            app_key: destType === 'personal' ? (destIdent || 'aidni_global') : (destIdent === '145240694' ? 'aidni_global' : 'gaatha_ventures'),
+            linkedin_org_id: destType === 'organization' ? destIdent : undefined,
+            brand_id: parseInt(brandId, 10),
+            message,
+            image_filename: filename || null,
+            idempotency_key: `ui_li_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+        };
+
+        const res = await authFetch('/api/publish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+            showModalValidationAlert(data.error || 'LinkedIn publish request rejected.');
+            return;
+        }
+
+        showToast(`Published to LinkedIn (${data.external_post_id || 'post created'})`, 'success');
+        closeModal();
+        if (currentTab === 'linkedin' || currentTab === 'history') loadPosts(currentTab);
+        if (currentTab === 'dashboard') loadDashboardExecutiveMetrics();
+    } catch (e) {
+        showModalValidationAlert('Network error while publishing to LinkedIn.');
+    } finally {
+        if (pubBtn) {
+            pubBtn.disabled = false;
+            pubBtn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Publish Now';
+        }
     }
 }
 

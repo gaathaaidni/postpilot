@@ -324,10 +324,24 @@
                             <select id="post-type" class="form-control" onchange="handleComposerChannelChange(this.value)">
                                 <option value="facebook">Facebook Pages</option>
                                 <option value="instagram">Instagram Professional</option>
-                                <option value="linkedin">LinkedIn Pages</option>
+                                <option value="linkedin">LinkedIn (Personal / Company Pages)</option>
                                 <option value="whatsapp">WhatsApp Business Cloud</option>
                             </select>
                         </div>
+                    </div>
+
+                    <!-- LinkedIn Destination Selector (Personal vs Independent Company Pages) -->
+                    <div class="form-group" id="linkedin-destination-group" style="display: none;">
+                        <label for="post-linkedin-destination" class="form-label">
+                            LinkedIn Destination
+                            <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 400;">(Strict selection — no automatic fallback)</span>
+                        </label>
+                        <select id="post-linkedin-destination" class="form-control" onchange="handleLinkedInDestinationChange(this.value)">
+                            <option value="personal:aidni_global">Personal LinkedIn Profile — Aidni Global App</option>
+                            <option value="organization:145240694">Aidni Global LLP Company Page (Org 145240694)</option>
+                            <option value="organization:145250613">Gaatha Ventures Sh.p.k. Company Page (Org 145250613)</option>
+                        </select>
+                        <div id="linkedin-destination-status-hint" style="margin-top: 0.45rem; font-size: 0.8rem; color: var(--text-secondary);"></div>
                     </div>
 
                     <!-- Optional Scheduling Controls -->
@@ -526,12 +540,15 @@
             </div>
             <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                <div style="display: flex; gap: 0.5rem;">
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                     <button type="button" class="btn btn-secondary" onclick="savePostAsDraft()">
                         <i class="fa-solid fa-file-pen"></i> Save as Draft
                     </button>
                     <button type="button" id="save-post-btn" class="btn btn-primary" onclick="savePost()">
                         <i class="fa-solid fa-calendar-check"></i> Schedule / Save Post
+                    </button>
+                    <button type="button" id="publish-now-post-btn" class="btn btn-primary" onclick="publishComposerPostNow()" style="display: none; background: #0a66c2; border-color: #0a66c2;">
+                        <i class="fa-solid fa-paper-plane"></i> Publish Now
                     </button>
                 </div>
             </div>
@@ -1184,6 +1201,6 @@
     <div id="toast-container" role="region" aria-live="polite"></div>
 
     <!-- Application Script -->
-    <script src="/static/script.js?v=20261112e"></script>
+    <script src="/static/script.js?v=20261112f"></script>
 </body>
 </html>

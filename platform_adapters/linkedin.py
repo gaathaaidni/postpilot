@@ -81,25 +81,130 @@ class LinkedInAdapter(BasePlatformAdapter):
         return True, None
 
     def upload_media(self, file_path: str, media_type: str = 'image', **kwargs) -> Dict[str, Any]:
-        """Validates media asset for LinkedIn."""
+        """Validates supported image media asset for LinkedIn REST Images API (JPG/JPEG/PNG/GIF)."""
         if not os.path.isfile(file_path):
             return {'success': False, 'error': f"Media file not found: {file_path}"}
         ext = os.path.splitext(file_path)[1].lower()
-        if ext not in {'.jpg', '.jpeg', '.png', '.gif', '.mp4'}:
-            return {'success': False, 'error': f"Unsupported LinkedIn media format: '{ext}'."}
+        if ext not in {'.jpg', '.jpeg', '.png', '.gif'}:
+            return {'success': False, 'error': f"Unsupported LinkedIn image format: '{ext}'. Supported formats: .jpg, .jpeg, .png, .gif."}
         return {'success': True, 'path': file_path, 'filename': os.path.basename(file_path)}
+
+    def _upload_image_for_owner(self, owner_urn: str, media_ref: str, app_key: str, access_token: Optional[str], is_personal: bool) -> Tuple[bool, Optional[str], Optional[str]]:
+        import config as app_config
+        media_path = str(media_ref)
+        if not os.path.isfile(media_path):
+            candidate = os.path.join(str(app_config.UPLOAD_FOLDER), os.path.basename(media_path))
+            if os.path.isfile(candidate):
+                media_path = candidate
+
+        ext = os.path.splitext(media_path)[1].lower()
+        if ext not in {'.jpg', '.jpeg', '.png', '.gif'}:
+            return False, None, f"Unsupported LinkedIn media format '{ext}'. Supported image formats: JPG, JPEG, PNG, GIF."
+
+        init_res = linkedin_api.initialize_image_upload(
+            owner_urn,
+            app_key=app_key,
+            access_token=access_token,
+            is_personal=is_personal,
+        )
+        if not init_res.get('success'):
+            return False, None, init_res.get('error') or 'LinkedIn image upload initialization failed.'
+
+        image_urn = init_res.get('image_urn')
+        upload_url = init_res.get('upload_url')
+        if not init_res.get('simulated'):
+            if not os.path.isfile(media_path):
+                return False, None, f"Media file not found for LinkedIn upload: {media_path}"
+            if not upload_url:
+                return False, None, "Failed uploading image binary to LinkedIn storage."
+            ok_put = (
+                linkedin_api.upload_image_file(upload_url, media_path, access_token=access_token)
+                if access_token else
+                linkedin_api.upload_image_file(upload_url, media_path)
+            )
+            if not ok_put:
+                return False, None, "Failed uploading image binary to LinkedIn storage."
+        return True, image_urn, None
 
     def publish(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Publishes an organization update to LinkedIn supporting both text and images.
-        When POSTPILOT_PUBLISHING_ENABLED=0, intercepts and returns simulated result.
+        Publishes explicitly either to a personal LinkedIn profile ('personal')
+        OR to a verified LinkedIn company organization ('organization').
+        Never silently redirects company <-> personal.
         """
         valid, err = self.validate_content(payload)
         if not valid:
             return {'success': False, 'platform': self.platform_key, 'error': err}
 
         text = payload.get('text') or payload.get('message') or payload.get('caption') or ''
+        image_filename = payload.get('image_filename') or payload.get('media_filename')
+        explicit_token = payload.get('access_token')
+        dest_raw = str(payload.get('destination') or payload.get('linkedin_destination') or '').strip().lower()
+        is_personal = (dest_raw == 'personal') or (str(payload.get('post_type') or '').strip().lower() == 'linkedin_personal')
+
+        if image_filename:
+            ext = os.path.splitext(str(image_filename).strip())[1].lower()
+            if ext not in {'.jpg', '.jpeg', '.png', '.gif'}:
+                return {
+                    'success': False,
+                    'platform': self.platform_key,
+                    'destination': 'personal' if is_personal else 'organization',
+                    'error': f"Unsupported LinkedIn media format '{ext}'. Supported image formats: JPG, JPEG, PNG, GIF.",
+                }
+
+        if is_personal:
+            app_key = linkedin_api.normalize_app_key(payload.get('app_key') or linkedin_api.APP_AIDNI_GLOBAL)
+            author_urn = payload.get('author_urn')
+            image_urn = None
+
+            if config.is_linkedin_personal_publishing_enabled():
+                if not author_urn:
+                    ident = linkedin_api.resolve_member_author(app_key, access_token=explicit_token, verify_live=True)
+                    if not ident.get('success'):
+                        return {
+                            'success': False,
+                            'platform': self.platform_key,
+                            'destination': 'personal',
+                            'app_key': app_key,
+                            'error_code': ident.get('error_code'),
+                            'error': ident.get('error') or 'Personal LinkedIn identity verification failed.',
+                        }
+                    author_urn = ident['author_urn']
+
+            if image_filename:
+                ok_up, image_urn, up_err = self._upload_image_for_owner(
+                    author_urn or 'urn:li:person:simulated',
+                    image_filename,
+                    app_key=app_key,
+                    access_token=explicit_token,
+                    is_personal=True,
+                )
+                if not ok_up:
+                    return {'success': False, 'platform': self.platform_key, 'destination': 'personal', 'error': up_err}
+
+            res = linkedin_api.create_personal_post(
+                text=text,
+                app_key=app_key,
+                access_token=explicit_token,
+                image_urn=image_urn,
+                author_urn=author_urn,
+            )
+            return {
+                'success': res.get('success', False),
+                'platform': self.platform_key,
+                'destination': 'personal',
+                'external_post_id': res.get('id') or res.get('share_urn'),
+                'image_urn': image_urn,
+                'app_key': app_key,
+                'author_urn': res.get('author_urn') or author_urn,
+                'simulated': res.get('simulated', False),
+                'error_code': res.get('error_code'),
+                'error': res.get('error'),
+            }
+
+        # Organization / Company Page path
         app_key = payload.get('app_key')
+        acct = None
         if not app_key and payload.get('brand_id'):
             try:
                 import database
@@ -114,49 +219,62 @@ class LinkedInAdapter(BasePlatformAdapter):
                     app_key = linkedin_api.APP_GAATHA_VENTURES
                 else:
                     logger.warning(f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked.")
-                    return {'success': False, 'platform': self.platform_key, 'error': f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked."}
-            except Exception:
-                pass
+                    return {'success': False, 'platform': self.platform_key, 'destination': 'organization', 'error': f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked."}
+            except Exception as ex:
+                if payload['brand_id'] == 1:
+                    app_key = linkedin_api.APP_GAATHA_VENTURES
+                else:
+                    logger.warning(f"No LinkedIn account mapped for brand #{payload['brand_id']} ({ex}). Cross-brand inheritance blocked.")
+                    return {'success': False, 'platform': self.platform_key, 'destination': 'organization', 'error': f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked."}
 
         app_key = self.resolve_app_key(payload.get('linkedin_org_id'), app_key)
         app_cfg = linkedin_api.get_app_config(app_key)
-        acct_org = acct.get('account_identifier') if 'acct' in locals() and acct else None
+        acct_org = acct.get('account_identifier') if acct else None
         org_id = payload.get('linkedin_org_id') or acct_org or app_cfg['org_id']
 
-        image_filename = payload.get('image_filename') or payload.get('media_filename')
+        if config.is_linkedin_company_publishing_enabled():
+            elig = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=explicit_token)
+            if not elig.get('company_publishing_authorized'):
+                return {
+                    'success': False,
+                    'platform': self.platform_key,
+                    'destination': 'organization',
+                    'app_key': app_key,
+                    'organization_id': org_id,
+                    'error_code': elig.get('eligibility_code', 'COMMUNITY_MANAGEMENT_API_REQUIRED'),
+                    'error': elig.get('eligibility_message') or 'Company-page publishing is not authorized on LinkedIn.',
+                }
+
         image_urn = None
-
         if image_filename:
-            import config as app_config
-            media_path = str(image_filename)
-            if not os.path.isfile(media_path):
-                candidate = os.path.join(str(app_config.UPLOAD_FOLDER), os.path.basename(media_path))
-                if os.path.isfile(candidate):
-                    media_path = candidate
-            # 3-Step Modern REST Image Upload procedure
-            init_res = linkedin_api.initialize_image_upload(org_id, app_key=app_key)
-            if init_res.get('success'):
-                upload_url = init_res.get('upload_url')
-                image_urn = init_res.get('image_urn')
-                if upload_url and os.path.isfile(media_path):
-                    linkedin_api.upload_image_file(upload_url, media_path)
+            ok_up, image_urn, up_err = self._upload_image_for_owner(
+                str(org_id),
+                image_filename,
+                app_key=app_key,
+                access_token=explicit_token,
+                is_personal=False,
+            )
+            if not ok_up:
+                return {'success': False, 'platform': self.platform_key, 'destination': 'organization', 'error': up_err}
 
-        # Create organization post referencing uploaded media if available
         res = linkedin_api.create_organization_post(
             organization_id=org_id,
             text=text,
             app_key=app_key,
+            access_token=explicit_token,
             image_urn=image_urn
         )
 
         return {
             'success': res.get('success', True),
             'platform': self.platform_key,
+            'destination': 'organization',
             'external_post_id': res.get('id') or res.get('share_urn'),
             'image_urn': image_urn,
             'app_key': app_key,
             'organization_id': org_id,
             'simulated': res.get('simulated', False),
+            'error_code': res.get('error_code'),
             'error': res.get('error')
         }
 

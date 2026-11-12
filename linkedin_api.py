@@ -23,12 +23,17 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# LinkedIn API Endpoints
+# LinkedIn API Endpoints & Centralized Version
 AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 REST_BASE_URL = "https://api.linkedin.com/v2"
 REST_POSTS_URL = "https://api.linkedin.com/rest/posts"
-REST_API_VERSION = "202401"
+REST_API_VERSION = getattr(config, 'LINKEDIN_API_VERSION', '202610')
+
+
+def get_rest_api_version() -> str:
+    """Returns centralized active LinkedIn REST API YYYYMM version (non-sunset)."""
+    return (os.getenv('LINKEDIN_API_VERSION') or getattr(config, 'LINKEDIN_API_VERSION', '202610') or '202610').strip()
 
 DEFAULT_TIMEOUT = 15  # seconds
 
@@ -282,13 +287,14 @@ def mask_secret_preview(secret: Optional[str]) -> str:
 
 
 def sanitize_log_message(msg: str) -> str:
-    """Sanitizes sensitive tokens, secrets, and auth codes from log messages."""
+    """Sanitizes sensitive tokens, secrets, refresh tokens, and auth codes from log messages."""
     if not msg:
         return ""
     clean = str(msg)
     patterns = [
         r'(?i)(client_secret=)[^\s&"\']+',
         r'(?i)(access_token=)[^\s&"\']+',
+        r'(?i)(refresh_token=)[^\s&"\']+',
         r'(?i)(code=)[^\s&"\']+',
         r'(?i)(bearer\s+)[^\s&"\']+',
         r'(?i)(token\s*:\s*["\'])[^\'"]+',
@@ -315,22 +321,25 @@ def _load_token_store_from_disk() -> Dict[str, Any]:
 
 
 def _write_token_store_to_disk(store: Dict[str, Any]) -> None:
-    """Safely writes stored tokens to data/linkedin_tokens.json."""
+    """Safely writes stored tokens to data/linkedin_tokens.json with restrictive permissions."""
     try:
         os.makedirs(TOKEN_STORE_DIR, exist_ok=True)
         with open(TOKEN_STORE_FILE, "w", encoding="utf-8") as f:
             json.dump(store, f, indent=2)
+        if os.name == 'posix':
+            os.chmod(TOKEN_STORE_FILE, 0o600)
     except Exception as e:
-        logger.error(f"Failed to persist LinkedIn token store: {e}")
+        logger.error(f"Failed to persist LinkedIn token store: {sanitize_log_message(str(e))}")
 
 
 def save_token_data(app_key: str, token_data: Dict[str, Any]) -> None:
     """
-    Saves access token and metadata for a specific LinkedIn application.
+    Saves access token and optional refresh metadata for a specific LinkedIn application.
     Keeps each application's tokens completely isolated.
     """
     key = normalize_app_key(app_key)
     store = _load_token_store_from_disk()
+    existing = store.get(key, {}) if isinstance(store.get(key), dict) else {}
 
     entry = {
         'app_key': key,
@@ -340,8 +349,17 @@ def save_token_data(app_key: str, token_data: Dict[str, Any]) -> None:
         'scope': token_data.get('scope', ''),
         'token_type': token_data.get('token_type', 'Bearer'),
         'updated_at': time.time(),
-        'member': token_data.get('member')
+        'member': token_data.get('member') if token_data.get('member') is not None else existing.get('member'),
     }
+    if token_data.get('refresh_token'):
+        entry['refresh_token'] = token_data['refresh_token']
+        r_exp_in = token_data.get('refresh_token_expires_in', 0)
+        entry['refresh_token_expires_in'] = r_exp_in
+        entry['refresh_token_expires_at'] = token_data.get('refresh_token_expires_at') or (time.time() + r_exp_in if r_exp_in else 0)
+    elif existing.get('refresh_token') and token_data.get('preserve_refresh_token', True):
+        entry['refresh_token'] = existing['refresh_token']
+        entry['refresh_token_expires_in'] = existing.get('refresh_token_expires_in', 0)
+        entry['refresh_token_expires_at'] = existing.get('refresh_token_expires_at', 0)
 
     store[key] = entry
     _write_token_store_to_disk(store)
@@ -394,6 +412,77 @@ def get_active_token(app_key: str) -> Optional[str]:
     if not data or is_token_expired(data):
         return None
     return data.get('access_token')
+
+
+def refresh_access_token(app_key: str) -> Dict[str, Any]:
+    """
+    Refreshes a LinkedIn OAuth token ONLY if the app has an authorized non-expired refresh_token.
+    Never overwrites or invalidates the existing stored token unless the replacement token
+    is returned and verified active.
+    """
+    key = normalize_app_key(app_key)
+    cfg = get_app_config(key)
+    td = get_token_data(key) or {}
+    ref_tok = (td.get('refresh_token') or '').strip()
+    if not ref_tok:
+        return {
+            'success': False,
+            'app_key': key,
+            'refresh_supported': False,
+            'reauth_required': True,
+            'error': f"Programmatic refresh_token not available for '{cfg['display_name']}'. Re-authorization via OAuth is required.",
+        }
+
+    ref_exp = td.get('refresh_token_expires_at') or 0
+    if ref_exp and float(ref_exp) > 0 and time.time() >= (float(ref_exp) - 60):
+        return {
+            'success': False,
+            'app_key': key,
+            'refresh_supported': True,
+            'reauth_required': True,
+            'error': f"Refresh token for '{cfg['display_name']}' has expired. Re-authorization via OAuth is required.",
+        }
+
+    if not cfg.get('client_id') or not cfg.get('client_secret'):
+        return {'success': False, 'app_key': key, 'reauth_required': True, 'error': 'Missing client credentials.'}
+
+    try:
+        resp = requests.post(
+            TOKEN_URL,
+            data={
+                'grant_type': 'refresh_token',
+                'refresh_token': ref_tok,
+                'client_id': cfg['client_id'],
+                'client_secret': cfg['client_secret'],
+            },
+            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+            timeout=DEFAULT_TIMEOUT,
+        )
+        res_json = resp.json() if resp.headers.get('content-type', '').startswith('application/json') else {}
+        new_token = (res_json.get('access_token') or '').strip()
+        if resp.status_code != 200 or not new_token:
+            err = sanitize_log_message(res_json.get('error_description') or res_json.get('error') or f"HTTP {resp.status_code}")
+            return {'success': False, 'app_key': key, 'refresh_supported': True, 'reauth_required': True, 'error': err}
+
+        # Verify replacement token before replacing stored credential
+        intr = introspect_token(key, access_token=new_token)
+        if intr.get('checked') and not intr.get('active'):
+            return {'success': False, 'app_key': key, 'reauth_required': True, 'error': 'Replacement token failed active verification; existing token preserved.'}
+
+        expires_in = res_json.get('expires_in', 0)
+        new_record = {
+            'access_token': new_token,
+            'expires_in': expires_in,
+            'expires_at': time.time() + expires_in if expires_in else 0,
+            'scope': res_json.get('scope') or ' '.join(intr.get('scopes') or []) or td.get('scope', ''),
+            'token_type': res_json.get('token_type', 'Bearer'),
+            'refresh_token': res_json.get('refresh_token') or ref_tok,
+            'refresh_token_expires_in': res_json.get('refresh_token_expires_in') or td.get('refresh_token_expires_in', 0),
+        }
+        save_token_data(key, new_record)
+        return {'success': True, 'app_key': key, 'expires_in': expires_in, 'scope': new_record['scope']}
+    except Exception as e:
+        return {'success': False, 'app_key': key, 'reauth_required': True, 'error': sanitize_log_message(str(e))}
 
 
 # ==============================================================================
@@ -547,8 +636,12 @@ def exchange_code_for_token(code: str,
             'expires_at': time.time() + expires_in,
             'scope': scope,
             'token_type': res_json.get('token_type', 'Bearer'),
-            'member': member if member.get('success') else None
+            'member': member if member.get('success') else None,
+            'preserve_refresh_token': False,
         }
+        if res_json.get('refresh_token'):
+            token_record['refresh_token'] = res_json.get('refresh_token')
+            token_record['refresh_token_expires_in'] = res_json.get('refresh_token_expires_in', 0)
 
         # Save independently for this application
         save_token_data(cfg['app_key'], token_record)
@@ -589,9 +682,11 @@ def get_authenticated_member(access_token: Optional[str] = None) -> Dict[str, An
         resp = requests.get(f"{REST_BASE_URL}/userinfo", headers=headers, timeout=DEFAULT_TIMEOUT)
         if resp.status_code == 200:
             data = resp.json()
+            sub = data.get('sub')
             return {
                 'success': True,
-                'sub': data.get('sub'),
+                'sub': sub,
+                'author_urn': f"urn:li:person:{sub}" if sub else None,
                 'name': data.get('name'),
                 'given_name': data.get('given_name'),
                 'family_name': data.get('family_name'),
@@ -602,6 +697,88 @@ def get_authenticated_member(access_token: Optional[str] = None) -> Dict[str, An
             return {'success': False, 'error': sanitize_log_message(resp.text), 'status_code': resp.status_code}
     except Exception as e:
         return {'success': False, 'error': sanitize_log_message(str(e))}
+
+
+def resolve_member_author(app_key: str, access_token: Optional[str] = None, verify_live: bool = True) -> Dict[str, Any]:
+    """
+    Resolves verified member author URN ('urn:li:person:<sub>') via LinkedIn identity endpoint
+    without ever guessing or constructing a member ID.
+    Requires active non-expired token, w_member_social, and identity access (/v2/userinfo).
+    """
+    cfg = get_app_config(app_key)
+    key = cfg['app_key']
+    td = get_token_data(key) or {}
+    tok = access_token or td.get('access_token')
+    if not tok:
+        return {'success': False, 'app_key': key, 'error_code': 'UNAUTHENTICATED', 'error': f"Missing access token for '{cfg['display_name']}'."}
+
+    if not access_token and is_token_expired(td):
+        return {'success': False, 'app_key': key, 'error_code': 'TOKEN_EXPIRED', 'error': f"Access token expired for '{cfg['display_name']}'. Re-authorization required."}
+
+    scopes = parse_scopes(td.get('scope'))
+    if verify_live and cfg.get('client_id') and cfg.get('client_secret'):
+        intr = introspect_token(key, access_token=tok)
+        if intr.get('checked'):
+            if not intr.get('active'):
+                return {'success': False, 'app_key': key, 'error_code': 'TOKEN_EXPIRED', 'error': f"Token is inactive/revoked for '{cfg['display_name']}'. Re-authorization required."}
+            if intr.get('scopes'):
+                scopes = intr['scopes']
+
+    if scopes and 'w_member_social' not in scopes:
+        return {
+            'success': False,
+            'app_key': key,
+            'error_code': 'MISSING_W_MEMBER_SOCIAL',
+            'scopes': scopes,
+            'error': f"Token for '{cfg['display_name']}' lacks required 'w_member_social' permission.",
+        }
+
+    cached_member = td.get('member') if isinstance(td.get('member'), dict) else None
+    if cached_member and cached_member.get('sub') and not verify_live:
+        sub = str(cached_member['sub']).strip()
+        return {
+            'success': True,
+            'app_key': key,
+            'member_id': sub,
+            'author_urn': f"urn:li:person:{sub}",
+            'member': cached_member,
+            'scopes': scopes,
+        }
+
+    # Verify against /v2/userinfo when OpenID scopes exist (or live check is requested)
+    if not scopes or ('openid' in scopes and 'profile' in scopes) or verify_live:
+        ui = get_authenticated_member(tok)
+        if ui.get('success') and ui.get('sub'):
+            sub = str(ui['sub']).strip()
+            member_clean = {'sub': sub, 'author_urn': f"urn:li:person:{sub}", 'name': ui.get('name'), 'email': ui.get('email')}
+            return {
+                'success': True,
+                'app_key': key,
+                'member_id': sub,
+                'author_urn': f"urn:li:person:{sub}",
+                'member': member_clean,
+                'scopes': scopes,
+            }
+        status_c = ui.get('status_code')
+        if status_c == 401:
+            return {'success': False, 'app_key': key, 'error_code': 'TOKEN_EXPIRED', 'scopes': scopes, 'error': 'LinkedIn rejected token (HTTP 401); re-authorization required.'}
+        if status_c == 403 or ('openid' not in scopes or 'profile' not in scopes):
+            return {
+                'success': False,
+                'app_key': key,
+                'error_code': 'IDENTITY_SCOPE_REQUIRED',
+                'scopes': scopes,
+                'error': f"Cannot resolve LinkedIn member URN for '{cfg['display_name']}': OpenID Connect ('openid profile') permission is missing on this token.",
+            }
+        return {'success': False, 'app_key': key, 'error_code': 'IDENTITY_LOOKUP_FAILED', 'scopes': scopes, 'error': ui.get('error') or 'Failed to resolve member identity.'}
+
+    return {
+        'success': False,
+        'app_key': key,
+        'error_code': 'IDENTITY_SCOPE_REQUIRED',
+        'scopes': scopes,
+        'error': f"Cannot verify member author URN for '{cfg['display_name']}' without 'openid' and 'profile' scopes.",
+    }
 
 
 def check_organization_publishing_eligibility(app_key: str, access_token: Optional[str] = None) -> Dict[str, Any]:
@@ -660,12 +837,15 @@ def check_organization_publishing_eligibility(app_key: str, access_token: Option
     # Case 2: Community Management API scopes present, verify ACL admin role
     headers = {
         "Authorization": f"Bearer {token}",
+        "LinkedIn-Version": get_rest_api_version(),
         "X-Restli-Protocol-Version": "2.0.0"
     }
-    url = f"{REST_BASE_URL}/organizationalEntityAcls?q=roleAssignee"
+    url = "https://api.linkedin.com/rest/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&state=APPROVED"
 
     try:
         resp = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
+        if resp.status_code == 426:
+            resp = requests.get(f"{REST_BASE_URL}/organizationalEntityAcls?q=roleAssignee", headers=headers, timeout=DEFAULT_TIMEOUT)
         if resp.status_code != 200:
             return {
                 'app_key': cfg['app_key'],
@@ -685,9 +865,10 @@ def check_organization_publishing_eligibility(app_key: str, access_token: Option
         is_admin = False
 
         for acl in elements:
-            if acl.get('organizationalTarget') == target_urn and acl.get('state') == 'APPROVED':
+            target = acl.get('organizationalTarget') or acl.get('organization')
+            if target == target_urn and acl.get('state') == 'APPROVED':
                 role = acl.get('role')
-                if role in ('ADMINISTRATOR', 'DIRECT_SPONSORED_CONTENT_POSTER', 'CURATOR'):
+                if role in ('ADMINISTRATOR', 'DIRECT_SPONSORED_CONTENT_POSTER', 'CURATOR', 'CONTENT_ADMIN'):
                     is_admin = True
                     break
 
@@ -733,13 +914,17 @@ def check_organization_publishing_eligibility(app_key: str, access_token: Option
         }
 
 
-def audit_linkedin_status() -> Dict[str, Any]:
+def audit_linkedin_status(verify_live: bool = False) -> Dict[str, Any]:
     """
     Audits connection status, member identity, organization discovery,
-    and publishing readiness for BOTH LinkedIn applications.
+    refresh lifecycle, and destination readiness for BOTH LinkedIn applications.
     Zero secret exposure.
     """
     apps_status = {}
+    api_ver = get_rest_api_version()
+    personal_flag_enabled = config.is_linkedin_personal_publishing_enabled()
+    company_flag_enabled = config.is_linkedin_company_publishing_enabled()
+
     for app_key in SUPPORTED_APPS:
         cfg = get_app_config(app_key)
         has_client_id = bool(cfg['client_id'])
@@ -747,19 +932,36 @@ def audit_linkedin_status() -> Dict[str, Any]:
         token_data = get_token_data(app_key)
         token = token_data.get('access_token') if token_data else None
         expired = is_token_expired(token_data)
+        has_refresh = bool(token_data and token_data.get('refresh_token'))
 
-        # Eligibility check
-        eligibility = check_organization_publishing_eligibility(app_key, access_token=token)
-
+        eligibility = check_organization_publishing_eligibility(app_key, access_token=token if not expired else None)
         granted_scopes = parse_scopes(token_data.get('scope')) if token_data else []
+
         member_info = None
+        identity_res: Dict[str, Any] = {'success': False}
         if token and not expired:
-            if token_data and token_data.get('member'):
+            if token_data and isinstance(token_data.get('member'), dict) and token_data['member'].get('sub') and not verify_live:
                 member_info = token_data['member']
-            elif 'openid' in granted_scopes and 'profile' in granted_scopes:
-                m = get_authenticated_member(token)
-                if m.get('success'):
-                    member_info = {'name': m.get('name'), 'sub': m.get('sub'), 'email': m.get('email')}
+                identity_res = {
+                    'success': True,
+                    'author_urn': member_info.get('author_urn') or f"urn:li:person:{member_info['sub']}",
+                    'member': member_info,
+                }
+            elif ('openid' in granted_scopes and 'profile' in granted_scopes) or verify_live:
+                identity_res = resolve_member_author(app_key, access_token=token, verify_live=verify_live)
+                if identity_res.get('success'):
+                    member_info = identity_res.get('member')
+            else:
+                identity_res = {
+                    'success': False,
+                    'error_code': 'IDENTITY_SCOPE_REQUIRED',
+                    'error': "Missing 'openid profile' scope to verify member identity.",
+                }
+
+        has_w_member = 'w_member_social' in granted_scopes
+        identity_verified = bool(identity_res.get('success') and member_info and (member_info.get('sub') or identity_res.get('author_urn')))
+        personal_ready = bool(token and not expired and has_w_member and identity_verified and personal_flag_enabled)
+        org_ready = bool(eligibility.get('company_publishing_authorized', False) and company_flag_enabled)
 
         apps_status[app_key] = {
             'app_key': app_key,
@@ -769,24 +971,104 @@ def audit_linkedin_status() -> Dict[str, Any]:
             'has_client_secret': has_client_secret,
             'authenticated': bool(token and not expired),
             'is_token_expired': expired,
+            'reauth_required': bool(not token or expired),
+            'refresh_token_available': has_refresh,
+            'refresh_token_expires_at': token_data.get('refresh_token_expires_at') if token_data else None,
             'token_preview': mask_secret_preview(token),
             'token_expiry': token_data.get('expires_at') if token_data else None,
             'token_expires_in': int(max(0, (token_data.get('expires_at', 0) - time.time()))) if token_data and token_data.get('expires_at') else 0,
             'org_id': cfg['org_id'],
             'org_urn': cfg['org_urn'],
             'member': member_info,
+            'member_identity_verified': identity_verified,
+            'author_urn': identity_res.get('author_urn') if identity_verified else None,
+            'identity_error_code': None if identity_verified else identity_res.get('error_code'),
             'scopes': granted_scopes,
             'requested_scopes': get_default_scopes(app_key),
-            'personal_posting_available': eligibility.get('personal_posting_available', False),
+            'personal_posting_available': bool(token and not expired and has_w_member and (identity_verified or 'openid' in granted_scopes)),
+            'personal_publishing_ready': personal_ready,
             'company_publishing_authorized': eligibility.get('company_publishing_authorized', False),
+            'company_publishing_ready': org_ready,
             'eligibility_code': eligibility.get('eligibility_code'),
             'eligibility_message': eligibility.get('eligibility_message'),
             'connect_url': f"/api/auth/linkedin/connect?app={app_key}"
         }
 
+    aidni = apps_status[APP_AIDNI_GLOBAL]
+    gaatha = apps_status[APP_GAATHA_VENTURES]
+
+    destinations = [
+        {
+            'key': 'personal:aidni_global',
+            'destination_type': 'personal',
+            'app_key': APP_AIDNI_GLOBAL,
+            'label': f"Personal LinkedIn Profile ({(aidni.get('member') or {}).get('name') or 'LinkedIn Member'})",
+            'author_urn': aidni.get('author_urn'),
+            'connected': aidni['authenticated'],
+            'read_identity_verified': aidni['member_identity_verified'],
+            'personal_publishing_ready': aidni['personal_publishing_ready'],
+            'organization_publishing_ready': False,
+            'missing_permission': None if 'w_member_social' in aidni['scopes'] else 'w_member_social',
+            'approval_pending': False,
+            'token_expired': aidni['is_token_expired'],
+            'publishing_disabled': not personal_flag_enabled,
+            'status_label': (
+                'Token Expired / Reauthorization Required' if aidni['reauth_required']
+                else ('Missing Permission' if 'w_member_social' not in aidni['scopes'] or not aidni['member_identity_verified']
+                      else ('Personal Publishing Ready' if personal_flag_enabled else 'Publishing Disabled'))
+            ),
+        },
+        {
+            'key': 'organization:145240694',
+            'destination_type': 'organization',
+            'app_key': APP_AIDNI_GLOBAL,
+            'organization_id': aidni['org_id'],
+            'author_urn': aidni['org_urn'],
+            'label': 'Aidni Global LLP Company Page (Org 145240694)',
+            'connected': aidni['authenticated'],
+            'read_identity_verified': aidni['member_identity_verified'],
+            'personal_publishing_ready': False,
+            'organization_publishing_ready': aidni['company_publishing_ready'],
+            'missing_permission': None if aidni['company_publishing_authorized'] else 'w_organization_social',
+            'approval_pending': not aidni['company_publishing_authorized'],
+            'token_expired': aidni['is_token_expired'],
+            'publishing_disabled': not company_flag_enabled,
+            'status_label': (
+                'Token Expired / Reauthorization Required' if aidni['reauth_required']
+                else ('Approval Pending' if not aidni['company_publishing_authorized']
+                      else ('Organization Publishing Ready' if company_flag_enabled else 'Publishing Disabled'))
+            ),
+        },
+        {
+            'key': 'organization:145250613',
+            'destination_type': 'organization',
+            'app_key': APP_GAATHA_VENTURES,
+            'organization_id': gaatha['org_id'],
+            'author_urn': gaatha['org_urn'],
+            'label': 'Gaatha Ventures Sh.p.k. Company Page (Org 145250613)',
+            'connected': gaatha['authenticated'],
+            'read_identity_verified': gaatha['member_identity_verified'],
+            'personal_publishing_ready': False,
+            'organization_publishing_ready': gaatha['company_publishing_ready'],
+            'missing_permission': None if gaatha['company_publishing_authorized'] else 'w_organization_social',
+            'approval_pending': not gaatha['company_publishing_authorized'],
+            'token_expired': gaatha['is_token_expired'],
+            'publishing_disabled': not company_flag_enabled,
+            'status_label': (
+                'Token Expired / Reauthorization Required' if gaatha['reauth_required']
+                else ('Approval Pending' if not gaatha['company_publishing_authorized']
+                      else ('Organization Publishing Ready' if company_flag_enabled else 'Publishing Disabled'))
+            ),
+        },
+    ]
+
     return {
         'apps': apps_status,
+        'destinations': destinations,
+        'api_version': api_ver,
         'publishing_enabled': config.is_platform_publishing_enabled('linkedin'),
+        'personal_publishing_enabled': personal_flag_enabled,
+        'company_publishing_enabled': company_flag_enabled,
         # Backwards compatibility top-level aliases
         'configured': all(a['configured'] for a in apps_status.values()),
         'authenticated': any(a['authenticated'] for a in apps_status.values()),
@@ -801,6 +1083,123 @@ def audit_linkedin_status() -> Dict[str, Any]:
 # LinkedIn REST Posts API (Modern Endpoint)
 # ==============================================================================
 
+def _extract_restli_post_urn(resp, fallback_prefix: str) -> str:
+    post_urn = resp.headers.get('x-restli-id') or resp.headers.get('X-RestLi-Id')
+    if not post_urn:
+        try:
+            data = resp.json()
+            post_urn = data.get('id') or data.get('urn')
+        except Exception:
+            post_urn = None
+    return post_urn or f"urn:li:share:{fallback_prefix}_{int(time.time())}"
+
+
+def create_personal_post(text: str,
+                         app_key: Optional[str] = APP_AIDNI_GLOBAL,
+                         access_token: Optional[str] = None,
+                         image_urn: Optional[str] = None,
+                         author_urn: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Creates a personal LinkedIn profile post via POST https://api.linkedin.com/rest/posts
+    using the verified member author URN (urn:li:person:<sub>) and w_member_social permission.
+    Never guesses author IDs and strictly enforces personal publishing controls.
+    """
+    if not text or not str(text).strip():
+        raise ValueError("Post text cannot be empty.")
+
+    resolved_app = normalize_app_key(app_key or APP_AIDNI_GLOBAL)
+
+    if not config.is_linkedin_personal_publishing_enabled():
+        logger.info(f"🛡️ [SAFETY] LinkedIn personal publishing simulated/blocked (personal flag disabled, App: {resolved_app})")
+        sim_id = f"urn:li:share:sim_personal_{int(time.time() * 1000)}"
+        return {
+            'id': sim_id,
+            'share_urn': sim_id,
+            'destination': 'personal',
+            'app_key': resolved_app,
+            'simulated': True,
+            'success': True,
+            'image_urn': image_urn,
+            'message': 'Simulated publishing: POSTPILOT_LINKEDIN_PERSONAL_PUBLISHING_ENABLED is 0'
+        }
+
+    token = access_token or get_active_token(resolved_app)
+    if not token:
+        return {
+            'success': False,
+            'destination': 'personal',
+            'app_key': resolved_app,
+            'error_code': 'UNAUTHENTICATED',
+            'reauth_required': True,
+            'error': f"Missing or expired LinkedIn access token for '{resolved_app}'. Re-authorization required."
+        }
+
+    resolved_author = (author_urn or '').strip()
+    if not resolved_author:
+        ident = resolve_member_author(resolved_app, access_token=token, verify_live=True)
+        if not ident.get('success'):
+            return {
+                'success': False,
+                'destination': 'personal',
+                'app_key': resolved_app,
+                'error_code': ident.get('error_code', 'IDENTITY_REQUIRED'),
+                'error': ident.get('error') or 'Cannot verify personal LinkedIn author URN.'
+            }
+        resolved_author = ident['author_urn']
+
+    if not resolved_author.startswith('urn:li:person:'):
+        return {'success': False, 'destination': 'personal', 'error': f"Invalid personal author URN: '{resolved_author}'."}
+
+    api_ver = get_rest_api_version()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "LinkedIn-Version": api_ver,
+        "X-Restli-Protocol-Version": "2.0.0",
+        "Content-Type": "application/json"
+    }
+    payload: Dict[str, Any] = {
+        "author": resolved_author,
+        "commentary": str(text).strip(),
+        "visibility": "PUBLIC",
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": []
+        },
+        "lifecycleState": "PUBLISHED",
+        "isReshareDisabledByAuthor": False
+    }
+    if image_urn:
+        payload["content"] = {"media": {"id": image_urn}}
+
+    try:
+        resp = requests.post(REST_POSTS_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
+        if resp.status_code in (200, 201):
+            post_urn = _extract_restli_post_urn(resp, resolved_app)
+            logger.info(f"Successfully published personal LinkedIn post {post_urn} via '{resolved_app}'")
+            return {
+                'success': True,
+                'id': post_urn,
+                'share_urn': post_urn,
+                'destination': 'personal',
+                'author_urn': resolved_author,
+                'app_key': resolved_app,
+                'api_version': api_ver,
+            }
+        err = sanitize_log_message(resp.text)
+        err_code = 'TOKEN_EXPIRED' if resp.status_code == 401 else (
+            'PERMISSION_DENIED' if resp.status_code == 403 else (
+                'API_VERSION_UNSUPPORTED' if resp.status_code == 426 else 'API_ERROR'
+            )
+        )
+        logger.error(f"LinkedIn personal post rejected (HTTP {resp.status_code}, {err_code}): {err}")
+        return {'success': False, 'status_code': resp.status_code, 'error_code': err_code, 'destination': 'personal', 'error': err}
+    except Exception as e:
+        safe_e = sanitize_log_message(str(e))
+        logger.error(f"Exception publishing personal LinkedIn post via {resolved_app}: {safe_e}")
+        return {'success': False, 'destination': 'personal', 'error_code': 'NETWORK_ERROR', 'error': safe_e}
+
+
 def create_organization_post(organization_id: str,
                              text: str,
                              app_key: Optional[str] = None,
@@ -809,11 +1208,6 @@ def create_organization_post(organization_id: str,
     """
     Creates a post on LinkedIn for an organization using the modern REST Posts API.
     Endpoint: POST https://api.linkedin.com/rest/posts
-    Headers: LinkedIn-Version: 202401, X-Restli-Protocol-Version: 2.0.0
-
-    Publishing Safety:
-        When POSTPILOT_PUBLISHING_ENABLED=0, strictly blocks external network calls
-        and returns a safe simulated response.
     """
     if not organization_id or not str(organization_id).strip():
         raise ValueError("Organization ID is required to create a LinkedIn organization post.")
@@ -822,7 +1216,6 @@ def create_organization_post(organization_id: str,
 
     clean_org_id = str(organization_id).replace("urn:li:organization:", "").strip()
 
-    # Determine which application config applies
     resolved_app = normalize_app_key(app_key) if app_key else None
     if not resolved_app:
         if clean_org_id == DEFAULT_ORG_ID_AIDNI_GLOBAL:
@@ -830,8 +1223,8 @@ def create_organization_post(organization_id: str,
         else:
             resolved_app = APP_GAATHA_VENTURES
 
-    # Publishing Safety Guardrail
-    if not config.is_platform_publishing_enabled('linkedin'):
+    # Publishing Safety Guardrail (Organization publishing uses company guardrail flag)
+    if not config.is_linkedin_company_publishing_enabled():
         logger.info(
             f"🛡️ [SAFETY] LinkedIn organization publishing blocked/simulated (POSTPILOT_PUBLISHING_ENABLED=0): "
             f"Organization ID {clean_org_id} (App: {resolved_app})"
@@ -840,6 +1233,7 @@ def create_organization_post(organization_id: str,
         return {
             'id': sim_id,
             'share_urn': sim_id,
+            'destination': 'organization',
             'organization_id': clean_org_id,
             'app_key': resolved_app,
             'simulated': True,
@@ -851,12 +1245,12 @@ def create_organization_post(organization_id: str,
     token = access_token or get_active_token(resolved_app)
     if not token:
         logger.error(f"Cannot publish LinkedIn post for org {clean_org_id}: Missing access token for {resolved_app}.")
-        return {'success': False, 'error': f"Missing LinkedIn access token for application '{resolved_app}'."}
+        return {'success': False, 'destination': 'organization', 'error_code': 'UNAUTHENTICATED', 'error': f"Missing LinkedIn access token for application '{resolved_app}'."}
 
-    # Modern LinkedIn REST Posts API
+    api_ver = get_rest_api_version()
     headers = {
         "Authorization": f"Bearer {token}",
-        "LinkedIn-Version": REST_API_VERSION,
+        "LinkedIn-Version": api_ver,
         "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "application/json"
     }
@@ -875,30 +1269,21 @@ def create_organization_post(organization_id: str,
     }
 
     if image_urn:
-        payload["content"] = {
-            "media": {
-                "id": image_urn
-            }
-        }
+        payload["content"] = {"media": {"id": image_urn}}
 
     try:
         resp = requests.post(REST_POSTS_URL, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
         if resp.status_code in (200, 201):
-            post_urn = resp.headers.get('x-restli-id') or resp.headers.get('X-RestLi-Id')
-            if not post_urn:
-                try:
-                    data = resp.json()
-                    post_urn = data.get('id') or data.get('urn')
-                except Exception:
-                    post_urn = f"urn:li:share:{clean_org_id}_{int(time.time())}"
-
+            post_urn = _extract_restli_post_urn(resp, clean_org_id)
             logger.info(f"Successfully published LinkedIn post {post_urn} for organization {clean_org_id}")
             return {
                 'success': True,
                 'id': post_urn,
                 'share_urn': post_urn,
+                'destination': 'organization',
                 'organization_id': clean_org_id,
-                'app_key': resolved_app
+                'app_key': resolved_app,
+                'api_version': api_ver,
             }
         elif resp.status_code == 403:
             err = sanitize_log_message(resp.text)
@@ -909,6 +1294,8 @@ def create_organization_post(organization_id: str,
             return {
                 'success': False,
                 'status_code': 403,
+                'error_code': 'CM_API_REQUIRED',
+                'destination': 'organization',
                 'error': (
                     "Organization publishing unauthorized (HTTP 403). "
                     "Community Management API (w_organization_social) access is required to publish to company pages."
@@ -918,36 +1305,44 @@ def create_organization_post(organization_id: str,
         else:
             err = sanitize_log_message(resp.text)
             logger.error(f"LinkedIn REST Posts API rejected (HTTP {resp.status_code}): {err}")
-            return {
-                'success': False,
-                'status_code': resp.status_code,
-                'error': err
-            }
+            return {'success': False, 'status_code': resp.status_code, 'destination': 'organization', 'error': err}
     except Exception as e:
         safe_e = sanitize_log_message(str(e))
         logger.error(f"Exception publishing to LinkedIn organization {clean_org_id}: {safe_e}")
-        return {'success': False, 'error': safe_e}
+        return {'success': False, 'destination': 'organization', 'error': safe_e}
 
 
 # ==============================================================================
 # LinkedIn REST Media Upload Procedures (Phase 2)
 # ==============================================================================
 
-def initialize_image_upload(organization_id: str,
+def initialize_image_upload(owner_or_org_id: str,
                             app_key: Optional[str] = None,
-                            access_token: Optional[str] = None) -> Dict[str, Any]:
+                            access_token: Optional[str] = None,
+                            is_personal: Optional[bool] = None) -> Dict[str, Any]:
     """
     Step 1: Initializes an image upload request on LinkedIn modern REST API.
+    Supports either personal author URN (urn:li:person:...) or organization URN/ID.
     POST https://api.linkedin.com/rest/images?action=initializeUpload
     """
-    clean_org_id = str(organization_id).replace("urn:li:organization:", "").strip()
-    resolved_app = normalize_app_key(app_key) if app_key else APP_GAATHA_VENTURES
+    raw_owner = str(owner_or_org_id or '').strip()
+    if raw_owner.startswith('urn:li:person:'):
+        owner_urn = raw_owner
+        personal_mode = True if is_personal is None else is_personal
+    else:
+        clean_org_id = raw_owner.replace("urn:li:organization:", "").strip()
+        owner_urn = f"urn:li:organization:{clean_org_id}"
+        personal_mode = False if is_personal is None else is_personal
 
-    if not config.is_platform_publishing_enabled('linkedin'):
+    resolved_app = normalize_app_key(app_key) if app_key else (APP_AIDNI_GLOBAL if personal_mode else APP_GAATHA_VENTURES)
+    enabled = config.is_linkedin_personal_publishing_enabled() if personal_mode else config.is_linkedin_company_publishing_enabled()
+
+    if not enabled:
         return {
             'success': True,
             'upload_url': f"https://api.linkedin.com/mediaUpload/simulated_{int(time.time())}",
             'image_urn': f"urn:li:image:sim_{int(time.time() * 1000)}",
+            'owner_urn': owner_urn,
             'simulated': True
         }
 
@@ -957,13 +1352,13 @@ def initialize_image_upload(organization_id: str,
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "LinkedIn-Version": REST_API_VERSION,
+        "LinkedIn-Version": get_rest_api_version(),
         "X-Restli-Protocol-Version": "2.0.0",
         "Content-Type": "application/json"
     }
     payload = {
         "initializeUploadRequest": {
-            "owner": f"urn:li:organization:{clean_org_id}"
+            "owner": owner_urn
         }
     }
     try:
@@ -979,6 +1374,7 @@ def initialize_image_upload(organization_id: str,
                 'success': True,
                 'upload_url': val.get('uploadUrl'),
                 'image_urn': val.get('image'),
+                'owner_urn': owner_urn,
                 'simulated': False
             }
         err = sanitize_log_message(resp.text)
@@ -992,7 +1388,7 @@ def upload_image_file(upload_url: str, file_path: str, access_token: Optional[st
     Step 2: Uploads raw image binary to the designated LinkedIn uploadUrl.
     PUT {upload_url}
     """
-    if not config.is_platform_publishing_enabled('linkedin') or 'simulated' in upload_url:
+    if 'simulated' in str(upload_url or ''):
         return True
 
     if not os.path.isfile(file_path):
@@ -1003,6 +1399,8 @@ def upload_image_file(upload_url: str, file_path: str, access_token: Optional[st
             data = f.read()
 
         headers = {"Content-Type": "application/octet-stream"}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
         resp = requests.put(upload_url, data=data, headers=headers, timeout=DEFAULT_TIMEOUT)
         return resp.status_code in (200, 201)
     except Exception as e:

@@ -1958,8 +1958,10 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300, allo
     with get_db_connection() as conn:
         cur = conn.execute(
             "SELECT id FROM scheduled_posts "
-            "WHERE ((status = 'scheduled' AND scheduled_for <= ?) "
-            "   OR (status = 'publishing' AND locked_at <= ? AND retry_count < max_retries))"
+            "WHERE external_post_id IS NULL AND ("
+            "  (status = 'scheduled' AND scheduled_for <= ?) "
+            "  OR (status = 'publishing' AND locked_at <= ? AND retry_count < max_retries)"
+            ")"
             f"{platform_filter_sql} "
             "ORDER BY scheduled_for ASC LIMIT ?",
             tuple([now_str, stale_str] + platform_params + [limit])
@@ -1970,7 +1972,7 @@ def claim_due_scheduled_posts(worker_id, limit=5, lock_timeout_seconds=300, allo
             post_before = conn.execute("SELECT status, organization_id FROM scheduled_posts WHERE id = ?", (cid,)).fetchone()
             res = conn.execute(
                 "UPDATE scheduled_posts SET status = 'publishing', locked_by = ?, locked_at = ?, updated_at = ? "
-                "WHERE id = ? AND ("
+                "WHERE id = ? AND external_post_id IS NULL AND ("
                 "  (status = 'scheduled' AND scheduled_for <= ?) OR "
                 "  (status = 'publishing' AND (locked_by = ? OR locked_at <= ?))"
                 ")"

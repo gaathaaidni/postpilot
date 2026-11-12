@@ -281,7 +281,8 @@ class TestLinkedInDualIntegration(unittest.TestCase):
             self.assertEqual(called_url, "https://api.linkedin.com/rest/posts")
 
             called_headers = mock_post.call_args[1]['headers']
-            self.assertEqual(called_headers['LinkedIn-Version'], '202401')
+            self.assertEqual(called_headers['LinkedIn-Version'], linkedin_api.get_rest_api_version())
+            self.assertEqual(called_headers['LinkedIn-Version'], '202610')
             self.assertEqual(called_headers['X-Restli-Protocol-Version'], '2.0.0')
             self.assertEqual(called_headers['Authorization'], 'Bearer TEST_BEARER_TOKEN')
 

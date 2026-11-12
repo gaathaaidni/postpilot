@@ -344,9 +344,16 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
 
         user_authenticated = False
         member_name = None
+        member_sub = None
+        author_urn = None
+        member_identity_verified = False
+        identity_error_code = None
         token_expired = False
         token_scopes = []
         company_publishing_ready = False
+        has_refresh_token = bool(token_data and token_data.get('refresh_token'))
+        token_expires_at = token_data.get('expires_at') if token_data else None
+        refresh_expires_at = token_data.get('refresh_token_expires_at') if token_data else None
 
         if active_token:
             if token_data and linkedin_api.is_token_expired(token_data):
@@ -362,17 +369,19 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
                     if member.get('success'):
                         user_authenticated = True
                         member_name = member.get('name')
+                        member_sub = member.get('sub')
+                        author_urn = member.get('author_urn') or (f"urn:li:person:{member_sub}" if member_sub else None)
+                        member_identity_verified = bool(author_urn)
                     else:
                         introspect = linkedin_api.introspect_token(app_key, active_token)
                         if introspect.get('checked') and introspect.get('active'):
                             user_authenticated = True
                             token_scopes = introspect.get('scopes') or token_scopes
                             member_name = 'Authorized Member (Share on LinkedIn)'
+                            identity_error_code = 'IDENTITY_LOOKUP_FAILED'
                         else:
                             token_expired = True
                 else:
-                    # w_member_social-only tokens (e.g. Gaatha Ventures) do not have OpenID /v2/userinfo permission;
-                    # verify active status via LinkedIn token introspection rather than failing HTTP 403.
                     introspect = linkedin_api.introspect_token(app_key, active_token)
                     if introspect.get('checked'):
                         if introspect.get('active'):
@@ -381,25 +390,38 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
                                 token_scopes = introspect['scopes']
                             if 'openid' in token_scopes and 'profile' in token_scopes:
                                 member = linkedin_api.get_authenticated_member(active_token)
-                                member_name = member.get('name') if member.get('success') else 'Authorized Member (Share on LinkedIn)'
+                                if member.get('success'):
+                                    member_name = member.get('name')
+                                    member_sub = member.get('sub')
+                                    author_urn = member.get('author_urn') or (f"urn:li:person:{member_sub}" if member_sub else None)
+                                    member_identity_verified = bool(author_urn)
+                                else:
+                                    member_name = 'Authorized Member (Share on LinkedIn)'
+                                    identity_error_code = 'IDENTITY_LOOKUP_FAILED'
                             else:
-                                member_name = 'Authorized Member (Share on LinkedIn)'
+                                member_name = 'Authorized Member (w_member_social only; OpenID missing)'
+                                identity_error_code = 'IDENTITY_SCOPE_REQUIRED'
                         else:
                             token_expired = True
                     else:
                         user_authenticated = True
                         member_name = 'Authorized Member (Share on LinkedIn)'
+                        identity_error_code = 'IDENTITY_SCOPE_REQUIRED'
 
                 if user_authenticated:
                     eligibility = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=active_token)
                     company_publishing_ready = bool(eligibility.get('company_publishing_authorized'))
 
-        # Mapping status in database
+        personal_flag_enabled = config.is_linkedin_personal_publishing_enabled()
+        company_flag_enabled = config.is_linkedin_company_publishing_enabled()
+        has_w_member = 'w_member_social' in token_scopes
+        personal_publishing_ready = bool(user_authenticated and not token_expired and has_w_member and member_identity_verified and personal_flag_enabled)
+        organization_publishing_ready = bool(company_publishing_ready and company_flag_enabled)
+
         mapping = existing_by_org.get(str(org_id))
         assigned_brand_id = mapping['brand_id'] if mapping else 1
         assigned_brand_name = brands_map.get(assigned_brand_id, 'GAATHA Suite')
 
-        # Precise Status Label Classification (Requirement 2 & 4)
         if not (has_client_id and has_client_secret):
             status_label = STATUS_CREDENTIALS_MISSING
             action_required = "Client ID or Client Secret missing in .env"
@@ -411,13 +433,18 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
             action_required = "Client credentials configured. 3-legged OAuth sign-in required to generate an active access token."
         elif not company_publishing_ready:
             status_label = STATUS_CONNECTED_LIMITED
-            action_required = "User authenticated. Company Page publishing requires LinkedIn 'Community Management API' approval (w_organization_social)."
-        elif config.is_platform_publishing_enabled('linkedin'):
+            if personal_publishing_ready:
+                action_required = "Personal profile posting ready (w_member_social + verified identity). Company Page publishing pending LinkedIn Community Management API approval (w_organization_social)."
+            elif not member_identity_verified:
+                action_required = "Token active (w_member_social), but lacks 'openid profile' to verify personal member URN; Company Page publishing pending Community Management API (w_organization_social)."
+            else:
+                action_required = "User authenticated. Company Page publishing requires LinkedIn 'Community Management API' approval (w_organization_social)."
+        elif organization_publishing_ready:
             status_label = STATUS_LIVE_READY
             action_required = None
         else:
             status_label = STATUS_CONNECTED
-            action_required = "Connected and authorized for organization publishing (Safe Standby: LinkedIn publishing disabled)."
+            action_required = "Connected and authorized for organization publishing (Safe Standby: Company Page publishing disabled)."
 
         connect_url = f"/api/auth/linkedin/connect?app={app_key}"
 
@@ -426,14 +453,26 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
             'name': display_name,
             'platform': 'linkedin',
             'organization_id': org_id,
+            'org_urn': f"urn:li:organization:{org_id}",
             'client_id_configured': has_client_id,
             'client_secret_configured': has_client_secret,
             'redirect_uri': redirect_uri,
             'user_authenticated': user_authenticated,
+            'token_expired': token_expired,
+            'token_expires_at': token_expires_at,
+            'token_expires_in': int(max(0, (float(token_expires_at) - time.time()))) if token_expires_at else 0,
+            'refresh_token_available': has_refresh_token,
+            'refresh_token_expires_at': refresh_expires_at,
             'authenticated_member': member_name,
+            'member_sub': member_sub,
+            'author_urn': author_urn,
+            'member_identity_verified': member_identity_verified,
+            'identity_error_code': identity_error_code,
             'token_scopes': token_scopes,
             'requested_scopes': linkedin_api.get_default_scopes(app_key),
-            'company_publishing_ready': company_publishing_ready,
+            'personal_publishing_ready': personal_publishing_ready,
+            'company_publishing_authorized': company_publishing_ready,
+            'company_publishing_ready': organization_publishing_ready,
             'assigned_brand_id': assigned_brand_id,
             'assigned_brand_name': assigned_brand_name,
             'status_label': status_label,
@@ -442,10 +481,84 @@ def get_linkedin_integration_status(organization_id: int = 1) -> Dict[str, Any]:
             'last_verified_at': mapping.get('last_verified_at') if mapping else None
         })
 
+    aidni_app = next((a for a in apps_status if a['app_key'] == linkedin_api.APP_AIDNI_GLOBAL), {})
+    gaatha_app = next((a for a in apps_status if a['app_key'] == linkedin_api.APP_GAATHA_VENTURES), {})
+    personal_flag_enabled = config.is_linkedin_personal_publishing_enabled()
+    company_flag_enabled = config.is_linkedin_company_publishing_enabled()
+
+    destinations = [
+        {
+            'key': 'personal:aidni_global',
+            'destination_type': 'personal',
+            'app_key': linkedin_api.APP_AIDNI_GLOBAL,
+            'label': f"Personal LinkedIn Profile ({aidni_app.get('authenticated_member') or 'LinkedIn Member'})",
+            'author_urn': aidni_app.get('author_urn'),
+            'connected': bool(aidni_app.get('user_authenticated')),
+            'read_identity_verified': bool(aidni_app.get('member_identity_verified')),
+            'personal_publishing_ready': bool(aidni_app.get('personal_publishing_ready')),
+            'organization_publishing_ready': False,
+            'missing_permission': None if ('w_member_social' in (aidni_app.get('token_scopes') or []) and aidni_app.get('member_identity_verified')) else 'w_member_social / openid profile',
+            'approval_pending': False,
+            'token_expired': bool(aidni_app.get('token_expired')),
+            'publishing_disabled': not personal_flag_enabled,
+            'status_label': (
+                'Token Expired / Reauthorization Required' if aidni_app.get('token_expired') or not aidni_app.get('user_authenticated')
+                else ('Missing Permission' if not aidni_app.get('member_identity_verified') or 'w_member_social' not in (aidni_app.get('token_scopes') or [])
+                      else ('Personal Publishing Ready' if personal_flag_enabled else 'Publishing Disabled'))
+            ),
+        },
+        {
+            'key': 'organization:145240694',
+            'destination_type': 'organization',
+            'app_key': linkedin_api.APP_AIDNI_GLOBAL,
+            'organization_id': aidni_app.get('organization_id', '145240694'),
+            'author_urn': aidni_app.get('org_urn', 'urn:li:organization:145240694'),
+            'label': 'Aidni Global LLP Company Page (Org 145240694)',
+            'connected': bool(aidni_app.get('user_authenticated')),
+            'read_identity_verified': bool(aidni_app.get('member_identity_verified')),
+            'personal_publishing_ready': False,
+            'organization_publishing_ready': bool(aidni_app.get('company_publishing_ready')),
+            'missing_permission': None if aidni_app.get('company_publishing_authorized') else 'w_organization_social',
+            'approval_pending': not bool(aidni_app.get('company_publishing_authorized')),
+            'token_expired': bool(aidni_app.get('token_expired')),
+            'publishing_disabled': not company_flag_enabled,
+            'status_label': (
+                'Token Expired / Reauthorization Required' if aidni_app.get('token_expired') or not aidni_app.get('user_authenticated')
+                else ('Approval Pending' if not aidni_app.get('company_publishing_authorized')
+                      else ('Organization Publishing Ready' if company_flag_enabled else 'Publishing Disabled'))
+            ),
+        },
+        {
+            'key': 'organization:145250613',
+            'destination_type': 'organization',
+            'app_key': linkedin_api.APP_GAATHA_VENTURES,
+            'organization_id': gaatha_app.get('organization_id', '145250613'),
+            'author_urn': gaatha_app.get('org_urn', 'urn:li:organization:145250613'),
+            'label': 'Gaatha Ventures Sh.p.k. Company Page (Org 145250613)',
+            'connected': bool(gaatha_app.get('user_authenticated')),
+            'read_identity_verified': bool(gaatha_app.get('member_identity_verified')),
+            'personal_publishing_ready': False,
+            'organization_publishing_ready': bool(gaatha_app.get('company_publishing_ready')),
+            'missing_permission': None if gaatha_app.get('company_publishing_authorized') else 'w_organization_social',
+            'approval_pending': not bool(gaatha_app.get('company_publishing_authorized')),
+            'token_expired': bool(gaatha_app.get('token_expired')),
+            'publishing_disabled': not company_flag_enabled,
+            'status_label': (
+                'Token Expired / Reauthorization Required' if gaatha_app.get('token_expired') or not gaatha_app.get('user_authenticated')
+                else ('Approval Pending' if not gaatha_app.get('company_publishing_authorized')
+                      else ('Organization Publishing Ready' if company_flag_enabled else 'Publishing Disabled'))
+            ),
+        },
+    ]
+
     return {
         'success': True,
         'organization_id': organization_id,
-        'apps': apps_status
+        'api_version': linkedin_api.get_rest_api_version(),
+        'personal_publishing_enabled': personal_flag_enabled,
+        'company_publishing_enabled': company_flag_enabled,
+        'apps': apps_status,
+        'destinations': destinations,
     }
 
 

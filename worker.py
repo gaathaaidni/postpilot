@@ -60,6 +60,10 @@ def process_due_scheduled_posts(worker_id, allow_simulation=False):
         due_posts = database.claim_due_scheduled_posts(worker_id, limit=5, allowed_platforms=enabled_platforms)
         for sp in due_posts:
             p_type = sp['post_type']
+            if sp.get('external_post_id'):
+                logger.info(f"Skipping duplicate dispatch for scheduled post #{sp['id']} (already has external_post_id={sp['external_post_id']}).")
+                database.complete_scheduled_post(sp['id'], worker_id, success=True, external_post_id=sp['external_post_id'])
+                continue
             logger.info(f"Executing scheduled post #{sp['id']} on platform/channel '{p_type}'...")
             try:
                 res = PlatformRegistry.dispatch(sp, worker_id=worker_id)

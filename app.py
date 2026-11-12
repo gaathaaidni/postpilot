@@ -603,15 +603,88 @@ def linkedin_organizations():
     })
 
 
+@app.route('/api/linkedin/refresh', methods=['POST'])
+@login_required
+@csrf_protect
+def linkedin_refresh_token():
+    """Safely attempts LinkedIn refresh-token flow only if authorized, preserving existing tokens on failure."""
+    data = request.get_json(silent=True) or {}
+    app_key = data.get('app') or data.get('app_key') or linkedin_api.APP_AIDNI_GLOBAL
+    res = linkedin_api.refresh_access_token(app_key)
+    return jsonify(res), (200 if res.get('success') else 400)
+
+
 @app.route('/api/linkedin/publish', methods=['POST'])
 @login_required
 @csrf_protect
 def linkedin_publish_post():
-    """Publishes or simulates a post to a LinkedIn organization page."""
+    """Publishes or simulates a post to either a verified Personal LinkedIn Profile or a Company Page."""
+    org_id_scope = session.get('organization_id', 1)
+    user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
+    destination = str(data.get('destination') or 'organization').strip().lower()
     org_id = data.get('organization_id')
     app_key = data.get('app') or data.get('app_key')
     text = data.get('text') or data.get('message') or data.get('caption')
+    image_filename = data.get('image_filename')
+    idempotency_key = data.get('idempotency_key')
+
+    if not text or not str(text).strip():
+        return jsonify({'error': 'Post text is required', 'code': 'MISSING_TEXT'}), 400
+
+    if idempotency_key:
+        with database.get_db_connection() as conn:
+            existing = conn.execute(
+                "SELECT id FROM scheduled_posts WHERE idempotency_key = ? AND organization_id = ?",
+                (idempotency_key, org_id_scope)
+            ).fetchone()
+            if existing:
+                rec = database.get_scheduled_post_by_id(existing['id'], organization_id=org_id_scope)
+                return jsonify({
+                    'success': rec['status'] == 'published',
+                    'deduplicated': True,
+                    'external_post_id': rec.get('external_post_id'),
+                    'record': rec
+                }), 200
+
+    if destination == 'personal':
+        resolved_app = linkedin_api.normalize_app_key(app_key or linkedin_api.APP_AIDNI_GLOBAL)
+        if not config.is_linkedin_personal_publishing_enabled():
+            return jsonify({
+                'success': False,
+                'destination': 'personal',
+                'blocked_by_guardrail': True,
+                'error': 'Personal LinkedIn publishing is currently disabled.'
+            }), 403
+        token = session.get(f'linkedin_access_token_{resolved_app}') or linkedin_api.get_active_token(resolved_app)
+        from platform_adapters import PlatformRegistry
+        adapter = PlatformRegistry.get_adapter('linkedin')
+        res = adapter.publish({
+            'destination': 'personal',
+            'app_key': resolved_app,
+            'message': text,
+            'image_filename': image_filename,
+            'access_token': token,
+        })
+        if not res.get('success') or res.get('simulated'):
+            return jsonify(res), (403 if res.get('error_code') in ('PERMISSION_DENIED', 'IDENTITY_SCOPE_REQUIRED', 'UNAUTHENTICATED', 'TOKEN_EXPIRED') else 400)
+
+        ext_id = res.get('external_post_id')
+        record = database.record_immediate_publication(
+            post_type='linkedin',
+            message=text,
+            external_post_id=ext_id,
+            brand_id=data.get('brand_id'),
+            organization_id=org_id_scope,
+            created_by=user_id,
+            image_filename=image_filename,
+            idempotency_key=idempotency_key,
+            provider_response={'external_post_id': ext_id, 'destination': 'personal', 'author_urn': res.get('author_urn'), 'app_key': resolved_app},
+            reason='Immediate publication to Personal LinkedIn Profile via /api/linkedin/publish',
+        )
+        return jsonify({**res, 'record': record}), 200
+
+    # Organization destination
     if not org_id:
         if app_key:
             try:
@@ -621,10 +694,15 @@ def linkedin_publish_post():
                 pass
     if not org_id:
         return jsonify({'error': 'organization_id is required', 'code': 'MISSING_ORG'}), 400
-    if not text:
-        return jsonify({'error': 'Post text is required', 'code': 'MISSING_TEXT'}), 400
 
-    # Strictly isolate access token selection to the specific target LinkedIn application
+    if not config.is_linkedin_company_publishing_enabled():
+        return jsonify({
+            'success': False,
+            'destination': 'organization',
+            'blocked_by_guardrail': True,
+            'error': 'Company-page LinkedIn publishing is disabled pending Community Management API (w_organization_social) approval.'
+        }), 403
+
     clean_org = str(org_id).replace("urn:li:organization:", "").strip()
     if app_key:
         resolved_app = linkedin_api.normalize_app_key(app_key)
@@ -639,16 +717,25 @@ def linkedin_publish_post():
     )
 
     try:
+        elig = linkedin_api.check_organization_publishing_eligibility(resolved_app, access_token=token)
+        if not elig.get('company_publishing_authorized'):
+            return jsonify({
+                'success': False,
+                'destination': 'organization',
+                'error_code': elig.get('eligibility_code', 'COMMUNITY_MANAGEMENT_API_REQUIRED'),
+                'error': elig.get('eligibility_message') or 'Company-page publishing not authorized.'
+            }), 403
+
         result = linkedin_api.create_organization_post(
             organization_id=org_id,
             text=text,
-            app_key=app_key,
+            app_key=resolved_app,
             access_token=token
         )
         return jsonify(result), (200 if result.get('success') else 400)
     except Exception as e:
-        logger.error(f"Error publishing LinkedIn post: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error publishing LinkedIn post: {linkedin_api.sanitize_log_message(str(e))}")
+        return jsonify({'error': linkedin_api.sanitize_log_message(str(e))}), 500
 
 @app.route('/api/publish', methods=['POST'])
 @login_required
@@ -663,11 +750,33 @@ def immediate_publish_post():
     user_id = session.get('user_id')
     data = request.get_json(silent=True) or {}
 
-    post_type = config._normalize_platform_key(data.get('post_type') or data.get('platform') or '')
+    raw_post_type = str(data.get('post_type') or data.get('platform') or '').strip().lower()
+    destination = str(data.get('destination') or data.get('linkedin_destination') or '').strip().lower()
+    is_li_personal = (raw_post_type == 'linkedin_personal') or (config._normalize_platform_key(raw_post_type) == 'linkedin' and destination == 'personal')
+    post_type = 'linkedin' if is_li_personal else config._normalize_platform_key(raw_post_type)
+
     if post_type not in ('facebook', 'instagram', 'linkedin', 'whatsapp'):
         return jsonify({'error': f"Unsupported platform '{post_type}'"}), 400
 
-    if not config.is_platform_publishing_enabled(post_type):
+    if is_li_personal:
+        if not config.is_linkedin_personal_publishing_enabled():
+            return jsonify({
+                'success': False,
+                'platform': 'linkedin',
+                'destination': 'personal',
+                'blocked_by_guardrail': True,
+                'error': "Personal LinkedIn publishing is currently disabled."
+            }), 403
+    elif post_type == 'linkedin':
+        if not config.is_linkedin_company_publishing_enabled():
+            return jsonify({
+                'success': False,
+                'platform': 'linkedin',
+                'destination': 'organization',
+                'blocked_by_guardrail': True,
+                'error': "Company-page LinkedIn publishing is disabled pending Community Management API (w_organization_social) approval."
+            }), 403
+    elif not config.is_platform_publishing_enabled(post_type):
         return jsonify({
             'success': False,
             'platform': post_type,
@@ -710,7 +819,8 @@ def immediate_publish_post():
     payload = {
         'organization_id': org_id,
         'brand_id': brand_id,
-        'post_type': post_type,
+        'post_type': 'linkedin_personal' if is_li_personal else post_type,
+        'destination': 'personal' if is_li_personal else (destination or None),
         'message': message,
         'image_filename': image_filename,
         'image_url': data.get('image_url'),
@@ -728,7 +838,9 @@ def immediate_publish_post():
         return jsonify({
             'success': False,
             'platform': post_type,
+            'destination': res.get('destination'),
             'simulated': bool(res.get('simulated')),
+            'error_code': res.get('error_code'),
             'error': res.get('error') or res.get('message') or 'Live publishing rejected'
         }), 400
 
@@ -762,13 +874,23 @@ def immediate_publish_post():
         image_filename=image_filename,
         idempotency_key=idempotency_key,
         permalink_url=permalink_url,
-        provider_response={'external_post_id': ext_id, 'page_id': page_id, 'permalink_url': permalink_url},
-        reason='Immediate live publication via /api/publish'
+        provider_response={
+            'external_post_id': ext_id,
+            'page_id': page_id,
+            'permalink_url': permalink_url,
+            'destination': res.get('destination'),
+            'author_urn': res.get('author_urn'),
+            'organization_id': res.get('organization_id'),
+            'app_key': res.get('app_key'),
+        },
+        reason=f"Immediate live publication ({res.get('destination') or post_type}) via /api/publish"
     )
     return jsonify({
         'success': True,
         'platform': post_type,
+        'destination': res.get('destination'),
         'page_id': page_id,
+        'author_urn': res.get('author_urn'),
         'external_post_id': ext_id,
         'permalink_url': permalink_url,
         'record': record
