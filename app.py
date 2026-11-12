@@ -1021,8 +1021,10 @@ def whatsapp_simulate_route():
 
     from platform_adapters.whatsapp import PRESERVED_WHATSAPP_NUMBERS, PREFERRED_PHONE_NUMBER_ID, LEGACY_DISCONNECTED_PHONE_NUMBER_ID
     requested_pid = str(data.get('phone_number_id') or PREFERRED_PHONE_NUMBER_ID).strip()
-    if requested_pid not in PRESERVED_WHATSAPP_NUMBERS:
-        return jsonify({'success': False, 'error': f"Unknown WhatsApp sender phone_number_id '{requested_pid}'."}), 400
+    if requested_pid == LEGACY_DISCONNECTED_PHONE_NUMBER_ID:
+        return jsonify({'success': False, 'error': "Secondary number +91 90990 28291 (1171737406016871) is preserved in read-only standby and is not offered for broadcasting."}), 400
+    if requested_pid != PREFERRED_PHONE_NUMBER_ID:
+        return jsonify({'success': False, 'error': f"Only preferred PostPilot sender {PREFERRED_PHONE_NUMBER_ID} (+91 98257 28291) is permitted."}), 400
     res = adapter.send_template(
         recipient_phone=recipient,
         template_name=template_name,
@@ -1032,9 +1034,6 @@ def whatsapp_simulate_route():
     )
     if res.get('success'):
         res['selected_account'] = PRESERVED_WHATSAPP_NUMBERS[requested_pid]
-        if requested_pid == LEGACY_DISCONNECTED_PHONE_NUMBER_ID:
-            res['sender_warning'] = 'Selected account +91 90990 28291 is ON_PREMISE/DISCONNECTED and preserved in standby only.'
-
     return jsonify(res), (200 if res.get('success') else 400)
 
 

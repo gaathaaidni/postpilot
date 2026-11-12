@@ -253,17 +253,20 @@ class TestWhatsAppReadiness(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                'WHATSAPP_ACTIVE_PHONE_NUMBER_ID': '1171737406016871',
-                'WHATSAPP_INACTIVE_PHONE_NUMBER_IDS': '1298748379987770',
+                'WHATSAPP_ACTIVE_PHONE_NUMBER_ID': '1298748379987770',
+                'WHATSAPP_INACTIVE_PHONE_NUMBER_IDS': '1171737406016871,999111222',
             },
         ):
-            ok_active, pid, _ = self.adapter.validate_sender('1171737406016871')
+            ok_active, pid, _ = self.adapter.validate_sender('1298748379987770')
             self.assertTrue(ok_active)
-            self.assertEqual(pid, '1171737406016871')
+            self.assertEqual(pid, '1298748379987770')
 
-            ok_inact, _, err_inact = self.adapter.validate_sender('1298748379987770')
+            ok_inact, _, err_inact = self.adapter.validate_sender('999111222')
             self.assertFalse(ok_inact)
             self.assertIn('inactive', err_inact.lower())
+
+            ok_sec, _, err_sec = self.adapter.validate_sender('1171737406016871')
+            self.assertFalse(ok_sec)
 
             ok_mismatch, _, _ = self.adapter.validate_sender('999888777')
             self.assertFalse(ok_mismatch)
@@ -271,7 +274,7 @@ class TestWhatsAppReadiness(unittest.TestCase):
             res_blocked = self.adapter.send_template(
                 '+919825728291',
                 'client_welcome',
-                phone_number_id='1298748379987770',
+                phone_number_id='1171737406016871',
             )
             self.assertFalse(res_blocked['success'])
 
@@ -289,39 +292,90 @@ class TestWhatsAppReadiness(unittest.TestCase):
         import integrations_service
         from pathlib import Path
 
-        with patch.dict(os.environ, {'FB_ACCESS_TOKEN': ''}):
+        # 1. Preferred sender must resolve ONLY to 1298748379987770 / WABA 1471882524763501
+        #    while preserving legacy .env 1171737406016871 / 1370721214882653 untouched.
+        with patch.dict(os.environ, {
+            'WHATSAPP_PHONE_NUMBER_ID': '1171737406016871',
+            'WHATSAPP_BUSINESS_ACCOUNT_ID': '1370721214882653',
+            'WHATSAPP_ACTIVE_PHONE_NUMBER_ID': '',
+            'WHATSAPP_ACTIVE_WABA_ID': '',
+        }):
+            creds = self.adapter.get_credentials()
+            self.assertEqual(creds['phone_number_id'], '1298748379987770')
+            self.assertEqual(creds['waba_id'], '1471882524763501')
+            self.assertEqual(creds['env_phone_number_id'], '1171737406016871')
+            self.assertEqual(creds['env_waba_id'], '1370721214882653')
+
+        # 2. Without Meta token, unknown fields must report UNKNOWN (never FAILED or guessed)
+        with patch.dict(os.environ, {'FB_ACCESS_TOKEN': ''}), \
+             patch.object(integrations_service.config, 'FB_ACCESS_TOKEN', None):
             status = integrations_service.get_whatsapp_integration_status(organization_id=1)
 
         self.assertTrue(status['success'])
         self.assertFalse(status['automatic_brand_binding'])
+        self.assertEqual(status['verified_via'], 'no_token_unknown')
         self.assertEqual(status['preferred_phone_id'], '1298748379987770')
         self.assertEqual(status['preferred_waba_id'], '1471882524763501')
-        self.assertIn('why_90990_appeared', status['config_diagnosis'])
+        self.assertEqual(status['configured_phone_id'], '1298748379987770')
+        self.assertIn('reconciliation_summary', status['config_diagnosis'])
 
         accounts = status.get('accounts') or []
         self.assertEqual(len(accounts), 2)
         by_pid = {a['phone_number_id']: a for a in accounts}
-        self.assertIn('1298748379987770', by_pid)
-        self.assertIn('1171737406016871', by_pid)
-
         pref = by_pid['1298748379987770']
-        disc = by_pid['1171737406016871']
+        sec = by_pid['1171737406016871']
         self.assertEqual(pref['waba_id'], '1471882524763501')
-        self.assertEqual(disc['waba_id'], '1370721214882653')
+        self.assertEqual(sec['waba_id'], '1370721214882653')
         self.assertTrue(pref['is_preferred_candidate'])
-        self.assertFalse(pref['messaging_eligibility']['eligible'])
-        self.assertFalse(disc['messaging_eligibility']['eligible'])
+        self.assertTrue(pref['offered_for_broadcast'])
+        self.assertFalse(sec['offered_for_broadcast'])
+        self.assertEqual(pref['platform_type'], 'UNKNOWN')
+        self.assertEqual(pref['billing_readiness']['status'], 'UNKNOWN')
         self.assertIsNone(pref['brand_assignment'])
-        self.assertIsNone(disc['brand_assignment'])
+        self.assertIsNone(sec['brand_assignment'])
 
-        # Disconnected legacy number 1171737406016871 must never be activated for live dispatch
-        with patch.object(config, 'is_platform_publishing_enabled', return_value=True), \
-             patch.dict(os.environ, {'WHATSAPP_PHONE_NUMBER_ID': '1171737406016871'}):
-            ok_live, _, err_live = self.adapter.validate_sender('1171737406016871', allow_preserved_sandbox=False)
-            self.assertFalse(ok_live)
-            self.assertIn('DISCONNECTED', err_live)
+        # 3. Live Meta mock: CONNECTED + CLOUD_API must NEVER imply permission to send when BLOCKED/141006
+        def _fake_get(url, **kwargs):
+            m = MagicMock()
+            if '/debug_token' in url:
+                m.json.return_value = {'data': {'is_valid': True, 'expires_at': 0, 'scopes': ['whatsapp_business_management', 'whatsapp_business_messaging'], 'granular_scopes': []}}
+            elif '/560075574375818' in url:
+                m.json.return_value = {'id': '560075574375818', 'name': 'Aidni Global', 'verification_status': 'verified', 'owned_whatsapp_business_accounts': {'data': [{'id': '1471882524763501', 'name': 'Aidni Global'}]}}
+            elif '/1298748379987770' in url:
+                m.json.return_value = {
+                    'id': '1298748379987770', 'display_phone_number': '+91 98257 28291', 'verified_name': 'Aidni Global',
+                    'platform_type': 'CLOUD_API', 'status': 'CONNECTED', 'code_verification_status': 'NOT_VERIFIED',
+                    'name_status': 'AVAILABLE_WITHOUT_REVIEW', 'health_status': {'can_send_message': 'BLOCKED', 'entities': [{'entity_type': 'WABA', 'id': '1471882524763501', 'can_send_message': 'BLOCKED', 'errors': [{'error_code': 141006, 'error_description': 'Payment error'}]}]},
+                }
+            elif '/1471882524763501/message_templates' in url or '/1370721214882653/message_templates' in url:
+                m.json.return_value = {'data': []}
+            elif '/1471882524763501/subscribed_apps' in url or '/1370721214882653/subscribed_apps' in url:
+                m.json.return_value = {'data': []}
+            elif '/1471882524763501' in url:
+                m.json.return_value = {'error': {'code': 100, 'message': 'Authorization Error'}}
+            else:
+                m.json.return_value = {}
+            return m
 
-        # Sandbox simulate defaults to preferred candidate 1298748379987770 and warns if disconnected selected
+        with patch.dict(os.environ, {'FB_ACCESS_TOKEN': 'tok_live'}), \
+             patch.object(integrations_service.config, 'FB_ACCESS_TOKEN', 'tok_live'), \
+             patch('requests.get', side_effect=_fake_get):
+            live_st = integrations_service.get_whatsapp_integration_status(organization_id=1)
+
+        live_pref = live_st['preferred_candidate']
+        self.assertEqual(live_pref['phone_status'], 'CONNECTED')
+        self.assertTrue(live_pref['connected_not_permitted'])
+        self.assertEqual(live_pref['state_classification'], 'RESTRICTED')
+        self.assertFalse(live_pref['messaging_eligibility']['eligible'])
+        self.assertEqual(live_pref['billing_readiness']['status'], 'RESTRICTED')
+        self.assertTrue(live_pref['billing_readiness']['has_payment_error'])
+        self.assertTrue(live_pref['waba_association_verified'])
+
+        # 4. Secondary number 1171737406016871 is NEVER offered for broadcasting or sandbox simulation
+        ok_sec, _, err_sec = self.adapter.validate_sender('1171737406016871')
+        self.assertFalse(ok_sec)
+        self.assertIn('not offered for broadcasting', err_sec.lower())
+
         self._login()
         with patch.object(config, 'is_platform_publishing_enabled', return_value=False):
             r_def = self.client.post(
@@ -332,20 +386,19 @@ class TestWhatsAppReadiness(unittest.TestCase):
             self.assertEqual(r_def.status_code, 200)
             self.assertEqual(json.loads(r_def.data)['sender_phone_number_id'], '1298748379987770')
 
-            r_leg = self.client.post(
+            r_sec = self.client.post(
                 '/api/whatsapp/simulate',
                 json={'recipient_phone': '+91 98257 28291', 'template_name': 'client_welcome', 'message': 'Hi', 'phone_number_id': '1171737406016871'},
                 headers={'X-CSRFToken': 'test_csrf_token'},
             )
-            self.assertEqual(r_leg.status_code, 200)
-            d_leg = json.loads(r_leg.data)
-            self.assertEqual(d_leg['sender_phone_number_id'], '1171737406016871')
-            self.assertIn('sender_warning', d_leg)
+            self.assertEqual(r_sec.status_code, 400)
+            self.assertIn('not offered for broadcasting', json.loads(r_sec.data)['error'].lower())
 
-        # UI safety: simulated dispatches never labeled as delivered; dual accounts & selector present
+        # 5. UI checks: secondary not offered in simulator dropdown, cached/unknown/restricted states distinguished
         js_src = (Path(__file__).resolve().parent / 'static/script.js').read_text(encoding='utf-8')
         self.assertNotIn('Delivered (Simulated)', js_src)
-        for token in ('wa-sender-select', '1298748379987770', '1471882524763501', '1171737406016871', '1370721214882653', 'Billing Readiness', 'Messaging Eligibility'):
+        self.assertNotIn('id="wa-sender-select"', js_src)
+        for token in ('1298748379987770', '1471882524763501', '1171737406016871', '1370721214882653', 'CONFIRMED LIVE', 'CACHED', 'UNKNOWN'):
             self.assertIn(token, js_src)
 
 

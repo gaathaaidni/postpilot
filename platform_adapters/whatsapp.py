@@ -39,22 +39,22 @@ PRESERVED_WHATSAPP_NUMBERS = {
         "waba_id": "1471882524763501",
         "display_phone_number": "+91 98257 28291",
         "business_name": "Aidni Global",
-        "role": "preferred_candidate",
+        "role": "preferred_sender",
         "is_preferred_candidate": True,
+        "offered_for_broadcast": True,
         "is_disconnected_legacy": False,
-        "expected_platform_type": "CLOUD_API",
-        "notes": "Cloud API connected candidate retained for future broadcasting once Meta verification, billing, timezone, and templates are ready.",
+        "notes": "Only preferred PostPilot WhatsApp sender under verified Business Portfolio 560075574375818 (Aidni Global). Connected does NOT mean permitted; sending remains restricted pending verification, billing, templates, and webhooks.",
     },
     "1171737406016871": {
         "phone_number_id": "1171737406016871",
         "waba_id": "1370721214882653",
         "display_phone_number": "+91 90990 28291",
         "business_name": "Gaatha Ventures",
-        "role": "preserved_disconnected",
+        "role": "preserved_secondary",
         "is_preferred_candidate": False,
+        "offered_for_broadcast": False,
         "is_disconnected_legacy": True,
-        "expected_platform_type": "ON_PREMISE",
-        "notes": "Preserved ON_PREMISE/DISCONNECTED account currently referenced in .env WHATSAPP_PHONE_NUMBER_ID. Never activated for dispatch.",
+        "notes": "Preserved secondary account (.env legacy reference). Not deleted or migrated, and NEVER offered for broadcasting.",
     },
 }
 
@@ -91,12 +91,12 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
 
         active_override = (os.getenv('WHATSAPP_ACTIVE_PHONE_NUMBER_ID') or '').strip()
         configured_phone_id = (os.getenv('WHATSAPP_PHONE_NUMBER_ID') or '').strip()
-        phone_id = active_override or configured_phone_id or PREFERRED_PHONE_NUMBER_ID
+        # +91 98257 28291 (1298748379987770) is the ONLY preferred PostPilot sender; preserve .env 1171737406016871 untouched without selecting it for broadcast
+        phone_id = active_override or PREFERRED_PHONE_NUMBER_ID
 
         configured_waba_id = (os.getenv('WHATSAPP_BUSINESS_ACCOUNT_ID') or os.getenv('WHATSAPP_WABA_ID') or '').strip()
         waba_id = (
             os.getenv('WHATSAPP_ACTIVE_WABA_ID')
-            or configured_waba_id
             or PREFERRED_WABA_ID
         ).strip()
 
@@ -126,27 +126,22 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Enforces strict sender-number isolation without mutating .env or falling back silently.
-        Live publishing NEVER activates the disconnected ON_PREMISE account (1171737406016871).
-        Sandbox previews may inspect/simulate either registered account when allow_preserved_sandbox=True.
+        +91 98257 28291 (1298748379987770) is the ONLY preferred sender offered by PostPilot.
+        Secondary account +91 90990 28291 (1171737406016871) is preserved untouched and NEVER offered for broadcasting.
         """
         creds = self.get_credentials()
         configured = creds.get('phone_number_id')
-        active_override = (os.getenv('WHATSAPP_ACTIVE_PHONE_NUMBER_ID') or '').strip() or None
         inactive_ids = creds.get('inactive_phone_number_ids') or set()
 
-        target = str(requested_phone_number_id).strip() if requested_phone_number_id else (active_override or PREFERRED_PHONE_NUMBER_ID if allow_preserved_sandbox else configured)
+        target = str(requested_phone_number_id).strip() if requested_phone_number_id else configured
         if not target:
             return False, None, "No WhatsApp sender phone_number_id is configured."
         if target in inactive_ids:
             return False, None, f"Sender phone_number_id '{target}' is explicitly marked inactive and cannot dispatch."
-
-        if allow_preserved_sandbox and target in PRESERVED_WHATSAPP_NUMBERS and not active_override:
-            return True, target, None
-
+        if target == LEGACY_DISCONNECTED_PHONE_NUMBER_ID:
+            return False, None, "Secondary account +91 90990 28291 (1171737406016871) is preserved in read-only standby and is not offered for broadcasting."
         if requested_phone_number_id and configured and target != configured:
-            return False, None, f"Sender mismatch: '{target}' does not match configured active sender '{configured}'."
-        if target == LEGACY_DISCONNECTED_PHONE_NUMBER_ID and config.is_platform_publishing_enabled('whatsapp'):
-            return False, None, "Account +91 90990 28291 (1171737406016871) is ON_PREMISE/DISCONNECTED and preserved in standby; cannot activate for live messaging."
+            return False, None, f"Sender mismatch: '{target}' does not match preferred sender '{configured}'."
         return True, target, None
 
     def validate_connection(self, **kwargs) -> Dict[str, Any]:

@@ -1156,7 +1156,7 @@ window._ppIntegrationsCache = { ts: 0, data: null, pending: null };
 async function fetchIntegrationsStatusCached(forceRefresh = false) {
     const now = Date.now();
     if (!forceRefresh && window._ppIntegrationsCache.data && (now - window._ppIntegrationsCache.ts) < 60000) {
-        return window._ppIntegrationsCache.data;
+        return { ...window._ppIntegrationsCache.data, _is_cached: true, _cached_ts: window._ppIntegrationsCache.ts };
     }
     if (!forceRefresh && window._ppIntegrationsCache.pending) {
         return window._ppIntegrationsCache.pending;
@@ -1166,6 +1166,7 @@ async function fetchIntegrationsStatusCached(forceRefresh = false) {
         .then(data => {
             if (data && (data.meta || data.linkedin || data.whatsapp)) {
                 window._ppIntegrationsCache = { ts: Date.now(), data, pending: null };
+                return { ...data, _is_cached: false, _cached_ts: window._ppIntegrationsCache.ts };
             } else {
                 window._ppIntegrationsCache.pending = null;
             }
@@ -2145,6 +2146,9 @@ async function loadIntegrationsDashboard(forceRefresh = false) {
                         </p>
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                        <span class="badge ${intData._is_cached ? 'badge-neutral' : 'badge-info'}">
+                            <i class="fa-solid ${intData._is_cached ? 'fa-clock-rotate-left' : 'fa-satellite-dish'}"></i> ${intData._is_cached ? 'Cached Status' : 'Live Meta Check'}
+                        </span>
                         <span class="badge badge-warning"><i class="fa-solid fa-lock"></i> WHATSAPP_PUBLISHING_ENABLED=0</span>
                         ${getIntegrationsStatusBadge(whatsapp.status_label || 'Verification Required', whatsapp.action_required)}
                     </div>
@@ -7268,36 +7272,44 @@ let waDualAccountsCache = [
         waba_id: '1471882524763501',
         display_phone_number: '+91 98257 28291',
         verified_name: 'Aidni Global',
-        role: 'preferred_candidate',
+        role: 'preferred_sender',
         is_preferred_candidate: true,
-        is_disconnected_legacy: false,
-        platform_type: 'CLOUD_API',
-        phone_status: 'CONNECTED',
-        code_verification_status: 'NOT_VERIFIED',
-        business_verification_status: 'verified',
-        health_can_send: 'BLOCKED',
+        offered_for_broadcast: true,
+        is_cached: true,
+        state_classification: 'CACHED',
+        platform_type: 'UNKNOWN',
+        phone_status: 'UNKNOWN',
+        code_verification_status: 'UNKNOWN',
+        business_verification_status: 'UNKNOWN',
+        name_status: 'UNKNOWN',
+        timezone_status: 'UNKNOWN',
+        health_can_send: 'UNKNOWN',
         approved_templates_count: 0,
-        messaging_eligibility: { eligible: false, reason: 'Sending blocked pending verification, billing & templates' },
-        billing_readiness: { ready: false, reason: 'Payment missing (141006) / Timezone unset (141007)' },
-        template_readiness: { meta_approved_count: 0, local_preview_count: 4 }
+        messaging_eligibility: { status: 'UNKNOWN', eligible: false, reason: 'Cached placeholder â€” awaiting live Meta Graph API check' },
+        billing_readiness: { status: 'UNKNOWN', ready: 'UNKNOWN', reason: 'UNKNOWN (awaiting live Meta check)' },
+        template_readiness: { status: 'UNKNOWN', meta_approved_count: 'UNKNOWN', local_preview_count: 4 }
     },
     {
         phone_number_id: '1171737406016871',
         waba_id: '1370721214882653',
         display_phone_number: '+91 90990 28291',
         verified_name: 'Gaatha Ventures',
-        role: 'preserved_disconnected',
+        role: 'preserved_secondary',
         is_preferred_candidate: false,
-        is_disconnected_legacy: true,
-        platform_type: 'ON_PREMISE',
-        phone_status: 'DISCONNECTED',
-        code_verification_status: 'NOT_VERIFIED',
-        business_verification_status: 'not_verified',
-        health_can_send: 'BLOCKED',
+        offered_for_broadcast: false,
+        is_cached: true,
+        state_classification: 'CACHED',
+        platform_type: 'UNKNOWN',
+        phone_status: 'UNKNOWN',
+        code_verification_status: 'UNKNOWN',
+        business_verification_status: 'UNKNOWN',
+        name_status: 'UNKNOWN',
+        timezone_status: 'UNKNOWN',
+        health_can_send: 'UNKNOWN',
         approved_templates_count: 0,
-        messaging_eligibility: { eligible: false, reason: 'ON_PREMISE / DISCONNECTED (Preserved only; never activated)' },
-        billing_readiness: { ready: false, reason: 'Payment missing (141006) / Timezone unset (141007)' },
-        template_readiness: { meta_approved_count: 0, local_preview_count: 4 }
+        messaging_eligibility: { status: 'RESTRICTED', eligible: false, reason: 'Preserved secondary account (NOT offered for broadcasting)' },
+        billing_readiness: { status: 'UNKNOWN', ready: 'UNKNOWN', reason: 'UNKNOWN (awaiting live Meta check)' },
+        template_readiness: { status: 'UNKNOWN', meta_approved_count: 'UNKNOWN', local_preview_count: 4 }
     }
 ];
 
@@ -7343,16 +7355,25 @@ function _getSelectedWAAccount() {
 function _renderDualWhatsAppAccountCards(accounts) {
     return (accounts || []).map(acc => {
         const isPref = !!acc.is_preferred_candidate || acc.phone_number_id === '1298748379987770';
-        const isDisc = !!acc.is_disconnected_legacy || acc.platform_type === 'ON_PREMISE' || acc.phone_status === 'DISCONNECTED';
+        const isCached = !!acc.is_cached;
         const borderCol = isPref ? 'var(--primary)' : 'var(--border)';
         const roleBadge = isPref
-            ? '<span class="badge badge-info"><i class="fa-solid fa-star"></i> Preferred Future Candidate</span>'
-            : '<span class="badge badge-neutral"><i class="fa-solid fa-lock"></i> Preserved (.env Ref &middot; Never Activate)</span>';
-        const connBadge = `<span class="badge ${isDisc ? 'badge-warning' : 'badge-success'}">${escapeHtml(acc.platform_type || 'UNKNOWN')} &middot; ${escapeHtml(acc.phone_status || 'UNKNOWN')}</span>`;
-        const verSummary = `Portfolio: ${escapeHtml(acc.business_verification_status || 'unknown')} &middot; OTP: ${escapeHtml(acc.code_verification_status || 'NOT_VERIFIED')} &middot; Name: ${escapeHtml(acc.name_status || 'UNREVIEWED')}`;
-        const msgReason = (acc.messaging_eligibility && acc.messaging_eligibility.reason) || (isDisc ? 'Disconnected standby only' : 'Sending blocked pending readiness');
-        const billReason = (acc.billing_readiness && acc.billing_readiness.reason) || 'Billing setup pending (141006)';
-        const tplApproved = (acc.template_readiness && acc.template_readiness.meta_approved_count) ?? (acc.approved_templates_count ?? 0);
+            ? '<span class="badge badge-info"><i class="fa-solid fa-star"></i> Only Preferred Sender</span>'
+            : '<span class="badge badge-neutral"><i class="fa-solid fa-lock"></i> Preserved Secondary &middot; Not Offered</span>';
+
+        const regState = (acc.platform_type === 'UNKNOWN' || acc.phone_status === 'UNKNOWN') ? 'UNKNOWN' : `${acc.platform_type} Â· ${acc.phone_status}`;
+        const regBadgeCls = regState === 'UNKNOWN' ? 'badge-neutral' : (acc.phone_status === 'CONNECTED' ? 'badge-success' : 'badge-warning');
+        const cacheBadge = isCached ? '<span class="badge badge-neutral">CACHED</span>' : '<span class="badge badge-info">CONFIRMED LIVE</span>';
+
+        const eligStatus = (acc.messaging_eligibility && acc.messaging_eligibility.status) || 'UNKNOWN';
+        const eligBadgeCls = eligStatus === 'UNKNOWN' ? 'badge-neutral' : (eligStatus === 'ELIGIBLE' ? 'badge-success' : 'badge-warning');
+        const stateCls = acc.state_classification || (isCached ? 'CACHED' : eligStatus);
+
+        const verSummary = `Portfolio: ${escapeHtml(acc.business_verification_status || 'UNKNOWN')} &middot; OTP: ${escapeHtml(acc.code_verification_status || 'UNKNOWN')} &middot; Name: ${escapeHtml(acc.name_status || 'UNKNOWN')}`;
+        const tzText = acc.timezone_status || 'UNKNOWN';
+        const msgReason = (acc.messaging_eligibility && acc.messaging_eligibility.reason) || 'UNKNOWN';
+        const billReason = (acc.billing_readiness && acc.billing_readiness.reason) || 'UNKNOWN';
+        const tplApproved = (acc.template_readiness && acc.template_readiness.meta_approved_count !== undefined) ? acc.template_readiness.meta_approved_count : 'UNKNOWN';
         const tplLocal = (acc.template_readiness && acc.template_readiness.local_preview_count) ?? 4;
 
         return `
@@ -7362,20 +7383,22 @@ function _renderDualWhatsAppAccountCards(accounts) {
                         <div style="font-size: 0.95rem; font-weight: 800; color: var(--text-primary);">${escapeHtml(acc.display_phone_number || acc.phone_number_id)} &mdash; ${escapeHtml(acc.verified_name || acc.business_name || '')}</div>
                         <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.25rem;">
                             ${roleBadge}
-                            ${connBadge}
+                            <span class="badge ${regBadgeCls}">${escapeHtml(regState)}</span>
+                            ${cacheBadge}
                         </div>
                     </div>
-                    <span class="badge badge-danger">Eligibility: BLOCKED</span>
+                    <span class="badge ${eligBadgeCls}">Eligibility: ${escapeHtml(eligStatus)} (${escapeHtml(stateCls)})</span>
                 </div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.35rem 0.75rem; font-size: 0.78rem; color: var(--text-secondary);">
                     <div><strong>Phone Number ID:</strong> <code>${escapeHtml(acc.phone_number_id)}</code></div>
                     <div><strong>WABA ID:</strong> <code>${escapeHtml(acc.waba_id)}</code></div>
-                    <div><strong>Connection:</strong> ${escapeHtml(acc.platform_type || 'UNKNOWN')} / ${escapeHtml(acc.phone_status || 'UNKNOWN')}</div>
-                    <div><strong>Templates:</strong> ${tplApproved} Meta-Approved &middot; ${tplLocal} Local Previews</div>
+                    <div><strong>Offered for Broadcast:</strong> ${isPref ? 'Preferred Only (When Ready)' : 'No (Read-Only Standby)'}</div>
+                    <div><strong>Templates:</strong> ${escapeHtml(String(tplApproved))} Meta-Approved &middot; ${tplLocal} Local Previews</div>
                     <div style="grid-column: 1 / -1;"><strong>Verification:</strong> ${verSummary}</div>
+                    <div style="grid-column: 1 / -1;"><strong>Timezone:</strong> ${escapeHtml(tzText)}</div>
                     <div style="grid-column: 1 / -1;"><strong>Messaging Eligibility:</strong> ${escapeHtml(msgReason)}</div>
                     <div style="grid-column: 1 / -1;"><strong>Billing Readiness:</strong> ${escapeHtml(billReason)}</div>
-                    <div style="grid-column: 1 / -1;"><strong>Brand Assignment:</strong> None (Auto-binding disabled) &middot; <strong>Sandbox vs Live:</strong> Sandbox Simulation Only</div>
+                    <div style="grid-column: 1 / -1;"><strong>Brand Assignment:</strong> None (Auto-binding disabled)</div>
                 </div>
             </div>
         `;
@@ -7431,9 +7454,10 @@ function renderWhatsAppView(container) {
                         <i class="fa-solid fa-tower-observation" style="color: var(--primary);"></i> Registered WhatsApp Business Accounts (Independent Tracking)
                     </div>
                     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        <span id="wa-templates-meta-pill" class="badge badge-warning">Meta Templates: Checking...</span>
-                        <span id="wa-webhook-meta-pill" class="badge badge-warning">Webhook: Checking...</span>
-                        <span id="wa-token-meta-pill" class="badge badge-warning">Token: Checking...</span>
+                        <span id="wa-cache-status-pill" class="badge badge-neutral">CACHED Â· Checking Live Meta...</span>
+                        <span id="wa-templates-meta-pill" class="badge badge-neutral">Meta Templates: UNKNOWN</span>
+                        <span id="wa-webhook-meta-pill" class="badge badge-neutral">Webhook: UNKNOWN</span>
+                        <span id="wa-token-meta-pill" class="badge badge-neutral">Token: UNKNOWN</span>
                     </div>
                 </div>
                 <div id="wa-preserved-numbers-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1rem;">
@@ -7450,14 +7474,10 @@ function renderWhatsAppView(container) {
                     </h3>
 
                     <div style="margin-bottom: 1rem;">
-                        <label for="wa-sender-select" style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Sender Account Selector (Both Numbers Â· Sandbox Preview)</label>
-                        <select id="wa-sender-select" class="form-control" style="font-size: 0.85rem;" onchange="handleWASenderChange(this.value)">
-                            ${waDualAccountsCache.map(a => `
-                                <option value="${escapeHtml(a.phone_number_id)}" ${a.phone_number_id === waSelectedSenderId ? 'selected' : ''}>
-                                    ${escapeHtml(a.display_phone_number)} &mdash; ID ${escapeHtml(a.phone_number_id)} &middot; WABA ${escapeHtml(a.waba_id)} (${a.is_preferred_candidate ? 'CLOUD_API Â· Preferred Candidate' : 'ON_PREMISE Â· Disconnected Preserved'})
-                                </option>
-                            `).join('')}
-                        </select>
+                        <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.35rem; display: block;">Preferred PostPilot WhatsApp Sender (Sandbox Only &middot; Secondary Not Offered)</label>
+                        <div style="padding: 0.55rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-surface-subtle); font-size: 0.83rem; font-weight: 600;">
+                            +91 98257 28291 &mdash; ID <code>1298748379987770</code> &middot; WABA <code>1471882524763501</code> (Aidni Global)
+                        </div>
                         <div style="display: flex; align-items: center; gap: 0.65rem; padding: 0.6rem 0.8rem; margin-top: 0.5rem; background: var(--bg-surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);">
                             <div style="width: 30px; height: 30px; border-radius: 50%; background: var(--success); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.8rem;">
                                 WA
@@ -7560,16 +7580,9 @@ function renderWhatsAppView(container) {
     ]).then(([wa, tplData]) => {
         if (!wa) return;
         const accts = Array.isArray(wa.accounts) ? wa.accounts : (Array.isArray(wa.numbers) ? wa.numbers : []);
+        waSelectedSenderId = '1298748379987770';
         if (accts.length > 0) {
             waDualAccountsCache = accts;
-            const selEl = document.getElementById('wa-sender-select');
-            if (selEl) {
-                selEl.innerHTML = accts.map(a => `
-                    <option value="${escapeHtml(a.phone_number_id)}" ${a.phone_number_id === waSelectedSenderId ? 'selected' : ''}>
-                        ${escapeHtml(a.display_phone_number)} &mdash; ID ${escapeHtml(a.phone_number_id)} &middot; WABA ${escapeHtml(a.waba_id)} (${a.is_preferred_candidate ? 'CLOUD_API Â· Preferred Candidate' : 'ON_PREMISE Â· Disconnected Preserved'})
-                    </option>
-                `).join('');
-            }
             const numsGrid = document.getElementById('wa-preserved-numbers-grid');
             if (numsGrid) {
                 numsGrid.innerHTML = _renderDualWhatsAppAccountCards(accts);
@@ -7580,6 +7593,12 @@ function renderWhatsAppView(container) {
         const badgeEl = document.getElementById('wa-studio-verification-badge');
         const guardEl = document.getElementById('wa-studio-guardrail-pill');
         const diagEl = document.getElementById('wa-config-diagnosis-text');
+        const cachePill = document.getElementById('wa-cache-status-pill');
+        if (cachePill) {
+            const isCached = !!wa.is_cached || wa.verified_via !== 'meta_graph_api_live';
+            cachePill.className = `badge ${isCached ? 'badge-neutral' : 'badge-info'}`;
+            cachePill.textContent = isCached ? 'CACHED / UNKNOWN LIVE' : 'CONFIRMED LIVE (Meta Graph API)';
+        }
         const tplPill = document.getElementById('wa-templates-meta-pill');
         const whPill = document.getElementById('wa-webhook-meta-pill');
         const tokPill = document.getElementById('wa-token-meta-pill');
@@ -7594,8 +7613,8 @@ function renderWhatsAppView(container) {
                 ? '<i class="fa-solid fa-tower-broadcast"></i> WhatsApp Broadcast Active'
                 : '<i class="fa-solid fa-lock"></i> WHATSAPP_PUBLISHING_ENABLED=0 (Sandbox Only)';
         }
-        if (diagEl && wa.config_diagnosis && wa.config_diagnosis.why_90990_appeared) {
-            diagEl.textContent = `Configuration Diagnosis: ${wa.config_diagnosis.why_90990_appeared}`;
+        if (diagEl && wa.config_diagnosis && (wa.config_diagnosis.reconciliation_summary || wa.config_diagnosis.why_90990_appeared)) {
+            diagEl.textContent = `Configuration Reconciliation: ${wa.config_diagnosis.reconciliation_summary || wa.config_diagnosis.why_90990_appeared}`;
         }
         if (tplPill) {
             const liveApproved = tplData ? (tplData.meta_approved_count ?? 0) : (wa.approved_templates_count ?? 0);
