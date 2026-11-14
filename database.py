@@ -732,6 +732,11 @@ def init_db():
         _ensure_column_exists(conn, 'users', 'is_active', 'INTEGER DEFAULT 1')
         _ensure_column_exists(conn, 'users', 'email', 'TEXT')
         _ensure_column_exists(conn, 'scheduled_posts', 'external_post_id', 'TEXT')
+        _ensure_column_exists(conn, 'whatsapp_webhook_events', 'organization_id', 'INTEGER DEFAULT 1')
+        _ensure_column_exists(conn, 'whatsapp_webhook_events', 'message_id', 'TEXT')
+        _ensure_column_exists(conn, 'whatsapp_webhook_events', 'status_value', 'TEXT')
+        _ensure_column_exists(conn, 'whatsapp_webhook_events', 'recipient_phone', 'TEXT')
+        _ensure_column_exists(conn, 'whatsapp_webhook_events', 'payload_json', 'TEXT')
 
         # Seed default commercial subscription plans
         default_plans = [

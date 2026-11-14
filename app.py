@@ -109,6 +109,7 @@ def csrf_protect(f):
             # Check header, form, or JSON
             token = (
                 request.headers.get('X-CSRFToken') or
+                request.headers.get('X-CSRF-Token') or
                 request.form.get('csrf_token') or
                 (request.is_json and request.get_json(silent=True) and request.get_json().get('csrf_token'))
             )

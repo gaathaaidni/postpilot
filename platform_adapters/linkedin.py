@@ -203,7 +203,7 @@ class LinkedInAdapter(BasePlatformAdapter):
             }
 
         # Organization / Company Page path
-        app_key = payload.get('app_key')
+        app_key = payload.get('app_key') or payload.get('app_name')
         acct = None
         if not app_key and payload.get('brand_id'):
             try:
@@ -227,10 +227,11 @@ class LinkedInAdapter(BasePlatformAdapter):
                     logger.warning(f"No LinkedIn account mapped for brand #{payload['brand_id']} ({ex}). Cross-brand inheritance blocked.")
                     return {'success': False, 'platform': self.platform_key, 'destination': 'organization', 'error': f"No LinkedIn account mapped for brand #{payload['brand_id']}. Cross-brand inheritance blocked."}
 
-        app_key = self.resolve_app_key(payload.get('linkedin_org_id'), app_key)
+        target_org = payload.get('linkedin_org_id') or payload.get('organization_id')
+        app_key = self.resolve_app_key(target_org, app_key)
         app_cfg = linkedin_api.get_app_config(app_key)
         acct_org = acct.get('account_identifier') if acct else None
-        org_id = payload.get('linkedin_org_id') or acct_org or app_cfg['org_id']
+        org_id = target_org or acct_org or app_cfg['org_id']
 
         if config.is_linkedin_company_publishing_enabled():
             elig = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=explicit_token)

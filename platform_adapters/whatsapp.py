@@ -84,8 +84,8 @@ class WhatsAppCloudAdapter(BaseMessagingAdapter):
 
     def get_credentials(self) -> Dict[str, Any]:
         """Resolves WhatsApp credentials and dual-account metadata without exposing secrets."""
-        wa_tok = (os.getenv('WHATSAPP_ACCESS_TOKEN') or '').strip()
-        fb_tok = (getattr(config, 'FB_ACCESS_TOKEN', None) or os.getenv('FB_ACCESS_TOKEN') or '').strip()
+        wa_tok = (os.getenv('WHATSAPP_ACCESS_TOKEN') if 'WHATSAPP_ACCESS_TOKEN' in os.environ else (getattr(config, 'WHATSAPP_ACCESS_TOKEN', None) or '')).strip()
+        fb_tok = (os.getenv('FB_ACCESS_TOKEN') if 'FB_ACCESS_TOKEN' in os.environ else (getattr(config, 'FB_ACCESS_TOKEN', None) or '')).strip()
         token = wa_tok or fb_tok or None
         token_source = 'WHATSAPP_ACCESS_TOKEN' if wa_tok else ('FB_ACCESS_TOKEN' if fb_tok else 'NONE')
 
