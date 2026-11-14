@@ -432,6 +432,40 @@ def init_db():
             )
         ''')
 
+        # 8c. WhatsApp suppression list table
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS whatsapp_suppression_list (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                phone_e164 TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT 'USER_OPT_OUT',
+                keyword TEXT,
+                source_waba_id TEXT,
+                source_phone_number_id TEXT,
+                source_message_id TEXT,
+                suppressed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, phone_e164)
+            )
+        ''')
+
+        # 8d. WhatsApp templates table
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS whatsapp_templates (
+                id {auto_id},
+                waba_id TEXT NOT NULL,
+                template_id TEXT,
+                name TEXT NOT NULL,
+                language TEXT NOT NULL DEFAULT 'en',
+                category TEXT,
+                status TEXT NOT NULL,
+                components_json TEXT,
+                variable_count INTEGER DEFAULT 0,
+                rejected_reason TEXT,
+                synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(waba_id, name, language)
+            )
+        ''')
+
         # 9. Brand marketing profiles (positioning, voice & tone, approved facts)
         conn.execute(f'''
             CREATE TABLE IF NOT EXISTS brand_marketing_profiles (
@@ -772,6 +806,9 @@ def init_db():
 
     # Seed default admin user if none exists
     init_default_admin()
+
+    # Seed Growth & Intelligence Property Registry foundation
+    init_growth_properties()
 
 def init_default_tasks():
     """Ensures records exist in task_state for all active modules."""
@@ -4312,3 +4349,489 @@ def get_whatsapp_webhook_events(organization_id=1, limit=50):
         ).fetchall()
         return [dict(r) for r in rows]
 
+# ==============================================================================
+# Growth & Intelligence — Phase 1: Seven Property Registry & Migration Foundation
+# ==============================================================================
+
+def init_growth_properties(conn=None):
+    """
+    Initializes schema_migrations and growth_properties tables, records migration version,
+    and seeds the 7 default GAATHA ecosystem properties mapped to existing brand workspaces.
+    """
+    is_pg = is_postgres()
+    auto_id = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+    def _execute_init(c):
+        # 1. schema_migrations table (Additive migration tracking)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version TEXT PRIMARY KEY,
+                description TEXT,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        # 2. growth_properties table (Central ecosystem property registry)
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS growth_properties (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                brand_id INTEGER,
+                property_key TEXT NOT NULL,
+                slug TEXT,
+                display_name TEXT NOT NULL,
+                canonical_url TEXT NOT NULL,
+                property_type TEXT NOT NULL DEFAULT 'web',
+                description TEXT,
+                category TEXT,
+                timezone TEXT DEFAULT 'Asia/Kolkata',
+                target_countries TEXT,
+                primary_language TEXT DEFAULT 'en',
+                ga4_property_id TEXT,
+                ga4_measurement_id TEXT,
+                gsc_site_url TEXT,
+                bing_site_url TEXT,
+                umami_website_id TEXT,
+                sitemap_url TEXT,
+                metadata_json TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, property_key)
+            )
+        ''')
+
+        # Indexes for query performance and tenant isolation
+        c.execute("CREATE INDEX IF NOT EXISTS idx_growth_properties_org ON growth_properties(organization_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_growth_properties_key ON growth_properties(organization_id, property_key)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_growth_properties_slug ON growth_properties(slug)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_growth_properties_brand ON growth_properties(organization_id, brand_id)")
+
+        # Record migration version idempotently
+        migration_version = '20261114_001_growth_properties'
+        migration_desc = 'Create schema_migrations and growth_properties foundation for Seven Property Registry'
+        existing_mig = c.execute(
+            "SELECT version FROM schema_migrations WHERE version = ?",
+            (migration_version,)
+        ).fetchone()
+        if not existing_mig:
+            c.execute(
+                "INSERT INTO schema_migrations (version, description) VALUES (?, ?)",
+                (migration_version, migration_desc)
+            )
+
+        # Seed default 7 GAATHA ecosystem properties for organization 1
+        brand_rows = c.execute("SELECT id, slug FROM brands WHERE organization_id = 1").fetchall()
+        brands_map = {r['slug']: r['id'] for r in brand_rows}
+
+        defaults = [
+            {
+                'property_key': 'gaatha_corporate',
+                'display_name': 'GAATHA Corporate',
+                'canonical_url': 'https://gaatha.tech',
+                'property_type': 'corporate',
+                'description': 'Main GAATHA ecosystem corporate presence and flagship brand',
+                'category': 'Corporate',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN,US,GB,AE',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('gaatha-flagship') or 101
+            },
+            {
+                'property_key': 'gaatha_terra',
+                'display_name': 'GAATHA Terra',
+                'canonical_url': 'https://terra.gaatha.tech',
+                'property_type': 'saas_product',
+                'description': 'Global sustainability, environmental intelligence, agriculture, and land systems platform',
+                'category': 'Sustainability / AgTech',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'GLOBAL',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('gaatha-terra') or 4
+            },
+            {
+                'property_key': 'gaatha_suite',
+                'display_name': 'GAATHA Suite',
+                'canonical_url': 'https://gaatha.tech/suite/',
+                'property_type': 'saas_product',
+                'description': 'Core business marketing, operations, and customer engagement SaaS suite',
+                'category': 'Business SaaS',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN,AE,US,GB',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('gaatha-suite') or 1
+            },
+            {
+                'property_key': 'sentira_ai',
+                'display_name': 'Sentira AI',
+                'canonical_url': 'https://gaatha.tech/sentira/',
+                'property_type': 'saas_product',
+                'description': 'AI-native intelligence, speech processing, and automation solutions',
+                'category': 'Artificial Intelligence',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'GLOBAL',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('sentira-ai') or 3
+            },
+            {
+                'property_key': 'gaatha_pos',
+                'display_name': 'GAATHA POS',
+                'canonical_url': 'https://gaatha.tech/pos/',
+                'property_type': 'saas_product',
+                'description': 'Point of sale, retail, and omnichannel management system',
+                'category': 'Retail / POS',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN,AE',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('gaatha-pos') or 2
+            },
+            {
+                'property_key': 'gaatha_ai',
+                'display_name': 'GAATHA AI',
+                'canonical_url': 'https://ai.gaatha.tech',
+                'property_type': 'saas_product',
+                'description': 'Next-generation AI research, multi-turn chat, and generative applications platform',
+                'category': 'AI / GenAI',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'GLOBAL',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('gaatha-ai') or 6
+            },
+            {
+                'property_key': 'phoenix',
+                'display_name': 'Phoenix',
+                'canonical_url': 'https://phoenix.gaatha.tech',
+                'property_type': 'subdomain',
+                'description': 'Flagship international immigration, visa, and global mobility services',
+                'category': 'Immigration / Global Mobility',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN,NZ,CA,AU,GB,DE',
+                'primary_language': 'en',
+                'brand_id': brands_map.get('phoenix-by-gaatha') or 5
+            }
+        ]
+
+        for p in defaults:
+            existing = c.execute(
+                "SELECT id FROM growth_properties WHERE organization_id = ? AND property_key = ?",
+                (1, p['property_key'])
+            ).fetchone()
+            if not existing:
+                c.execute('''
+                    INSERT INTO growth_properties (
+                        organization_id, brand_id, property_key, slug, display_name,
+                        canonical_url, property_type, description, category, timezone,
+                        target_countries, primary_language, is_active
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ''', (
+                    1, p['brand_id'], p['property_key'], p['property_key'], p['display_name'],
+                    p['canonical_url'], p['property_type'], p['description'], p['category'],
+                    p['timezone'], p['target_countries'], p['primary_language']
+                ))
+        c.commit()
+
+    if conn is not None:
+        _execute_init(conn)
+    else:
+        with get_db_connection() as c:
+            _execute_init(c)
+
+def validate_growth_property_ownership(property_id, organization_id):
+    """Validates that a growth property exists and belongs to the given organization."""
+    if not property_id:
+        raise ValueError("Property ID is required.")
+    try:
+        p_id = int(property_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid property ID '{property_id}'. Must be an integer.")
+    with get_db_connection() as conn:
+        row = conn.execute(
+            "SELECT id, organization_id, brand_id, property_key, slug, display_name, is_active FROM growth_properties WHERE id = ?",
+            (p_id,)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Growth property ID {p_id} does not exist.")
+        if row['organization_id'] != organization_id:
+            raise TenantIsolationError(f"Growth property ID {p_id} belongs to a different organization.")
+        return dict(row)
+
+def list_growth_properties(organization_id=1, include_inactive=True):
+    """Lists growth properties scoped to the active organization."""
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        query = '''
+            SELECT gp.*, b.name AS brand_name, b.slug AS brand_slug
+            FROM growth_properties gp
+            LEFT JOIN brands b ON gp.brand_id = b.id
+            WHERE gp.organization_id = ?
+        '''
+        params = [org_id]
+        if not include_inactive:
+            query += " AND gp.is_active = 1"
+        query += " ORDER BY gp.id ASC"
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_growth_property_by_id(property_id, organization_id=None):
+    """Retrieves a single growth property by ID, optionally verifying organization scope."""
+    try:
+        p_id = int(property_id)
+    except (ValueError, TypeError):
+        return None
+    with get_db_connection() as conn:
+        query = '''
+            SELECT gp.*, b.name AS brand_name, b.slug AS brand_slug
+            FROM growth_properties gp
+            LEFT JOIN brands b ON gp.brand_id = b.id
+            WHERE gp.id = ?
+        '''
+        params = [p_id]
+        if organization_id is not None:
+            query += " AND gp.organization_id = ?"
+            params.append(int(organization_id))
+        row = conn.execute(query, tuple(params)).fetchone()
+        return dict(row) if row else None
+
+def get_growth_property_by_key(property_key, organization_id=None):
+    """Retrieves a single growth property by key or slug, optionally verifying organization scope."""
+    if not property_key:
+        return None
+    clean_key = str(property_key).strip().lower()
+    with get_db_connection() as conn:
+        query = '''
+            SELECT gp.*, b.name AS brand_name, b.slug AS brand_slug
+            FROM growth_properties gp
+            LEFT JOIN brands b ON gp.brand_id = b.id
+            WHERE (gp.property_key = ? OR gp.slug = ?)
+        '''
+        params = [clean_key, clean_key]
+        if organization_id is not None:
+            query += " AND gp.organization_id = ?"
+            params.append(int(organization_id))
+        row = conn.execute(query, tuple(params)).fetchone()
+        return dict(row) if row else None
+
+def create_growth_property(organization_id, data):
+    """Creates a new growth property record with strict validation and tenant isolation."""
+    from urllib.parse import urlparse
+    org_id = int(organization_id)
+    if not isinstance(data, dict):
+        raise ValueError("Property data must be a JSON dictionary.")
+
+    property_key = str(data.get('property_key') or data.get('slug') or '').strip().lower()
+    if not property_key:
+        raise ValueError("Property key is required.")
+    if not re.match(r'^[a-z0-9_-]+$', property_key):
+        raise ValueError("Property key may only contain lowercase letters, numbers, underscores, and dashes.")
+    if len(property_key) < 2 or len(property_key) > 64:
+        raise ValueError("Property key must be between 2 and 64 characters long.")
+
+    display_name = str(data.get('display_name') or '').strip()
+    if not display_name:
+        raise ValueError("Display name is required.")
+    if len(display_name) > 128:
+        raise ValueError("Display name cannot exceed 128 characters.")
+
+    canonical_url = str(data.get('canonical_url') or '').strip()
+    if not canonical_url:
+        raise ValueError("Canonical URL is required.")
+    parsed = urlparse(canonical_url)
+    if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+        raise ValueError("Canonical URL must be a valid absolute URL starting with http:// or https://")
+
+    brand_id = data.get('brand_id')
+    if brand_id not in (None, ""):
+        validate_brand_ownership(brand_id, org_id)
+        brand_id = int(brand_id)
+    else:
+        brand_id = None
+
+    property_type = str(data.get('property_type') or 'web').strip()
+    description = str(data.get('description') or '').strip() or None
+    category = str(data.get('category') or '').strip() or None
+    timezone = str(data.get('timezone') or 'Asia/Kolkata').strip()
+    target_countries = str(data.get('target_countries') or '').strip() or None
+    primary_language = str(data.get('primary_language') or 'en').strip()
+    metadata_json = data.get('metadata_json')
+    if isinstance(metadata_json, (dict, list)):
+        metadata_json = json.dumps(metadata_json)
+    elif metadata_json:
+        metadata_json = str(metadata_json)
+    else:
+        metadata_json = None
+
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM growth_properties WHERE organization_id = ? AND (property_key = ? OR slug = ?)",
+            (org_id, property_key, property_key)
+        ).fetchone()
+        if existing:
+            raise ValueError(f"Property with key '{property_key}' already exists in this organization.")
+
+        if is_postgres():
+            cur = conn.execute('''
+                INSERT INTO growth_properties (
+                    organization_id, brand_id, property_key, slug, display_name,
+                    canonical_url, property_type, description, category, timezone,
+                    target_countries, primary_language, metadata_json, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) RETURNING id
+            ''', (
+                org_id, brand_id, property_key, property_key, display_name,
+                canonical_url, property_type, description, category, timezone,
+                target_countries, primary_language, metadata_json
+            ))
+            new_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute('''
+                INSERT INTO growth_properties (
+                    organization_id, brand_id, property_key, slug, display_name,
+                    canonical_url, property_type, description, category, timezone,
+                    target_countries, primary_language, metadata_json, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            ''', (
+                org_id, brand_id, property_key, property_key, display_name,
+                canonical_url, property_type, description, category, timezone,
+                target_countries, primary_language, metadata_json
+            ))
+            new_id = cur.lastrowid
+        conn.commit()
+
+    return get_growth_property_by_id(new_id, organization_id=org_id)
+
+def update_growth_property(property_id, organization_id, data):
+    """Updates an existing growth property record ensuring tenant isolation and validity."""
+    from urllib.parse import urlparse
+    validate_growth_property_ownership(property_id, organization_id)
+    org_id = int(organization_id)
+    p_id = int(property_id)
+    if not isinstance(data, dict):
+        raise ValueError("Property update payload must be a JSON dictionary.")
+
+    updates = []
+    params = []
+
+    if 'property_key' in data:
+        key = str(data['property_key']).strip().lower()
+        if not key:
+            raise ValueError("Property key cannot be empty.")
+        if not re.match(r'^[a-z0-9_-]+$', key):
+            raise ValueError("Property key may only contain lowercase letters, numbers, underscores, and dashes.")
+        with get_db_connection() as conn:
+            collision = conn.execute(
+                "SELECT id FROM growth_properties WHERE organization_id = ? AND property_key = ? AND id != ?",
+                (org_id, key, p_id)
+            ).fetchone()
+            if collision:
+                raise ValueError(f"Property key '{key}' is already in use by another property.")
+        updates.extend(["property_key = ?", "slug = ?"])
+        params.extend([key, key])
+
+    if 'display_name' in data:
+        name = str(data['display_name']).strip()
+        if not name:
+            raise ValueError("Display name cannot be empty.")
+        if len(name) > 128:
+            raise ValueError("Display name cannot exceed 128 characters.")
+        updates.append("display_name = ?")
+        params.append(name)
+
+    if 'canonical_url' in data:
+        url = str(data['canonical_url']).strip()
+        if not url:
+            raise ValueError("Canonical URL cannot be empty.")
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            raise ValueError("Canonical URL must be a valid absolute URL starting with http:// or https://")
+        updates.append("canonical_url = ?")
+        params.append(url)
+
+    if 'brand_id' in data:
+        b_id = data['brand_id']
+        if b_id not in (None, ""):
+            validate_brand_ownership(b_id, org_id)
+            updates.append("brand_id = ?")
+            params.append(int(b_id))
+        else:
+            updates.append("brand_id = NULL")
+
+    if 'property_type' in data:
+        updates.append("property_type = ?")
+        params.append(str(data['property_type']).strip())
+
+    if 'description' in data:
+        updates.append("description = ?")
+        params.append(str(data['description']).strip() if data['description'] else None)
+
+    if 'category' in data:
+        updates.append("category = ?")
+        params.append(str(data['category']).strip() if data['category'] else None)
+
+    if 'timezone' in data:
+        updates.append("timezone = ?")
+        params.append(str(data['timezone']).strip())
+
+    if 'target_countries' in data:
+        updates.append("target_countries = ?")
+        params.append(str(data['target_countries']).strip() if data['target_countries'] else None)
+
+    if 'primary_language' in data:
+        updates.append("primary_language = ?")
+        params.append(str(data['primary_language']).strip())
+
+    if 'metadata_json' in data:
+        m = data['metadata_json']
+        if isinstance(m, (dict, list)):
+            m = json.dumps(m)
+        elif m:
+            m = str(m)
+        else:
+            m = None
+        updates.append("metadata_json = ?")
+        params.append(m)
+
+    if 'is_active' in data:
+        updates.append("is_active = ?")
+        params.append(1 if data['is_active'] in (1, True, '1', 'true') else 0)
+
+    if not updates:
+        return get_growth_property_by_id(p_id, organization_id=org_id)
+
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    sql = f"UPDATE growth_properties SET {', '.join(updates)} WHERE id = ? AND organization_id = ?"
+    params.extend([p_id, org_id])
+
+    with get_db_connection() as conn:
+        conn.execute(sql, tuple(params))
+        conn.commit()
+
+    return get_growth_property_by_id(p_id, organization_id=org_id)
+
+def update_growth_property_status(property_id, organization_id, is_active):
+    """Enables or disables a growth property ensuring tenant isolation."""
+    validate_growth_property_ownership(property_id, organization_id)
+    org_id = int(organization_id)
+    p_id = int(property_id)
+    active_val = 1 if is_active in (1, True, '1', 'true') else 0
+
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE growth_properties SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND organization_id = ?",
+            (active_val, p_id, org_id)
+        )
+        conn.commit()
+
+    return get_growth_property_by_id(p_id, organization_id=org_id)
+
+def delete_growth_property(property_id, organization_id):
+    """Safely removes a growth property ensuring tenant isolation."""
+    validate_growth_property_ownership(property_id, organization_id)
+    org_id = int(organization_id)
+    p_id = int(property_id)
+
+    with get_db_connection() as conn:
+        conn.execute(
+            "DELETE FROM growth_properties WHERE id = ? AND organization_id = ?",
+            (p_id, org_id)
+        )
+        conn.commit()
+    return True

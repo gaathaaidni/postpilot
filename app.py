@@ -99,7 +99,7 @@ def csrf_protect(f):
     """Enforces CSRF token validation on state-altering requests."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if request.method in ('POST', 'PUT', 'DELETE'):
+        if request.method in ('POST', 'PUT', 'DELETE', 'PATCH'):
             # Allow login without CSRF token since session is not established yet
             if request.path in ('/api/auth/login', '/api/auth/register-org', '/api/webhooks/whatsapp'):
                 return f(*args, **kwargs)
@@ -2252,6 +2252,104 @@ def save_brand_profile(brand_id):
     except Exception as e:
         logger.error(f"Error saving brand profile: {e}")
         return jsonify({'error': 'Failed to save brand marketing profile'}), 500
+
+# --- Growth & Intelligence: Property Registry Endpoints ---
+
+@app.route('/api/growth/properties', methods=['GET'])
+@login_required
+def get_growth_properties():
+    """Lists all ecosystem growth properties for the active organization."""
+    org_id = session.get('organization_id', 1)
+    include_inactive = request.args.get('include_inactive', 'true').lower() in ('true', '1', 'yes')
+    try:
+        props = database.list_growth_properties(organization_id=org_id, include_inactive=include_inactive)
+        if request.args.get('envelope') == '1':
+            return jsonify({'properties': props, 'count': len(props), 'organization_id': org_id})
+        return jsonify(props)
+    except Exception as e:
+        logger.error(f"Error fetching growth properties: {e}")
+        return jsonify({'error': 'Failed to retrieve growth properties'}), 500
+
+@app.route('/api/growth/properties/<int:property_id>', methods=['GET'])
+@login_required
+def get_growth_property(property_id):
+    """Retrieves a single growth property scoped to the active organization."""
+    org_id = session.get('organization_id', 1)
+    prop = database.get_growth_property_by_id(property_id, organization_id=org_id)
+    if not prop:
+        return jsonify({'error': 'Property not found'}), 404
+    return jsonify(prop)
+
+@app.route('/api/growth/properties', methods=['POST'])
+@login_required
+@csrf_protect
+def create_growth_property_route():
+    """Registers a new ecosystem property for the active organization."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    try:
+        created = database.create_growth_property(organization_id=org_id, data=data)
+        return jsonify(created), 201
+    except ValueError as e:
+        msg = str(e)
+        status_code = 409 if 'already exists' in msg else 400
+        return jsonify({'error': msg}), status_code
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 403
+    except Exception as e:
+        logger.error(f"Error creating growth property: {e}")
+        return jsonify({'error': 'Failed to create growth property'}), 500
+
+@app.route('/api/growth/properties/<int:property_id>', methods=['PUT'])
+@login_required
+@csrf_protect
+def update_growth_property_route(property_id):
+    """Updates an existing ecosystem property scoped to the active organization."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    try:
+        updated = database.update_growth_property(property_id=property_id, organization_id=org_id, data=data)
+        return jsonify(updated), 200
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        msg = str(e)
+        if 'does not exist' in msg:
+            return jsonify({'error': msg}), 404
+        status_code = 409 if 'already in use' in msg else 400
+        return jsonify({'error': msg}), status_code
+    except Exception as e:
+        logger.error(f"Error updating growth property: {e}")
+        return jsonify({'error': 'Failed to update growth property'}), 500
+
+@app.route('/api/growth/properties/<int:property_id>/status', methods=['PATCH'])
+@login_required
+@csrf_protect
+def update_growth_property_status_route(property_id):
+    """Enables or disables an ecosystem property scoped to the active organization."""
+    if session.get('role') == 'viewer':
+        return jsonify({'error': 'Unauthorized: Viewers have read-only access.'}), 403
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    is_active = data.get('is_active')
+    if is_active is None and 'status' in data:
+        is_active = (str(data['status']).lower() == 'active')
+    if is_active is None:
+        return jsonify({'error': "Missing 'is_active' or 'status' in request body."}), 400
+    try:
+        updated = database.update_growth_property_status(property_id=property_id, organization_id=org_id, is_active=is_active)
+        return jsonify(updated), 200
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error updating growth property status: {e}")
+        return jsonify({'error': 'Failed to update property status'}), 500
 
 # --- AI Marketing Studio: Campaigns & Content Generation Endpoints ---
 

@@ -107,7 +107,7 @@ const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.getAttribu
 async function authFetch(url, options = {}) {
     options.headers = options.headers || {};
     const method = (options.method || 'GET').toUpperCase();
-    if (['POST', 'PUT', 'DELETE'].includes(method)) {
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
         if (!options.headers['X-CSRFToken'] && CSRF_TOKEN) {
             options.headers['X-CSRFToken'] = CSRF_TOKEN;
         }
@@ -427,6 +427,7 @@ function loadTab(tab) {
         'approvals': 'Approvals Centre',
         'queue': 'Publishing Queue',
         'analytics': 'Marketing & AI Analytics',
+        'properties': 'Ecosystem Property Registry',
         'tour': 'Nexora Suite Management',
         'nz': 'Phoenix International Management',
         'gaatha': 'Gaatha AI Automation',
@@ -472,6 +473,8 @@ function loadTab(tab) {
         renderQueueView(content);
     } else if (tab === 'analytics') {
         renderAnalytics(content);
+    } else if (tab === 'properties') {
+        renderPropertiesView(content);
     } else if (tab === 'about') {
         renderHelpAboutView(content);
     } else if (['tour', 'nz', 'gaatha', 'insta'].includes(tab)) {
@@ -8901,4 +8904,486 @@ async function confirmSubscriptionUpgrade() {
     } catch (e) {
         showToast(e.message || "Network error", "danger");
     }
+}
+
+// ==============================================================================
+// Growth & Intelligence — Phase 1: Property Registry View & Controllers
+// ==============================================================================
+
+let cachedGrowthProperties = [];
+let cachedBrandsList = [];
+
+async function renderPropertiesView(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Ecosystem Property Registry...</p>
+        </div>
+    `;
+
+    try {
+        const [propsRes, brandsRes] = await Promise.all([
+            authFetch('/api/growth/properties'),
+            authFetch('/api/brands')
+        ]);
+
+        if (!propsRes.ok) {
+            throw new Error(`Failed to fetch properties (HTTP ${propsRes.status})`);
+        }
+
+        const props = await propsRes.json();
+        cachedGrowthProperties = Array.isArray(props) ? props : (props.properties || []);
+        cachedBrandsList = brandsRes.ok ? await brandsRes.json() : [];
+
+        // Update sidebar count badge
+        const badgeEl = document.getElementById('nav-properties-count');
+        if (badgeEl) badgeEl.textContent = String(cachedGrowthProperties.length);
+
+        const activeCount = cachedGrowthProperties.filter(p => p.is_active).length;
+
+        let html = `
+            <div class="properties-view-container fade-in">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(16, 185, 129, 0.15); display: flex; align-items: center; justify-content: center; color: #10b981; font-size: 1.1rem;">
+                                <i class="fa-solid fa-sitemap"></i>
+                            </div>
+                            <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800; color: var(--text-primary);">
+                                Ecosystem Property Registry
+                            </h2>
+                        </div>
+                        <p style="margin: 0.35rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                            Authoritative central registry for all GAATHA digital properties, domains, brand workspaces, and SEO domains.
+                        </p>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <span class="badge badge-info" style="font-size: 0.82rem; padding: 0.4rem 0.75rem;">
+                            <i class="fa-solid fa-circle-check" style="color: #10b981;"></i> ${activeCount} / ${cachedGrowthProperties.length} Active
+                        </span>
+                        <button type="button" class="btn btn-secondary" onclick="renderPropertiesView(document.getElementById('content-area'))" title="Refresh Properties">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                        <button type="button" class="btn btn-primary" onclick="openAddPropertyModal()" style="display: inline-flex; align-items: center; gap: 0.4rem;">
+                            <i class="fa-solid fa-plus"></i> Register Property
+                        </button>
+                    </div>
+                </div>
+
+                <div class="properties-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.25rem;">
+        `;
+
+        if (cachedGrowthProperties.length === 0) {
+            html += `
+                <div class="card" style="grid-column: 1 / -1; text-align: center; padding: 3rem 1rem;">
+                    <i class="fa-solid fa-sitemap fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Properties Found</h3>
+                    <p style="color: var(--text-muted);">No ecosystem properties have been registered yet.</p>
+                    <button type="button" class="btn btn-primary" onclick="openAddPropertyModal()" style="margin-top: 1rem;">
+                        <i class="fa-solid fa-plus"></i> Register First Property
+                    </button>
+                </div>
+            `;
+        } else {
+            cachedGrowthProperties.forEach(p => {
+                const isActive = Boolean(p.is_active);
+                const statusBadge = isActive
+                    ? `<span class="badge badge-published" style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem;">
+                         <span style="width: 7px; height: 7px; border-radius: 50%; background: #10b981; display: inline-block;"></span> Active
+                       </span>`
+                    : `<span class="badge badge-secondary" style="display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem;">
+                         <span style="width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; display: inline-block;"></span> Disabled
+                       </span>`;
+
+                const typeBadge = `<span class="badge badge-secondary" style="font-size: 0.72rem; text-transform: uppercase;">${escapeHtml(p.property_type || 'web')}</span>`;
+                const catBadge = p.category ? `<span class="badge badge-info" style="font-size: 0.72rem;">${escapeHtml(p.category)}</span>` : '';
+                const brandLabel = p.brand_name ? escapeHtml(p.brand_name) : (p.brand_id ? `Brand #${p.brand_id}` : 'Unlinked');
+
+                html += `
+                    <div class="card property-card" id="prop-card-${p.id}" style="display: flex; flex-direction: column; justify-content: space-between; gap: 1rem; padding: 1.25rem; border-top: 3px solid ${isActive ? '#10b981' : '#94a3b8'}; transition: transform 0.2s ease, box-shadow 0.2s ease;">
+                        <div>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.6rem;">
+                                <div>
+                                    <h3 style="margin: 0; font-size: 1.08rem; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 0.45rem;">
+                                        <span>${escapeHtml(p.display_name)}</span>
+                                    </h3>
+                                    <code style="font-size: 0.75rem; color: var(--text-muted); background: var(--bg-surface); padding: 0.15rem 0.4rem; border-radius: 4px; display: inline-block; margin-top: 0.25rem;">${escapeHtml(p.property_key)}</code>
+                                </div>
+                                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem;">
+                                    ${statusBadge}
+                                    ${typeBadge}
+                                </div>
+                            </div>
+
+                            <p style="font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45; margin-bottom: 0.75rem;">
+                                ${escapeHtml(p.description || 'GAATHA ecosystem digital property.')}
+                            </p>
+
+                            <div style="margin-bottom: 0.75rem;">
+                                <a href="${escapeHtml(p.canonical_url)}" target="_blank" rel="noopener noreferrer" style="font-size: 0.82rem; color: var(--primary); text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; word-break: break-all;">
+                                    <i class="fa-solid fa-globe"></i>
+                                    <span>${escapeHtml(p.canonical_url)}</span>
+                                    <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.7rem; opacity: 0.7;"></i>
+                                </a>
+                            </div>
+
+                            <div style="display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.75rem; color: var(--text-muted);">
+                                ${catBadge}
+                                <span class="badge badge-secondary" title="Mapped Brand Workspace" style="display: inline-flex; align-items: center; gap: 0.3rem;">
+                                    <i class="fa-solid fa-building-flag"></i> ${brandLabel}
+                                </span>
+                                <span class="badge badge-secondary" title="Target Regions" style="display: inline-flex; align-items: center; gap: 0.3rem;">
+                                    <i class="fa-solid fa-earth-americas"></i> ${escapeHtml(p.target_countries || 'Global')}
+                                </span>
+                                <span class="badge badge-secondary" title="Timezone" style="display: inline-flex; align-items: center; gap: 0.3rem;">
+                                    <i class="fa-solid fa-clock"></i> ${escapeHtml(p.timezone || 'Asia/Kolkata')}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.25rem;">
+                            <button type="button" class="btn btn-sm ${isActive ? 'btn-secondary' : 'btn-success'}" onclick="togglePropertyStatus(${p.id}, ${isActive})" style="font-size: 0.78rem; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                <i class="fa-solid ${isActive ? 'fa-pause' : 'fa-play'}"></i> ${isActive ? 'Disable' : 'Enable'}
+                            </button>
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="openEditPropertyModal(${p.id})" style="font-size: 0.78rem; display: inline-flex; align-items: center; gap: 0.3rem;">
+                                <i class="fa-solid fa-pen-to-square"></i> Edit
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = `
+            <div class="card" style="text-align: center; padding: 3rem 1rem; border-left: 4px solid var(--danger);">
+                <i class="fa-solid fa-circle-exclamation fa-3x" style="color: var(--danger); margin-bottom: 1rem;"></i>
+                <h3 style="color: var(--danger);">Failed to Load Property Registry</h3>
+                <p style="color: var(--text-muted); margin-bottom: 1.5rem;">${escapeHtml(err.message || "An unexpected error occurred.")}</p>
+                <button type="button" class="btn btn-primary" onclick="renderPropertiesView(document.getElementById('content-area'))">
+                    <i class="fa-solid fa-arrows-rotate"></i> Try Again
+                </button>
+            </div>
+        `;
+        showToast(err.message || "Error loading properties", "danger");
+    }
+}
+
+// Toggle Property Status (Active/Disabled)
+async function togglePropertyStatus(propertyId, currentActive) {
+    const newStatus = !currentActive;
+    try {
+        const res = await authFetch(`/api/growth/properties/${propertyId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_active: newStatus })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || `Failed to update status (HTTP ${res.status})`);
+        }
+        showToast(`Property status updated to ${newStatus ? 'Active' : 'Disabled'}!`, "success");
+        renderPropertiesView(document.getElementById('content-area'));
+    } catch (e) {
+        showToast(e.message || "Failed to update property status", "danger");
+    }
+}
+
+// Open Edit Property Modal
+function openEditPropertyModal(propertyId) {
+    const prop = cachedGrowthProperties.find(p => p.id === propertyId);
+    if (!prop) {
+        showToast("Property record not found in cache.", "danger");
+        return;
+    }
+
+    let modal = document.getElementById('property-edit-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'property-edit-modal';
+        modal.className = 'modal-backdrop';
+        document.body.appendChild(modal);
+    }
+
+    const brandOptions = cachedBrandsList.map(b => `
+        <option value="${b.id}" ${b.id === prop.brand_id ? 'selected' : ''}>${escapeHtml(b.name)} (ID: ${b.id})</option>
+    `).join('');
+
+    modal.innerHTML = `
+        <div class="modal-card" style="max-width: 600px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-pen-to-square" style="color: var(--primary);"></i> Edit Property: ${escapeHtml(prop.display_name)}</h3>
+                <button type="button" class="modal-close" onclick="closePropertyModal('property-edit-modal')">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1; padding: 1.25rem;">
+                <form id="property-edit-form" onsubmit="event.preventDefault(); savePropertyEdit(${prop.id});">
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="font-size: 0.84rem; font-weight: 600;">Property Key (Unique Identifier)</label>
+                        <input type="text" class="form-control" value="${escapeHtml(prop.property_key)}" disabled style="opacity: 0.7; cursor: not-allowed;">
+                        <small style="color: var(--text-muted); font-size: 0.74rem;">Unique keys are immutable to preserve telemetry history.</small>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="font-size: 0.84rem; font-weight: 600;">Display Name *</label>
+                        <input type="text" id="prop-edit-display-name" class="form-control" value="${escapeHtml(prop.display_name)}" required maxlength="128">
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="font-size: 0.84rem; font-weight: 600;">Canonical URL *</label>
+                        <input type="url" id="prop-edit-canonical-url" class="form-control" value="${escapeHtml(prop.canonical_url)}" required placeholder="https://example.com">
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Mapped Brand</label>
+                            <select id="prop-edit-brand-id" class="form-control">
+                                <option value="">-- Unassigned --</option>
+                                ${brandOptions}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Property Type</label>
+                            <select id="prop-edit-property-type" class="form-control">
+                                <option value="corporate" ${prop.property_type === 'corporate' ? 'selected' : ''}>Corporate</option>
+                                <option value="saas_product" ${prop.property_type === 'saas_product' ? 'selected' : ''}>SaaS Product</option>
+                                <option value="subdomain" ${prop.property_type === 'subdomain' ? 'selected' : ''}>Subdomain Service</option>
+                                <option value="landing_page" ${prop.property_type === 'landing_page' ? 'selected' : ''}>Landing Page</option>
+                                <option value="web" ${prop.property_type === 'web' ? 'selected' : ''}>Web Portal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Category</label>
+                            <input type="text" id="prop-edit-category" class="form-control" value="${escapeHtml(prop.category || '')}" placeholder="e.g. AI / GenAI">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Target Countries / Regions</label>
+                            <input type="text" id="prop-edit-target-countries" class="form-control" value="${escapeHtml(prop.target_countries || '')}" placeholder="e.g. GLOBAL or IN,US,AE">
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Timezone</label>
+                            <input type="text" id="prop-edit-timezone" class="form-control" value="${escapeHtml(prop.timezone || 'Asia/Kolkata')}">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Primary Language</label>
+                            <input type="text" id="prop-edit-language" class="form-control" value="${escapeHtml(prop.primary_language || 'en')}">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="font-size: 0.84rem; font-weight: 600;">Description</label>
+                        <textarea id="prop-edit-description" class="form-control" rows="2">${escapeHtml(prop.description || '')}</textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.5rem; padding: 1rem 1.25rem;">
+                <button type="button" class="btn btn-secondary" onclick="closePropertyModal('property-edit-modal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="savePropertyEdit(${prop.id})">
+                    <i class="fa-solid fa-floppy-disk"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    `;
+    modal.classList.add('active');
+}
+
+// Save Property Edit
+async function savePropertyEdit(propertyId) {
+    const displayName = document.getElementById('prop-edit-display-name')?.value.trim();
+    const canonicalUrl = document.getElementById('prop-edit-canonical-url')?.value.trim();
+    const brandIdVal = document.getElementById('prop-edit-brand-id')?.value;
+    const propertyType = document.getElementById('prop-edit-property-type')?.value;
+    const category = document.getElementById('prop-edit-category')?.value.trim();
+    const targetCountries = document.getElementById('prop-edit-target-countries')?.value.trim();
+    const timezone = document.getElementById('prop-edit-timezone')?.value.trim();
+    const language = document.getElementById('prop-edit-language')?.value.trim();
+    const description = document.getElementById('prop-edit-description')?.value.trim();
+
+    if (!displayName || !canonicalUrl) {
+        showToast("Display name and Canonical URL are required.", "danger");
+        return;
+    }
+
+    const payload = {
+        display_name: displayName,
+        canonical_url: canonicalUrl,
+        brand_id: brandIdVal ? parseInt(brandIdVal, 10) : null,
+        property_type: propertyType,
+        category: category || null,
+        target_countries: targetCountries || null,
+        timezone: timezone || 'Asia/Kolkata',
+        primary_language: language || 'en',
+        description: description || null
+    };
+
+    try {
+        const res = await authFetch(`/api/growth/properties/${propertyId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || `Save failed (HTTP ${res.status})`);
+        }
+
+        closePropertyModal('property-edit-modal');
+        showToast("Property updated successfully!", "success");
+        renderPropertiesView(document.getElementById('content-area'));
+    } catch (e) {
+        showToast(e.message || "Failed to update property", "danger");
+    }
+}
+
+// Open Add Property Modal
+function openAddPropertyModal() {
+    let modal = document.getElementById('property-add-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'property-add-modal';
+        modal.className = 'modal-backdrop';
+        document.body.appendChild(modal);
+    }
+
+    const brandOptions = cachedBrandsList.map(b => `
+        <option value="${b.id}">${escapeHtml(b.name)} (ID: ${b.id})</option>
+    `).join('');
+
+    modal.innerHTML = `
+        <div class="modal-card" style="max-width: 600px; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-plus-circle" style="color: var(--primary);"></i> Register Ecosystem Property</h3>
+                <button type="button" class="modal-close" onclick="closePropertyModal('property-add-modal')">&times;</button>
+            </div>
+            <div class="modal-body" style="overflow-y: auto; flex: 1; padding: 1.25rem;">
+                <form id="property-add-form" onsubmit="event.preventDefault(); createPropertySubmit();">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Property Key *</label>
+                            <input type="text" id="prop-add-key" class="form-control" required placeholder="e.g. gaatha_docs" pattern="^[a-z0-9_-]+$">
+                            <small style="color: var(--text-muted); font-size: 0.74rem;">Lowercase, numbers, underscores, and dashes only.</small>
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Display Name *</label>
+                            <input type="text" id="prop-add-display-name" class="form-control" required placeholder="e.g. GAATHA Documentation">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="font-size: 0.84rem; font-weight: 600;">Canonical URL *</label>
+                        <input type="url" id="prop-add-canonical-url" class="form-control" required placeholder="https://docs.gaatha.tech">
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Mapped Brand</label>
+                            <select id="prop-add-brand-id" class="form-control">
+                                <option value="">-- Unassigned --</option>
+                                ${brandOptions}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Property Type</label>
+                            <select id="prop-add-property-type" class="form-control">
+                                <option value="saas_product">SaaS Product</option>
+                                <option value="corporate">Corporate</option>
+                                <option value="subdomain">Subdomain Service</option>
+                                <option value="landing_page">Landing Page</option>
+                                <option value="web" selected>Web Portal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Category</label>
+                            <input type="text" id="prop-add-category" class="form-control" placeholder="e.g. Developer Docs">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-size: 0.84rem; font-weight: 600;">Target Countries / Regions</label>
+                            <input type="text" id="prop-add-target-countries" class="form-control" value="GLOBAL" placeholder="e.g. GLOBAL or IN,US">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label style="font-size: 0.84rem; font-weight: 600;">Description</label>
+                        <textarea id="prop-add-description" class="form-control" rows="2" placeholder="Brief summary of property role in GAATHA ecosystem..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.5rem; padding: 1rem 1.25rem;">
+                <button type="button" class="btn btn-secondary" onclick="closePropertyModal('property-add-modal')">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="createPropertySubmit()">
+                    <i class="fa-solid fa-plus"></i> Register Property
+                </button>
+            </div>
+        </div>
+    `;
+    modal.classList.add('active');
+}
+
+// Create Property Submit
+async function createPropertySubmit() {
+    const key = document.getElementById('prop-add-key')?.value.trim().toLowerCase();
+    const displayName = document.getElementById('prop-add-display-name')?.value.trim();
+    const canonicalUrl = document.getElementById('prop-add-canonical-url')?.value.trim();
+    const brandIdVal = document.getElementById('prop-add-brand-id')?.value;
+    const propertyType = document.getElementById('prop-add-property-type')?.value;
+    const category = document.getElementById('prop-add-category')?.value.trim();
+    const targetCountries = document.getElementById('prop-add-target-countries')?.value.trim();
+    const description = document.getElementById('prop-add-description')?.value.trim();
+
+    if (!key || !displayName || !canonicalUrl) {
+        showToast("Property key, Display name, and Canonical URL are required.", "danger");
+        return;
+    }
+
+    const payload = {
+        property_key: key,
+        display_name: displayName,
+        canonical_url: canonicalUrl,
+        brand_id: brandIdVal ? parseInt(brandIdVal, 10) : null,
+        property_type: propertyType || 'web',
+        category: category || null,
+        target_countries: targetCountries || 'GLOBAL',
+        timezone: 'Asia/Kolkata',
+        primary_language: 'en',
+        description: description || null
+    };
+
+    try {
+        const res = await authFetch('/api/growth/properties', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || `Registration failed (HTTP ${res.status})`);
+        }
+
+        closePropertyModal('property-add-modal');
+        showToast("Property registered successfully!", "success");
+        renderPropertiesView(document.getElementById('content-area'));
+    } catch (e) {
+        showToast(e.message || "Failed to register property", "danger");
+    }
+}
+
+function closePropertyModal(modalId) {
+    const el = document.getElementById(modalId);
+    if (el) el.classList.remove('active');
 }
