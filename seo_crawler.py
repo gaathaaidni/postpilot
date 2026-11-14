@@ -101,7 +101,11 @@ class SEOHTMLParser(HTMLParser):
 
 
 def is_ssrf_safe_url(url: str) -> bool:
-    """Verifies that a URL does not point to internal, private, loopback, or cloud-metadata IPs."""
+    """
+    Verifies that a URL does not point to internal, private, loopback, link-local,
+    multicast, or cloud-metadata IPs (e.g. AWS/GCP/Azure 169.254.169.254).
+    Resolves DNS and validates all returned IPv4 and IPv6 addresses.
+    """
     if os.environ.get('POSTPILOT_ALLOW_LOCAL_CRAWL') == '1':
         return True
     try:
@@ -115,15 +119,38 @@ def is_ssrf_safe_url(url: str) -> bool:
         if hostname_lower in ('localhost', '127.0.0.1', '::1', '0.0.0.0', '169.254.169.254'):
             return False
         
-        # Resolve to IP
-        ip_addr = socket.gethostbyname(hostname)
-        ip_obj = ipaddress.ip_address(ip_addr)
-        if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_reserved or ip_obj.is_link_local:
+        # Resolve to all IPs (IPv4 and IPv6) to prevent DNS rebinding / multi-homed tricks
+        addr_info = socket.getaddrinfo(hostname, None)
+        if not addr_info:
             return False
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip_obj = ipaddress.ip_address(ip_str)
+            if ip_obj.is_loopback or ip_obj.is_private or ip_obj.is_reserved or ip_obj.is_link_local or ip_obj.is_multicast:
+                return False
+            if str(ip_obj) == '169.254.169.254':
+                return False
         return True
     except Exception as e:
         logger.warning(f"SSRF check rejected URL {url}: {e}")
         return False
+
+
+class SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    HTTP redirect handler that validates redirect targets against SSRF rules
+    before allowing urllib to follow them.
+    """
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not is_ssrf_safe_url(newurl):
+            logger.warning(f"SSRFSafeRedirectHandler blocked redirect to unsafe URL: {newurl}")
+            raise urllib.error.HTTPError(newurl, code, f"SSRF redirect blocked: {newurl}", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def build_safe_opener() -> urllib.request.OpenerDirector:
+    """Builds a urllib OpenerDirector equipped with SSRFSafeRedirectHandler."""
+    return urllib.request.build_opener(SSRFSafeRedirectHandler())
 
 
 def normalize_url(url: str) -> str:
@@ -138,10 +165,13 @@ def parse_robots_txt(base_url: str) -> Optional[urllib.robotparser.RobotFilePars
     try:
         parsed = urllib.parse.urlparse(base_url)
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        if not is_ssrf_safe_url(robots_url):
+            return None
         rp = urllib.robotparser.RobotFileParser()
         rp.set_url(robots_url)
         req = urllib.request.Request(robots_url, headers={'User-Agent': USER_AGENT})
-        with urllib.request.urlopen(req, timeout=5.0) as resp:
+        opener = build_safe_opener()
+        with opener.open(req, timeout=5.0) as resp:
             content = resp.read().decode('utf-8', errors='ignore')
             rp.parse(content.splitlines())
             return rp
@@ -155,8 +185,11 @@ def fetch_sitemap_urls(base_url: str) -> List[str]:
     try:
         parsed = urllib.parse.urlparse(base_url)
         sitemap_url = f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"
+        if not is_ssrf_safe_url(sitemap_url):
+            return []
         req = urllib.request.Request(sitemap_url, headers={'User-Agent': USER_AGENT})
-        with urllib.request.urlopen(req, timeout=5.0) as resp:
+        opener = build_safe_opener()
+        with opener.open(req, timeout=5.0) as resp:
             content = resp.read().decode('utf-8', errors='ignore')
             found = re.findall(r'<loc>\s*(https?://[^<\s]+)\s*</loc>', content, re.IGNORECASE)
             for u in found:
@@ -435,7 +468,8 @@ def run_seo_crawl(
         try:
             req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
             last_request_time = time.time()
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            opener = build_safe_opener()
+            with opener.open(req, timeout=REQUEST_TIMEOUT) as resp:
                 status_code = resp.getcode()
                 response_time_ms = int((time.time() - req_start) * 1000)
                 content_type = resp.headers.get('Content-Type', '')

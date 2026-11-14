@@ -16,6 +16,7 @@ Features:
 import os
 import re
 import json
+import time
 import sqlite3
 import logging
 from pathlib import Path
@@ -4555,12 +4556,14 @@ def init_growth_properties(conn=None):
         migrate_phase2_1_property_calendar(conn)
         migrate_phase2_website_intelligence(conn)
         migrate_phase2_property_domains_and_seo(conn)
+        migrate_phase3_rate_limiting_and_isolation(conn)
     else:
         with get_db_connection() as c:
             _execute_init(c)
             migrate_phase2_1_property_calendar(c)
             migrate_phase2_website_intelligence(c)
             migrate_phase2_property_domains_and_seo(c)
+            migrate_phase3_rate_limiting_and_isolation(c)
 
 def migrate_phase2_1_property_calendar(conn=None):
     """
@@ -4781,6 +4784,113 @@ def migrate_phase2_property_domains_and_seo(conn=None):
     else:
         with get_db_connection() as c:
             _execute(c)
+
+def migrate_phase3_rate_limiting_and_isolation(conn=None):
+    """
+    Additive migration 20261114_005_rate_limiting_and_isolation:
+    - Creates web_intel_rate_limits table for multi-worker rate limiting across Gunicorn workers.
+    - Adds is_synthetic column to web_intel_sessions to isolate automated and test traffic.
+    """
+    is_pg = is_postgres()
+
+    def _execute(c):
+        # 1. web_intel_rate_limits table (zero raw IP persistence)
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS web_intel_rate_limits (
+                key_hash TEXT PRIMARY KEY,
+                window_start INTEGER NOT NULL,
+                request_count INTEGER NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON web_intel_rate_limits(window_start)")
+
+        # 2. Add is_synthetic column to web_intel_sessions if not present
+        if is_pg:
+            col_exists = c.execute("""
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'web_intel_sessions' AND column_name = 'is_synthetic'
+            """).fetchone()
+            if not col_exists:
+                c.execute("ALTER TABLE web_intel_sessions ADD COLUMN is_synthetic INTEGER DEFAULT 0")
+        else:
+            col_info = c.execute("PRAGMA table_info(web_intel_sessions)").fetchall()
+            col_names = [col['name'] if isinstance(col, dict) else col[1] for col in col_info]
+            if 'is_synthetic' not in col_names:
+                c.execute("ALTER TABLE web_intel_sessions ADD COLUMN is_synthetic INTEGER DEFAULT 0")
+
+        # Record migration version in schema_migrations idempotently
+        migration_version = '20261114_005_rate_limiting_and_isolation'
+        row = c.execute(
+            "SELECT version FROM schema_migrations WHERE version = ?",
+            (migration_version,)
+        ).fetchone()
+        if not row:
+            c.execute('''
+                INSERT INTO schema_migrations (version, description)
+                VALUES (?, ?)
+            ''', (migration_version, 'Multi-worker rate limiting table and synthetic traffic isolation'))
+        c.commit()
+
+    if conn is not None:
+        _execute(conn)
+    else:
+        with get_db_connection() as c:
+            _execute(c)
+
+def check_and_increment_rate_limit(key_hash: str, window_sec: int = 60, max_requests: int = 120) -> bool:
+    """
+    Atomically checks and increments request counter for key_hash within window_sec.
+    Returns True if rate limit is exceeded, False if request is allowed.
+    Uses SHA-256 key_hash to ensure zero raw IP storage.
+    """
+    now_ts = int(time.time())
+    current_window = (now_ts // window_sec) * window_sec
+
+    with get_db_connection() as conn:
+        # Periodic pruning of expired window records (older than 5 minutes)
+        if now_ts % 60 == 0:
+            try:
+                conn.execute("DELETE FROM web_intel_rate_limits WHERE window_start < ?", (now_ts - 300,))
+                conn.commit()
+            except Exception:
+                pass
+
+        row = conn.execute(
+            "SELECT window_start, request_count FROM web_intel_rate_limits WHERE key_hash = ?",
+            (key_hash,)
+        ).fetchone()
+
+        if row:
+            if row['window_start'] == current_window:
+                if row['request_count'] >= max_requests:
+                    return True  # Exceeded
+                conn.execute(
+                    "UPDATE web_intel_rate_limits SET request_count = request_count + 1, updated_at = CURRENT_TIMESTAMP WHERE key_hash = ?",
+                    (key_hash,)
+                )
+                conn.commit()
+                return False
+            else:
+                # Expired window for this key, reset to current
+                conn.execute(
+                    "UPDATE web_intel_rate_limits SET window_start = ?, request_count = 1, updated_at = CURRENT_TIMESTAMP WHERE key_hash = ?",
+                    (current_window, key_hash)
+                )
+                conn.commit()
+                return False
+        else:
+            # First request for this key
+            try:
+                conn.execute(
+                    "INSERT INTO web_intel_rate_limits (key_hash, window_start, request_count, updated_at) VALUES (?, ?, 1, CURRENT_TIMESTAMP)",
+                    (key_hash, current_window)
+                )
+                conn.commit()
+                return False
+            except Exception:
+                # Handle concurrent insert
+                return check_and_increment_rate_limit(key_hash, window_sec, max_requests)
 
 def migrate_phase2_website_intelligence(conn=None):
     """
@@ -5294,7 +5404,8 @@ def record_web_intel_telemetry(property_id, organization_id, session_hash, visit
                                city_name=None, asn_org=None, device_type='desktop',
                                browser_name=None, os_name=None, referrer_source=None,
                                referrer_domain=None, landing_page=None, path='/',
-                               query_string=None, page_title=None, load_time_ms=None, is_bot=0):
+                               query_string=None, page_title=None, load_time_ms=None,
+                               is_bot=0, is_synthetic=0):
     """
     Records an incoming telemetry beacon safely and additively.
     Finds or creates a session row (without storing raw IP), then logs the pageview.
@@ -5323,14 +5434,14 @@ def record_web_intel_telemetry(property_id, organization_id, session_hash, visit
                         organization_id, property_id, session_hash, visitor_id_hash,
                         country_code, country_name, region_name, city_name, asn_org,
                         device_type, browser_name, os_name, referrer_source, referrer_domain,
-                        landing_page, exit_page, pageviews_count, is_bot
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                        landing_page, exit_page, pageviews_count, is_bot, is_synthetic
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                     RETURNING id
                 ''', (
                     org_id, p_id, session_hash, visitor_hash,
                     country_code, country_name, region_name, city_name, asn_org,
                     device_type, browser_name, os_name, referrer_source, referrer_domain,
-                    landing_page or path, path, is_bot
+                    landing_page or path, path, is_bot, is_synthetic
                 ))
                 sess_id = cur.fetchone()['id']
             else:
@@ -5339,13 +5450,13 @@ def record_web_intel_telemetry(property_id, organization_id, session_hash, visit
                         organization_id, property_id, session_hash, visitor_id_hash,
                         country_code, country_name, region_name, city_name, asn_org,
                         device_type, browser_name, os_name, referrer_source, referrer_domain,
-                        landing_page, exit_page, pageviews_count, is_bot
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                        landing_page, exit_page, pageviews_count, is_bot, is_synthetic
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
                 ''', (
                     org_id, p_id, session_hash, visitor_hash,
                     country_code, country_name, region_name, city_name, asn_org,
                     device_type, browser_name, os_name, referrer_source, referrer_domain,
-                    landing_page or path, path, is_bot
+                    landing_page or path, path, is_bot, is_synthetic
                 ))
                 sess_id = cur.lastrowid
 
@@ -5442,6 +5553,7 @@ def get_web_intel_overview(property_id, organization_id=1, days=30):
                 SUM(CASE WHEN pageviews_count = 1 THEN 1 ELSE 0 END) as bounce_sessions
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
         ''', (p_id, org_id, since_date)).fetchone()
 
         total_sessions = sess_stats['total_sessions'] or 0
@@ -5455,10 +5567,12 @@ def get_web_intel_overview(property_id, organization_id=1, days=30):
         ''', (p_id, org_id, since_date)).fetchone()['cnt']
 
         top_pages = conn.execute('''
-            SELECT path, page_title, COUNT(*) as views
-            FROM web_intel_pageviews
-            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
-            GROUP BY path, page_title
+            SELECT p.path, p.page_title, COUNT(*) as views
+            FROM web_intel_pageviews p
+            JOIN web_intel_sessions s ON s.id = p.session_id
+            WHERE p.property_id = ? AND p.organization_id = ? AND p.created_at >= ?
+              AND s.is_bot = 0 AND (s.is_synthetic = 0 OR s.is_synthetic IS NULL)
+            GROUP BY p.path, p.page_title
             ORDER BY views DESC
             LIMIT 10
         ''', (p_id, org_id, since_date)).fetchall()
@@ -5490,6 +5604,7 @@ def get_web_intel_geo_breakdown(property_id, organization_id=1, days=30):
                 COUNT(*) as session_count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY country_code, country_name, city_name
             ORDER BY session_count DESC
             LIMIT 50
@@ -5585,6 +5700,7 @@ def get_web_intel_timeline(property_id, organization_id=1, days=30):
                 COALESCE(SUM(pageviews_count), 0) as pageviews_count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND SUBSTR(created_at, 1, 10) >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY SUBSTR(created_at, 1, 10)
             ORDER BY day_date ASC
         ''', (p_id, org_id, since_date)).fetchall()
@@ -5604,6 +5720,7 @@ def get_web_intel_sources(property_id, organization_id=1, days=30):
                 COUNT(*) as session_count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY referrer_source
             ORDER BY session_count DESC
         ''', (p_id, org_id, since_date)).fetchall()
@@ -5614,6 +5731,7 @@ def get_web_intel_sources(property_id, organization_id=1, days=30):
                 COUNT(*) as session_count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ? AND referrer_domain IS NOT NULL
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY referrer_domain
             ORDER BY session_count DESC
             LIMIT 15
@@ -5636,6 +5754,7 @@ def get_web_intel_devices(property_id, organization_id=1, days=30):
             SELECT COALESCE(device_type, 'desktop') as device, COUNT(*) as count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY device_type ORDER BY count DESC
         ''', (p_id, org_id, since_date)).fetchall()
 
@@ -5643,6 +5762,7 @@ def get_web_intel_devices(property_id, organization_id=1, days=30):
             SELECT COALESCE(browser_name, 'Other') as browser, COUNT(*) as count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY browser_name ORDER BY count DESC LIMIT 10
         ''', (p_id, org_id, since_date)).fetchall()
 
@@ -5650,6 +5770,7 @@ def get_web_intel_devices(property_id, organization_id=1, days=30):
             SELECT COALESCE(os_name, 'Other') as os, COUNT(*) as count
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY os_name ORDER BY count DESC LIMIT 10
         ''', (p_id, org_id, since_date)).fetchall()
 
@@ -5671,6 +5792,7 @@ def get_web_intel_pages(property_id, organization_id=1, days=30, limit=20):
             SELECT COALESCE(landing_page, '/') as page, COUNT(*) as sessions
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY landing_page ORDER BY sessions DESC LIMIT ?
         ''', (p_id, org_id, since_date, limit)).fetchall()
 
@@ -5678,14 +5800,17 @@ def get_web_intel_pages(property_id, organization_id=1, days=30, limit=20):
             SELECT COALESCE(exit_page, '/') as page, COUNT(*) as exits
             FROM web_intel_sessions
             WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+              AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
             GROUP BY exit_page ORDER BY exits DESC LIMIT ?
         ''', (p_id, org_id, since_date, limit)).fetchall()
 
         all_pages = conn.execute('''
-            SELECT path, page_title, COUNT(*) as views, AVG(load_time_ms) as avg_load_time_ms
-            FROM web_intel_pageviews
-            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
-            GROUP BY path, page_title ORDER BY views DESC LIMIT ?
+            SELECT p.path, p.page_title, COUNT(*) as views, AVG(p.load_time_ms) as avg_load_time_ms
+            FROM web_intel_pageviews p
+            JOIN web_intel_sessions s ON s.id = p.session_id
+            WHERE p.property_id = ? AND p.organization_id = ? AND p.created_at >= ?
+              AND s.is_bot = 0 AND (s.is_synthetic = 0 OR s.is_synthetic IS NULL)
+            GROUP BY p.path, p.page_title ORDER BY views DESC LIMIT ?
         ''', (p_id, org_id, since_date, limit)).fetchall()
 
         return {
@@ -5728,6 +5853,115 @@ def get_web_intel_conversions(property_id, organization_id=1, days=30, limit=50)
             'by_source': [dict(s) for s in by_source],
             'recent': [dict(r) for r in recent],
             'total': sum(t['count'] for t in by_type)
+        }
+
+def get_web_intel_portfolio_overview(organization_id=1, days=30):
+    """
+    Computes aggregated growth intelligence across all active properties in the organization:
+    - total_sessions
+    - total_unique_visitors
+    - total_pageviews
+    - total_conversions
+    - average_seo_health_score
+    - per_property_metrics: list of each property's stats
+    - top_performing_property: property with the most visitors/sessions
+    """
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        props = conn.execute('''
+            SELECT id, property_key, display_name, canonical_url, property_type, category
+            FROM growth_properties
+            WHERE organization_id = ? AND is_active = 1
+            ORDER BY id ASC
+        ''', (org_id,)).fetchall()
+
+        property_metrics = []
+        total_visitors = 0
+        total_sessions = 0
+        total_pageviews = 0
+        total_conversions = 0
+        health_scores = []
+
+        for p in props:
+            p_id = p['id']
+            # Sessions & visitors (isolated from bots and synthetic traffic)
+            s_row = conn.execute('''
+                SELECT
+                    COUNT(*) as sessions,
+                    COUNT(DISTINCT visitor_id_hash) as visitors,
+                    COALESCE(SUM(pageviews_count), 0) as pageviews
+                FROM web_intel_sessions
+                WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+                  AND is_bot = 0 AND (is_synthetic = 0 OR is_synthetic IS NULL)
+            ''', (p_id, org_id, since_date)).fetchone()
+
+            p_sess = s_row['sessions'] or 0
+            p_vis = s_row['visitors'] or 0
+            p_pv = s_row['pageviews'] or 0
+
+            # Conversions
+            c_row = conn.execute('''
+                SELECT COUNT(*) as conversions
+                FROM web_intel_conversions
+                WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            ''', (p_id, org_id, since_date)).fetchone()
+            p_conv = c_row['conversions'] or 0
+
+            # Latest SEO audit
+            seo_row = conn.execute('''
+                SELECT health_score, critical_count, warning_count, crawl_timestamp
+                FROM web_intel_seo_audits
+                WHERE property_id = ? AND organization_id = ? AND status = 'completed'
+                ORDER BY id DESC LIMIT 1
+            ''', (p_id, org_id)).fetchone()
+
+            h_score = round(seo_row['health_score'], 1) if seo_row else None
+            crit_count = seo_row['critical_count'] if seo_row else 0
+            warn_count = seo_row['warning_count'] if seo_row else 0
+
+            if h_score is not None:
+                health_scores.append(h_score)
+
+            total_sessions += p_sess
+            total_visitors += p_vis
+            total_pageviews += p_pv
+            total_conversions += p_conv
+
+            property_metrics.append({
+                'property_id': p_id,
+                'property_key': p['property_key'],
+                'display_name': p['display_name'],
+                'canonical_url': p['canonical_url'],
+                'property_type': p['property_type'],
+                'category': p['category'],
+                'sessions': p_sess,
+                'unique_visitors': p_vis,
+                'pageviews': p_pv,
+                'conversions': p_conv,
+                'health_score': h_score,
+                'critical_issues': crit_count,
+                'warning_issues': warn_count,
+                'last_audit_at': seo_row['crawl_timestamp'] if seo_row else None
+            })
+
+        avg_health = round(sum(health_scores) / len(health_scores), 1) if health_scores else 100.0
+
+        property_metrics.sort(key=lambda x: (x['unique_visitors'], x['sessions']), reverse=True)
+        top_prop = property_metrics[0] if property_metrics else None
+
+        return {
+            'organization_id': org_id,
+            'days': days,
+            'total_properties': len(props),
+            'total_unique_visitors': total_visitors,
+            'total_sessions': total_sessions,
+            'total_pageviews': total_pageviews,
+            'total_conversions': total_conversions,
+            'average_health_score': avg_health,
+            'top_performing_property': top_prop,
+            'properties': property_metrics
         }
 
 def record_seo_audit_results(property_id, organization_id, audit_summary, pages_list, recommendations_list):

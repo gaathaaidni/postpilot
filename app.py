@@ -2355,28 +2355,27 @@ def update_growth_property_status_route(property_id):
 
 # ── Website Intelligence Engine (Phase 2 Additive Telemetry & Analytics) ──
 
-_WEB_INTEL_RATE_LIMITS = {}
-_RATE_LIMIT_WINDOW_SEC = 60.0
-_RATE_LIMIT_MAX_PER_WINDOW = 120
+class WebIntelRateLimitDict(dict):
+    """Dictionary interface for backward compatibility that synchronizes with the shared rate limit table."""
+    def clear(self):
+        super().clear()
+        try:
+            with database.get_db_connection() as conn:
+                conn.execute("DELETE FROM web_intel_rate_limits")
+                conn.commit()
+        except Exception:
+            pass
 
-def _is_web_intel_rate_limited(client_key: str) -> bool:
-    """In-memory rate limiter: permits at most 120 telemetry beacons per minute."""
-    now = time.time()
-    cutoff = now - _RATE_LIMIT_WINDOW_SEC
-    timestamps = _WEB_INTEL_RATE_LIMITS.get(client_key, [])
-    # Prune expired timestamps
-    active = [t for t in timestamps if t > cutoff]
-    if len(active) >= _RATE_LIMIT_MAX_PER_WINDOW:
-        _WEB_INTEL_RATE_LIMITS[client_key] = active
-        return True
-    active.append(now)
-    _WEB_INTEL_RATE_LIMITS[client_key] = active
-    # Memory maintenance if cache grows large
-    if len(_WEB_INTEL_RATE_LIMITS) > 10000:
-        keys_to_purge = [k for k, v in _WEB_INTEL_RATE_LIMITS.items() if not v or v[-1] <= cutoff]
-        for k in keys_to_purge:
-            _WEB_INTEL_RATE_LIMITS.pop(k, None)
-    return False
+_WEB_INTEL_RATE_LIMITS = WebIntelRateLimitDict()
+
+def _is_web_intel_rate_limited(client_ip: str) -> bool:
+    """
+    Multi-worker rate limiter: permits at most 120 telemetry beacons per minute.
+    Backed by database table web_intel_rate_limits with hashed client keys,
+    sharing state across multiple Gunicorn workers with zero raw IP persistence.
+    """
+    client_key_hash = hashlib.sha256(f"web_intel_rl_{client_ip}".encode('utf-8')).hexdigest()[:32]
+    return database.check_and_increment_rate_limit(client_key_hash, window_sec=60, max_requests=120)
 
 def _add_web_intel_cors_headers(response, origin):
     """Sets CORS headers reflecting verified origin."""
@@ -2434,10 +2433,10 @@ def collect_web_intel():
         resp.status_code = 403
         return _add_web_intel_cors_headers(resp, origin)
 
-    # 3. Client IP Extraction (Trust authoritative proxy header from Nginx)
+    # 3. Client IP Extraction (Trust authoritative proxy header from Nginx; ignore client-supplied XFF/CF)
     client_ip = (request.headers.get('X-Real-IP') or request.remote_addr or '127.0.0.1').strip()
 
-    # 4. Rate Limiting Check
+    # 4. Rate Limiting Check (Multi-worker persistent SQLite / Postgres table)
     if _is_web_intel_rate_limited(client_ip):
         resp = jsonify({'error': 'Rate limit exceeded. Too many requests.'})
         resp.status_code = 429
@@ -2459,10 +2458,14 @@ def collect_web_intel():
     city_name = geo_res.get('city_name')
     asn_org = geo_res.get('asn_org')
 
-    # 7. User-Agent / Device / Bot Parsing
+    # 7. User-Agent / Device / Bot Parsing & Synthetic Traffic Isolation
+    is_test_header = request.headers.get('X-PostPilot-Test') == '1'
+    is_test_data = bool(data.get('is_test') or data.get('is_synthetic'))
+    is_synthetic = 1 if (is_test_header or is_test_data) else 0
+
     ua = request.headers.get('User-Agent', '')
     ua_lower = ua.lower()
-    is_bot = 1 if any(b in ua_lower for b in ('bot', 'crawl', 'spider', 'slurp', 'bytespider', 'claudebot', 'petalbot', 'headless')) else 0
+    is_bot = 1 if (is_synthetic or any(b in ua_lower for b in ('bot', 'crawl', 'spider', 'slurp', 'bytespider', 'claudebot', 'petalbot', 'headless'))) else 0
 
     device_type = data.get('device_type')
     if not device_type:
@@ -2524,7 +2527,8 @@ def collect_web_intel():
                 query_string=data.get('query_string'),
                 page_title=data.get('page_title'),
                 load_time_ms=data.get('load_time_ms'),
-                is_bot=is_bot
+                is_bot=is_bot,
+                is_synthetic=is_synthetic
             )
             resp = jsonify({'status': 'ok', 'recorded': 'pageview'})
             return _add_web_intel_cors_headers(resp, origin)
@@ -2561,6 +2565,19 @@ def collect_web_intel():
         resp = jsonify({'error': 'Failed to process telemetry beacon.'})
         resp.status_code = 500
         return _add_web_intel_cors_headers(resp, origin)
+
+@app.route('/api/web-intel/portfolio/summary', methods=['GET'])
+@login_required
+def get_web_intel_portfolio_summary_route():
+    """Retrieves cross-property portfolio growth & intelligence overview."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        summary = database.get_web_intel_portfolio_overview(organization_id=org_id, days=days)
+        return jsonify(summary), 200
+    except Exception as e:
+        logger.error(f"Error fetching portfolio summary: {e}")
+        return jsonify({'error': 'Failed to fetch portfolio summary.'}), 500
 
 @app.route('/api/web-intel/properties', methods=['GET'])
 @login_required

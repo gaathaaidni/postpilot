@@ -9576,6 +9576,7 @@ async function renderWebsiteIntelligenceView(container) {
                 <!-- Sub-Navigation Tabs -->
                 <div style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; overflow-x: auto; padding-bottom: 0.25rem;">
                     ${[
+                        { id: 'portfolio', icon: 'fa-cubes-stacked', label: 'Portfolio Overview' },
                         { id: 'overview', icon: 'fa-chart-pie', label: 'Overview' },
                         { id: 'geo', icon: 'fa-earth-americas', label: 'Geography' },
                         { id: 'sources', icon: 'fa-diagram-project', label: 'Traffic Sources' },
@@ -9638,7 +9639,9 @@ async function loadActiveWebIntelSubtab() {
     const container = document.getElementById('web-intel-subtab-content');
     if (!container || !webIntelSelectedPropId) return;
 
-    if (webIntelActiveSubtab === 'overview') {
+    if (webIntelActiveSubtab === 'portfolio') {
+        await loadWebIntelPortfolioSubtab(container);
+    } else if (webIntelActiveSubtab === 'overview') {
         await loadWebIntelOverviewSubtab(container);
     } else if (webIntelActiveSubtab === 'geo') {
         await loadWebIntelGeoSubtab(container);
@@ -9652,6 +9655,129 @@ async function loadActiveWebIntelSubtab() {
         await loadWebIntelSeoSubtab(container);
     } else if (webIntelActiveSubtab === 'recs') {
         await loadWebIntelRecommendationsSubtab(container);
+    }
+}
+
+async function loadWebIntelPortfolioSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Portfolio Growth Intelligence...</div>`;
+    try {
+        const res = await authFetch(`/api/web-intel/portfolio/summary?days=${webIntelSelectedDays}`);
+        if (!res.ok) throw new Error('Failed to load portfolio summary');
+        const data = await res.json();
+
+        const totalProps = data.total_properties || 0;
+        const visitors = data.total_unique_visitors || 0;
+        const sessions = data.total_sessions || 0;
+        const pageviews = data.total_pageviews || 0;
+        const conversions = data.total_conversions || 0;
+        const avgHealth = data.average_health_score !== undefined ? data.average_health_score : 100.0;
+        const topProp = data.top_performing_property;
+
+        let html = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Active Properties</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: var(--primary); margin-top: 0.35rem;">${totalProps}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Monitored websites</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Total Visitors</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #10b981; margin-top: 0.35rem;">${visitors.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Unique visitors (${webIntelSelectedDays}d)</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Total Sessions</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #8b5cf6; margin-top: 0.35rem;">${sessions.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">${pageviews.toLocaleString()} pageviews</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Total Conversions</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #ec4899; margin-top: 0.35rem;">${conversions.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Leads &amp; enquiries</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Avg Health Score</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: ${avgHealth >= 80 ? '#10b981' : avgHealth >= 60 ? '#f59e0b' : '#ef4444'}; margin-top: 0.35rem;">${avgHealth}%</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Technical SEO score</div>
+                </div>
+            </div>
+        `;
+
+        if (topProp && topProp.sessions > 0) {
+            html += `
+                <div class="card" style="padding: 1rem 1.25rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; border-left: 4px solid var(--primary); background: rgba(59, 130, 246, 0.05);">
+                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                        <i class="fa-solid fa-trophy" style="font-size: 1.5rem; color: #f59e0b;"></i>
+                        <div>
+                            <div style="font-size: 0.78rem; font-weight: 600; text-transform: uppercase; color: var(--text-muted);">Top Performing Website</div>
+                            <div style="font-weight: 700; font-size: 1rem;">${escapeHtml(topProp.display_name)} <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: normal;">(${escapeHtml(topProp.canonical_url)})</span></div>
+                        </div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: 800; font-size: 1.1rem; color: var(--primary);">${topProp.unique_visitors.toLocaleString()} visitors</div>
+                        <div style="font-size: 0.78rem; color: var(--text-muted);">${topProp.conversions} conversions</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        html += `
+            <div class="card" style="padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700;">Portfolio Websites &amp; Intelligence Summary</h3>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">${data.properties.length} registered properties</span>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Property Name</th>
+                                <th>Category / Type</th>
+                                <th>Live URL</th>
+                                <th>Visitors</th>
+                                <th>Sessions</th>
+                                <th>Conversions</th>
+                                <th>SEO Score</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.properties.map(p => {
+                                const score = p.health_score !== null ? `${p.health_score}%` : 'Not audited';
+                                const badgeColor = p.health_score === null ? 'var(--text-muted)' : p.health_score >= 80 ? '#10b981' : p.health_score >= 60 ? '#f59e0b' : '#ef4444';
+                                return `
+                                    <tr>
+                                        <td>
+                                            <strong>${escapeHtml(p.display_name)}</strong>
+                                            <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(p.property_key)}</div>
+                                        </td>
+                                        <td><span class="badge" style="background: rgba(255,255,255,0.08);">${escapeHtml(p.category || p.property_type)}</span></td>
+                                        <td><a href="${escapeHtml(p.canonical_url)}" target="_blank" rel="noopener noreferrer" style="color: var(--primary); font-size: 0.85rem;">${escapeHtml(p.canonical_url)}</a></td>
+                                        <td>${p.unique_visitors.toLocaleString()}</td>
+                                        <td>${p.sessions.toLocaleString()}</td>
+                                        <td>${p.conversions}</td>
+                                        <td>
+                                            <span style="display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 700; color: ${badgeColor};">
+                                                <i class="fa-solid fa-circle" style="font-size: 0.5rem;"></i> ${score}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-secondary" onclick="changeWebIntelProperty(${p.property_id}); switchWebIntelSubtab('overview');" title="View detailed analytics for this property">
+                                                <i class="fa-solid fa-arrow-right"></i> View
+                                            </button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 2rem; text-align: center; color: var(--danger);"><p>Error loading portfolio summary: ${escapeHtml(e.message)}</p></div>`;
     }
 }
 

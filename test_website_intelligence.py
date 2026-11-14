@@ -579,6 +579,104 @@ class TestWebsiteIntelligence(unittest.TestCase):
         check = subprocess.run(["node", "-c", str(script_path)], capture_output=True, text=True)
         self.assertEqual(check.returncode, 0, f"script.js syntax check failed: {check.stderr}")
 
+    def test_32_ssrf_safe_redirect_handler_blocks_private_targets(self):
+        """Verifies SSRFSafeRedirectHandler intercepts and blocks redirects to private or metadata addresses."""
+        from seo_crawler import SSRFSafeRedirectHandler
+        import urllib.error
+        import urllib.request
+
+        handler = SSRFSafeRedirectHandler()
+        req = urllib.request.Request("https://safe-domain.com")
+        
+        # Unsafe redirect target: loopback
+        with self.assertRaises(urllib.error.HTTPError):
+            handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:8080/secret")
+
+        # Unsafe redirect target: AWS/cloud metadata IP
+        with self.assertRaises(urllib.error.HTTPError):
+            handler.redirect_request(req, None, 301, "Moved", {}, "http://169.254.169.254/latest/meta-data/")
+
+        # Unsafe redirect target: private 10.x.x.x
+        with self.assertRaises(urllib.error.HTTPError):
+            handler.redirect_request(req, None, 302, "Found", {}, "http://10.0.0.1/admin")
+
+    def test_33_shared_rate_limiting_across_keys(self):
+        """Verifies database-backed rate limiter increments per-key counters and enforces 120 limit."""
+        import hashlib
+        key_a = hashlib.sha256(b"client_ip_test_A").hexdigest()[:32]
+        key_b = hashlib.sha256(b"client_ip_test_B").hexdigest()[:32]
+
+        with database.get_db_connection() as conn:
+            conn.execute("DELETE FROM web_intel_rate_limits WHERE key_hash IN (?, ?)", (key_a, key_b))
+            conn.commit()
+
+        # Send 120 requests for key_a using a stable window to avoid clock boundary tick
+        for _ in range(120):
+            blocked = database.check_and_increment_rate_limit(key_a, window_sec=3600, max_requests=120)
+            self.assertFalse(blocked)
+
+        # 121st request should be blocked
+        blocked_121 = database.check_and_increment_rate_limit(key_a, window_sec=3600, max_requests=120)
+        self.assertTrue(blocked_121)
+
+        # key_b should still be allowed (independent key isolation)
+        blocked_b = database.check_and_increment_rate_limit(key_b, window_sec=3600, max_requests=120)
+        self.assertFalse(blocked_b)
+
+    def test_34_synthetic_traffic_isolation_from_kpis(self):
+        """Verifies test runs with X-PostPilot-Test header or is_test flag are marked synthetic and isolated from analytics."""
+        self._login(user_id=1, username="admin", role="admin", org_id=1)
+        
+        # Pre-check baseline unique visitors for property 1
+        initial_overview = database.get_web_intel_overview(property_id=1, organization_id=1, days=30)
+        initial_visitors = initial_overview['unique_visitors']
+
+        # Send synthetic telemetry beacon
+        res_test = self.client.post(
+            '/api/web-intel/collect',
+            json={
+                "property_key": "gaatha_corporate",
+                "session_id": "synthetic_session_999",
+                "path": "/automated-test-run",
+                "page_title": "Synthetic Test Run",
+                "event_type": "pageview",
+                "is_test": True
+            },
+            headers={
+                "Origin": "https://gaatha.tech",
+                "X-PostPilot-Test": "1",
+                "X-Real-IP": "198.51.100.99"
+            }
+        )
+        self.assertEqual(res_test.status_code, 200)
+
+        # Verify record in database has is_synthetic = 1
+        with database.get_db_connection() as conn:
+            sess = conn.execute(
+                "SELECT is_synthetic, is_bot FROM web_intel_sessions WHERE exit_page = '/automated-test-run'"
+            ).fetchone()
+            self.assertIsNotNone(sess)
+            self.assertEqual(sess['is_synthetic'], 1)
+            self.assertEqual(sess['is_bot'], 1)
+
+        # Verify overview metrics did NOT count the synthetic visitor
+        post_overview = database.get_web_intel_overview(property_id=1, organization_id=1, days=30)
+        self.assertEqual(post_overview['unique_visitors'], initial_visitors)
+
+    def test_35_portfolio_summary_api(self):
+        """Verifies GET /api/web-intel/portfolio/summary returns multi-property aggregated intelligence."""
+        self._login(user_id=1, username="admin", role="admin", org_id=1)
+        res = self.client.get('/api/web-intel/portfolio/summary?days=30')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('total_properties', data)
+        self.assertGreaterEqual(data['total_properties'], 7)
+        self.assertIn('total_unique_visitors', data)
+        self.assertIn('total_pageviews', data)
+        self.assertIn('average_health_score', data)
+        self.assertIn('properties', data)
+        self.assertIsInstance(data['properties'], list)
+
 
 if __name__ == '__main__':
     unittest.main()
