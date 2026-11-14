@@ -233,6 +233,19 @@ class LinkedInAdapter(BasePlatformAdapter):
         acct_org = acct.get('account_identifier') if acct else None
         org_id = target_org or acct_org or app_cfg['org_id']
 
+        # Enforce fail-closed check for LinkedIn company-page publishing:
+        # In live publishing mode, if company publishing flag is disabled, block immediately even if permissions exist.
+        if config.is_publishing_enabled() and not config.is_linkedin_company_publishing_enabled():
+            return {
+                'success': False,
+                'platform': self.platform_key,
+                'destination': 'organization',
+                'app_key': app_key,
+                'organization_id': org_id,
+                'error_code': 'COMPANY_PUBLISHING_DISABLED',
+                'error': 'LinkedIn company-page publishing is explicitly disabled (POSTPILOT_LINKEDIN_COMPANY_PUBLISHING_ENABLED=0).',
+            }
+
         if config.is_linkedin_company_publishing_enabled():
             elig = linkedin_api.check_organization_publishing_eligibility(app_key, access_token=explicit_token)
             if not elig.get('company_publishing_authorized'):

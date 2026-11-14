@@ -198,6 +198,17 @@ class TestLinkedInPersonalAndCompany(unittest.TestCase):
         self.assertEqual(res_ok['destination'], 'organization')
         self.assertEqual(res_ok['organization_id'], '145250613')
 
+        # Even with w_organization_social + APPROVED ADMINISTRATOR ACL:
+        # If POSTPILOT_LINKEDIN_COMPANY_PUBLISHING_ENABLED=0, it MUST REMAIN BLOCKED!
+        mock_post.reset_mock()
+        with patch.dict(os.environ, {'POSTPILOT_PUBLISHING_ENABLED': '1', 'POSTPILOT_LINKEDIN_COMPANY_PUBLISHING_ENABLED': '0', 'POSTPILOT_ALLOWED_PLATFORMS': 'facebook,linkedin'}), \
+             patch('linkedin_api.get_token_data', return_value=org_td), \
+             patch('linkedin_api.get_active_token', return_value='ORG_TOK'):
+            res_disabled = PlatformRegistry.get_adapter('linkedin').publish({'destination': 'organization', 'linkedin_org_id': '145250613', 'message': 'Flag disabled'})
+        self.assertFalse(res_disabled['success'])
+        self.assertEqual(res_disabled['error_code'], 'COMPANY_PUBLISHING_DISABLED')
+        mock_post.assert_not_called()
+
     # 5. Refresh token preservation & log redaction
     @patch('requests.post')
     def test_05_refresh_token_preservation_and_redaction(self, mock_post):

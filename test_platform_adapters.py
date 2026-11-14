@@ -175,26 +175,27 @@ class TestPlatformAdapters(unittest.TestCase):
 
     def test_09_safety_guardrail_publishing_blocked(self):
         """Verifies that publish calls across all adapters respect POSTPILOT_PUBLISHING_ENABLED=0."""
-        # Facebook simulation
-        fb_res = PlatformRegistry.dispatch({'post_type': 'facebook', 'message': 'Safety test'})
-        self.assertTrue(fb_res['success'])
-        self.assertTrue(fb_res.get('simulated'))
+        with patch.dict(os.environ, {'POSTPILOT_PUBLISHING_ENABLED': '0'}):
+            # Facebook simulation
+            fb_res = PlatformRegistry.dispatch({'post_type': 'facebook', 'message': 'Safety test'})
+            self.assertTrue(fb_res['success'])
+            self.assertTrue(fb_res.get('simulated'))
 
-        # Instagram simulation
-        ig_res = PlatformRegistry.dispatch({'post_type': 'instagram', 'message': 'Safety test', 'image_filename': 'test.jpg'})
-        self.assertTrue(ig_res['success'])
-        self.assertTrue(ig_res.get('simulated'))
+            # Instagram simulation
+            ig_res = PlatformRegistry.dispatch({'post_type': 'instagram', 'message': 'Safety test', 'image_filename': 'test.jpg'})
+            self.assertTrue(ig_res['success'])
+            self.assertTrue(ig_res.get('simulated'))
 
-        # LinkedIn simulation
-        li_res = PlatformRegistry.dispatch({'post_type': 'linkedin', 'message': 'Safety test'})
-        self.assertTrue(li_res['success'])
-        self.assertTrue(li_res.get('simulated'))
+            # LinkedIn simulation
+            li_res = PlatformRegistry.dispatch({'post_type': 'linkedin', 'message': 'Safety test'})
+            self.assertTrue(li_res['success'])
+            self.assertTrue(li_res.get('simulated'))
 
-        # WhatsApp simulation
-        wa = PlatformRegistry.get_adapter('whatsapp')
-        wa_res = wa.send_template('+15552345678', 'client_welcome')
-        self.assertTrue(wa_res['success'])
-        self.assertTrue(wa_res.get('simulated'))
+            # WhatsApp simulation
+            wa = PlatformRegistry.get_adapter('whatsapp')
+            wa_res = wa.send_template('+15552345678', 'client_welcome')
+            self.assertTrue(wa_res['success'])
+            self.assertTrue(wa_res.get('simulated'))
 
 
 if __name__ == '__main__':

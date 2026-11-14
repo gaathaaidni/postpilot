@@ -255,15 +255,29 @@ class TestLinkedInPublishing(unittest.TestCase):
             'simulated': False
         }
 
-        res = self.adapter.publish({
-            'text': 'Exciting developments at Aidni Global!',
-            'app_name': 'aidni_global',
-            'organization_id': '145240694'
-        })
+        with patch.object(config, 'is_linkedin_company_publishing_enabled', return_value=True), \
+             patch('linkedin_api.check_organization_publishing_eligibility', return_value={'company_publishing_authorized': True}):
+            res = self.adapter.publish({
+                'text': 'Exciting developments at Aidni Global!',
+                'app_name': 'aidni_global',
+                'organization_id': '145240694'
+            })
 
-        self.assertTrue(res['success'])
-        self.assertEqual(res['external_post_id'], 'urn:li:share:7123456789012345678')
-        self.assertEqual(res['organization_id'], '145240694')
+            self.assertTrue(res['success'])
+            self.assertEqual(res['external_post_id'], 'urn:li:share:7123456789012345678')
+            self.assertEqual(res['organization_id'], '145240694')
+
+    def test_linkedin_company_publishing_blocked_when_flag_zero(self):
+        """When POSTPILOT_LINKEDIN_COMPANY_PUBLISHING_ENABLED=0, organization publishing is blocked."""
+        with patch.object(config, 'is_publishing_enabled', return_value=True), \
+             patch.object(config, 'is_linkedin_company_publishing_enabled', return_value=False):
+            res = self.adapter.publish({
+                'destination': 'organization',
+                'linkedin_org_id': '145240694',
+                'text': 'Blocked company post'
+            })
+            self.assertFalse(res['success'])
+            self.assertEqual(res['error_code'], 'COMPANY_PUBLISHING_DISABLED')
 
     @patch('linkedin_api.requests.put')
     @patch('linkedin_api.requests.post')
@@ -298,7 +312,8 @@ class TestLinkedInPublishing(unittest.TestCase):
             tf_path = tf.name
 
         try:
-            with patch.object(config, 'is_publishing_enabled', return_value=True):
+            with patch.object(config, 'is_publishing_enabled', return_value=True), \
+                 patch.object(config, 'is_linkedin_company_publishing_enabled', return_value=True):
                 with patch('linkedin_api.get_active_token', return_value='fake_token_123'):
                     # Call initializeUpload
                     init_res = linkedin_api.initialize_image_upload('145250613', app_key='gaatha_ventures')
