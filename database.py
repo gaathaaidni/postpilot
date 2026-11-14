@@ -247,6 +247,7 @@ def _ensure_indexes(conn):
         ("idx_sched_org", "CREATE INDEX IF NOT EXISTS idx_sched_org ON scheduled_posts(organization_id, post_type, scheduled_for)"),
         ("idx_sched_lock", "CREATE INDEX IF NOT EXISTS idx_sched_lock ON scheduled_posts(locked_by, locked_at)"),
         ("idx_sched_idempotency", "CREATE INDEX IF NOT EXISTS idx_sched_idempotency ON scheduled_posts(idempotency_key)"),
+        ("idx_sched_growth_property", "CREATE INDEX IF NOT EXISTS idx_sched_growth_property ON scheduled_posts(organization_id, growth_property_id)"),
         ("idx_brands_org", "CREATE INDEX IF NOT EXISTS idx_brands_org ON brands(organization_id, slug)"),
         ("idx_users_org", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(organization_id, username)"),
         ("idx_audit_post", "CREATE INDEX IF NOT EXISTS idx_audit_post ON post_audit_logs(scheduled_post_id, created_at)"),
@@ -364,7 +365,8 @@ def init_db():
                 rejection_reason TEXT,
                 created_by INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                growth_property_id INTEGER REFERENCES growth_properties(id)
             )
         ''')
 
@@ -3294,7 +3296,7 @@ def get_ai_usage_summary(organization_id, days=30):
 
 def get_calendar_events(organization_id=1, start_date=None, end_date=None,
                         brand_id=None, campaign_id=None, platform=None, status=None,
-                        target_timezone=None):
+                        target_timezone=None, property_id=None):
     """
     Retrieves unified calendar events across scheduled posts and content drafts
     scoped to active organization with date bounds, localized timestamps, and filters.
@@ -3306,6 +3308,9 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
 
     if brand_id and str(brand_id) != 'all':
         validate_brand_ownership(int(brand_id), org_id)
+
+    if property_id and str(property_id) != 'all':
+        validate_growth_property_ownership(int(property_id), org_id)
 
     start_utc = None
     if start_date:
@@ -3327,11 +3332,13 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
         sp_query = (
             "SELECT sp.id, sp.organization_id, sp.post_type, sp.message, "
             "sp.image_filename, sp.scheduled_for, sp.timezone, sp.status, "
-            "sp.created_at, sp.brand_id, sp.campaign_id, "
-            "b.name as brand_name, c.name as campaign_name "
+            "sp.created_at, sp.brand_id, sp.campaign_id, sp.growth_property_id, "
+            "b.name as brand_name, c.name as campaign_name, "
+            "gp.property_key, gp.display_name as property_name, gp.canonical_url as property_canonical_url "
             "FROM scheduled_posts sp "
             "LEFT JOIN brands b ON sp.brand_id = b.id "
             "LEFT JOIN campaigns c ON sp.campaign_id = c.id "
+            "LEFT JOIN growth_properties gp ON sp.growth_property_id = gp.id "
             "WHERE sp.organization_id = ?"
         )
         sp_params = [org_id]
@@ -3345,6 +3352,9 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
         if brand_id and str(brand_id) != 'all':
             sp_query += " AND sp.brand_id = ?"
             sp_params.append(int(brand_id))
+        if property_id and str(property_id) != 'all':
+            sp_query += " AND sp.growth_property_id = ?"
+            sp_params.append(int(property_id))
         if campaign_id and str(campaign_id) != 'all':
             sp_query += " AND sp.campaign_id = ?"
             sp_params.append(int(campaign_id))
@@ -3383,6 +3393,11 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
                 'status': d.get('status') or 'scheduled',
                 'brand_id': d.get('brand_id'),
                 'brand_name': d.get('brand_name'),
+                'growth_property_id': d.get('growth_property_id'),
+                'property_id': d.get('growth_property_id'),
+                'property_key': d.get('property_key'),
+                'property_name': d.get('property_name'),
+                'property_canonical_url': d.get('property_canonical_url'),
                 'campaign_id': d.get('campaign_id'),
                 'campaign_name': d.get('campaign_name'),
                 'image_filename': d.get('image_filename')
@@ -3392,10 +3407,12 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
         cd_query = (
             "SELECT cd.id, cd.organization_id, cd.target_platform, cd.headline, "
             "cd.caption, cd.status, cd.created_at, cd.brand_id, cd.campaign_id, "
-            "b.name as brand_name, c.name as campaign_name "
+            "b.name as brand_name, c.name as campaign_name, "
+            "gp.id as growth_property_id, gp.property_key, gp.display_name as property_name, gp.canonical_url as property_canonical_url "
             "FROM content_drafts cd "
             "LEFT JOIN brands b ON cd.brand_id = b.id "
             "LEFT JOIN campaigns c ON cd.campaign_id = c.id "
+            "LEFT JOIN growth_properties gp ON (cd.brand_id = gp.brand_id AND cd.organization_id = gp.organization_id) "
             "WHERE cd.organization_id = ?"
         )
         cd_params = [org_id]
@@ -3409,6 +3426,9 @@ def get_calendar_events(organization_id=1, start_date=None, end_date=None,
         if brand_id and str(brand_id) != 'all':
             cd_query += " AND cd.brand_id = ?"
             cd_params.append(int(brand_id))
+        if property_id and str(property_id) != 'all':
+            cd_query += " AND cd.brand_id IN (SELECT brand_id FROM growth_properties WHERE id = ?)"
+            cd_params.append(int(property_id))
         if campaign_id and str(campaign_id) != 'all':
             cd_query += " AND cd.campaign_id = ?"
             cd_params.append(int(campaign_id))
@@ -4532,9 +4552,68 @@ def init_growth_properties(conn=None):
 
     if conn is not None:
         _execute_init(conn)
+        migrate_phase2_1_property_calendar(conn)
     else:
         with get_db_connection() as c:
             _execute_init(c)
+            migrate_phase2_1_property_calendar(c)
+
+def migrate_phase2_1_property_calendar(conn=None):
+    """
+    Additive migration 20261114_002_link_posts_to_properties:
+    Adds growth_property_id to scheduled_posts, creates index, and backfills properties from brands.
+    """
+    is_pg = is_postgres()
+
+    def _execute(c):
+        # Check if migration already recorded
+        row = c.execute(
+            "SELECT version FROM schema_migrations WHERE version = ?",
+            ('20261114_002_link_posts_to_properties',)
+        ).fetchone()
+
+        # Ensure column exists on scheduled_posts
+        has_col = False
+        if is_pg:
+            cur = c.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'scheduled_posts' AND column_name = 'growth_property_id'"
+            )
+            has_col = bool(cur.fetchone())
+            if not has_col:
+                c.execute("ALTER TABLE scheduled_posts ADD COLUMN IF NOT EXISTS growth_property_id INTEGER REFERENCES growth_properties(id)")
+        else:
+            cur = c.execute("PRAGMA table_info(scheduled_posts)")
+            cols = [r['name'] if isinstance(r, dict) else r[1] for r in cur.fetchall()]
+            has_col = 'growth_property_id' in cols
+            if not has_col:
+                c.execute("ALTER TABLE scheduled_posts ADD COLUMN growth_property_id INTEGER REFERENCES growth_properties(id)")
+
+        # Ensure index exists
+        c.execute("CREATE INDEX IF NOT EXISTS idx_sched_growth_property ON scheduled_posts(organization_id, growth_property_id)")
+
+        # Perform backfill based on unambiguous brand mapping for that organization
+        c.execute('''
+            UPDATE scheduled_posts
+            SET growth_property_id = (
+                SELECT gp.id FROM growth_properties gp
+                WHERE gp.brand_id = scheduled_posts.brand_id
+                  AND gp.organization_id = scheduled_posts.organization_id
+            )
+            WHERE brand_id IS NOT NULL AND (growth_property_id IS NULL OR growth_property_id = 0)
+        ''')
+
+        if not row:
+            c.execute('''
+                INSERT INTO schema_migrations (version, description)
+                VALUES (?, ?)
+            ''', ('20261114_002_link_posts_to_properties', 'Link scheduled_posts to growth_properties and backfill unambiguous brand mappings'))
+        c.commit()
+
+    if conn is not None:
+        _execute(conn)
+    else:
+        with get_db_connection() as c:
+            _execute(c)
 
 def validate_growth_property_ownership(property_id, organization_id):
     """Validates that a growth property exists and belongs to the given organization."""

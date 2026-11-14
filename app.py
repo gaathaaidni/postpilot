@@ -3629,6 +3629,7 @@ def get_calendar_events_route():
     platform = request.args.get('platform') or request.args.get('post_type')
     status = request.args.get('status')
     tz = request.args.get('timezone')
+    property_id = request.args.get('property_id') or request.args.get('growth_property_id')
 
     try:
         events = database.get_calendar_events(
@@ -3639,7 +3640,8 @@ def get_calendar_events_route():
             campaign_id=campaign_id,
             platform=platform,
             status=status,
-            target_timezone=tz
+            target_timezone=tz,
+            property_id=property_id
         )
         return jsonify(events), 200
     except (database.TenantIsolationError, ValueError) as e:

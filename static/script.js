@@ -4649,10 +4649,56 @@ async function updatePendingApprovalsBadge() {
 let calendarCurrentDate = new Date();
 let calendarActiveView = 'month'; // 'month', 'week', 'day', 'list'
 let calendarFilterChannel = 'all';
+let calendarFilterProperty = 'all';
 let calendarFilterBrand = 'all';
 let calendarFilterStatus = 'all';
 let cachedScheduledPosts = [];
 let cachedBrandsList = [];
+window.cachedPropertiesList = [];
+
+function renderCalendarPropertyLegend() {
+    const legendEl = document.getElementById('calendar-property-legend');
+    if (!legendEl) return;
+
+    const props = [
+        { key: 'gaatha_corporate', name: 'Corporate' },
+        { key: 'gaatha_terra', name: 'Terra' },
+        { key: 'gaatha_suite', name: 'Suite' },
+        { key: 'sentira_ai', name: 'Sentira' },
+        { key: 'gaatha_pos', name: 'POS' },
+        { key: 'gaatha_ai', name: 'Gaatha AI' },
+        { key: 'phoenix', name: 'Phoenix' },
+        { key: 'unassigned', name: 'Unassigned' }
+    ];
+
+    legendEl.innerHTML = '<span class="legend-title"><i class="fa-solid fa-layer-group"></i> Properties:</span>' +
+        props.map(p => `
+            <span class="legend-item" onclick="setCalendarPropertyFilter('${p.key}')" title="Filter by ${p.name}">
+                <span class="legend-dot prop-dot-${p.key}"></span>
+                <span class="legend-label">${p.name}</span>
+            </span>
+        `).join('');
+}
+
+function setCalendarPropertyFilter(propKey) {
+    const propSel = document.getElementById('cal-filter-property');
+    if (!propSel) return;
+    if (propKey === 'unassigned') {
+        propSel.value = 'all';
+        calendarFilterProperty = 'all';
+        handleCalendarFilterChange();
+        return;
+    }
+    const match = (window.cachedPropertiesList || []).find(p => p.property_key === propKey);
+    if (match) {
+        propSel.value = String(match.id);
+        calendarFilterProperty = String(match.id);
+    } else {
+        propSel.value = 'all';
+        calendarFilterProperty = 'all';
+    }
+    handleCalendarFilterChange();
+}
 
 async function renderCalendarView(container) {
     container.innerHTML = `
@@ -4676,6 +4722,9 @@ async function renderCalendarView(container) {
             </div>
 
             <div class="calendar-filters-group">
+                <select id="cal-filter-property" onchange="handleCalendarFilterChange()">
+                    <option value="all">All Properties</option>
+                </select>
                 <select id="cal-filter-channel" onchange="handleCalendarFilterChange()">
                     <option value="all">All Platforms</option>
                     <option value="facebook">Facebook Pages</option>
@@ -4700,6 +4749,8 @@ async function renderCalendarView(container) {
             </div>
         </div>
 
+        <div class="calendar-property-legend" id="calendar-property-legend"></div>
+
         <div id="calendar-content-root">
             <div style="text-align: center; padding: 3rem; color: var(--text-muted);">
                 <i class="fa-solid fa-spinner fa-spin" style="font-size: 1.5rem; margin-bottom: 0.5rem; display: block;"></i>
@@ -4713,6 +4764,23 @@ async function renderCalendarView(container) {
 
 async function loadCalendarData() {
     try {
+        // Fetch properties if not cached
+        if (!window.cachedPropertiesList || window.cachedPropertiesList.length === 0) {
+            const pRes = await authFetch('/api/growth/properties');
+            if (pRes.ok) {
+                const pData = await pRes.json();
+                window.cachedPropertiesList = pData.properties || [];
+            }
+        }
+        const propSel = document.getElementById('cal-filter-property');
+        if (propSel && window.cachedPropertiesList && window.cachedPropertiesList.length > 0) {
+            const curVal = propSel.value || calendarFilterProperty;
+            propSel.innerHTML = '<option value="all">All Properties</option>' +
+                window.cachedPropertiesList.map(p => `<option value="${p.id}">${escapeHtml(p.display_name)}</option>`).join('');
+            propSel.value = curVal;
+        }
+        renderCalendarPropertyLegend();
+
         // Fetch brands if not cached
         if (cachedBrandsList.length === 0) {
             const bRes = await authFetch('/api/brands');
@@ -4725,6 +4793,9 @@ async function loadCalendarData() {
         }
 
         let calUrl = `/api/calendar/events?brand_id=${encodeURIComponent(calendarFilterBrand)}&status=${encodeURIComponent(calendarFilterStatus)}&platform=${encodeURIComponent(calendarFilterChannel)}`;
+        if (calendarFilterProperty !== 'all') {
+            calUrl += `&property_id=${encodeURIComponent(calendarFilterProperty)}`;
+        }
         const res = await authFetch(calUrl);
         if (res.ok) {
             cachedScheduledPosts = await res.json();
@@ -4741,10 +4812,11 @@ async function loadCalendarData() {
 }
 
 function handleCalendarFilterChange() {
+    calendarFilterProperty = document.getElementById('cal-filter-property')?.value || 'all';
     calendarFilterChannel = document.getElementById('cal-filter-channel')?.value || 'all';
     calendarFilterBrand = document.getElementById('cal-filter-brand')?.value || 'all';
     calendarFilterStatus = document.getElementById('cal-filter-status')?.value || 'all';
-    renderCalendarContent();
+    loadCalendarData();
 }
 
 function prevCalendar() {
@@ -4786,6 +4858,10 @@ function setCalendarView(view) {
 function getFilteredCalendarPosts() {
     return cachedScheduledPosts.filter(p => {
         if (calendarFilterChannel !== 'all' && p.post_type !== calendarFilterChannel) return false;
+        if (calendarFilterProperty !== 'all') {
+            const pId = p.growth_property_id != null ? p.growth_property_id : p.property_id;
+            if (String(pId) !== String(calendarFilterProperty)) return false;
+        }
         if (calendarFilterBrand !== 'all' && String(p.brand_id) !== String(calendarFilterBrand)) return false;
         if (calendarFilterStatus !== 'all' && p.status !== calendarFilterStatus) return false;
         return true;
@@ -4887,8 +4963,11 @@ function renderCalendarMonthGrid(root) {
 
         dayPosts.slice(0, 3).forEach(p => {
             const timeStr = (p.local_scheduled_for || p.scheduled_for || '').substring(11, 16);
+            const propKey = p.property_key || 'unassigned';
+            const propName = p.property_name || 'Unassigned';
             html += `
-                <div class="calendar-pill pill-${p.post_type}" onclick="openPostDetails(${p.id}, event)" title="${escapeHtml(p.message || '')}">
+                <div class="calendar-pill pill-${p.post_type}" onclick="openPostDetails(${p.id}, event)" title="${escapeHtml(propName)}: ${escapeHtml(p.message || '')}">
+                    <span class="cal-prop-badge prop-${propKey}">${escapeHtml(propName)}</span>
                     <span style="font-weight: 700; font-size: 0.7rem;">${timeStr}</span>
                     <span class="text-truncate" style="flex:1;">${escapeHtml(p.message || '(Media Attachment)')}</span>
                     <span class="badge badge-${p.status}" style="padding: 1px 4px; font-size: 0.65rem;">${p.status}</span>
@@ -4966,11 +5045,16 @@ function renderCalendarWeekView(root) {
         } else {
             dayPosts.forEach(p => {
                 const timeStr = (p.local_scheduled_for || p.scheduled_for || '').substring(11, 16);
+                const propKey = p.property_key || 'unassigned';
+                const propName = p.property_name || 'Unassigned';
                 html += `
                     <div class="calendar-pill pill-${p.post_type}" onclick="openPostDetails(${p.id}, event)" style="padding: 0.5rem; flex-direction: column; align-items: flex-start; gap: 0.25rem;">
-                        <div style="display: flex; justify-content: space-between; width: 100%; font-size: 0.72rem;">
-                            <span style="font-weight: 700;">${timeStr}</span>
-                            <span class="badge badge-${p.status}">${p.status}</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.72rem; gap: 0.25rem;">
+                            <span class="cal-prop-badge prop-${propKey}">${escapeHtml(propName)}</span>
+                            <div style="display: flex; gap: 0.25rem; align-items: center;">
+                                <span style="font-weight: 700;">${timeStr}</span>
+                                <span class="badge badge-${p.status}">${p.status}</span>
+                            </div>
                         </div>
                         <div style="font-size: 0.8rem; line-height: 1.35; max-height: 48px; overflow: hidden;">${escapeHtml(p.message || '(Media Attachment)')}</div>
                     </div>
@@ -5023,6 +5107,8 @@ function renderCalendarDayView(root) {
         html += `<div style="display: flex; flex-direction: column; gap: 0.85rem;">`;
         filtered.forEach(p => {
             const timeStr = (p.local_scheduled_for || p.scheduled_for || '').substring(11, 16);
+            const propKey = p.property_key || 'unassigned';
+            const propName = p.property_name || 'Unassigned';
             html += `
                 <div class="calendar-list-card" onclick="openPostDetails(${p.id}, event)" style="cursor: pointer;">
                     <div class="calendar-list-date-badge">
@@ -5031,6 +5117,7 @@ function renderCalendarDayView(root) {
                     </div>
                     <div style="flex: 1; min-width: 0;">
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+                            <span class="cal-prop-badge prop-${propKey}">${escapeHtml(propName)}</span>
                             <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border);">${CHANNEL_INFO[p.post_type]?.name || p.post_type}</span>
                             <span class="badge badge-${p.status}">${p.status}</span>
                             ${p.idempotency_key ? `<small style="color: var(--text-muted); font-size: 0.72rem;">#${p.id}</small>` : ''}
@@ -5073,6 +5160,8 @@ function renderCalendarListView(root) {
             const rawDt = p.local_scheduled_for || p.scheduled_for || '';
             const datePart = rawDt.substring(0, 10);
             const timePart = rawDt.substring(11, 16);
+            const propKey = p.property_key || 'unassigned';
+            const propName = p.property_name || 'Unassigned';
 
             html += `
                 <div class="calendar-list-card" onclick="openPostDetails(${p.id}, event)" style="cursor: pointer;">
@@ -5083,6 +5172,7 @@ function renderCalendarListView(root) {
                     </div>
                     <div style="flex: 1; min-width: 0;">
                         <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; flex-wrap: wrap;">
+                            <span class="cal-prop-badge prop-${propKey}">${escapeHtml(propName)}</span>
                             <span class="badge" style="background: var(--bg-app); border: 1px solid var(--border);">${CHANNEL_INFO[p.post_type]?.name || p.post_type}</span>
                             <span class="badge badge-${p.status}">${p.status}</span>
                             ${p.timezone ? `<small style="color: var(--text-muted); font-size: 0.72rem;">Zone: ${p.timezone}</small>` : ''}
@@ -5161,6 +5251,10 @@ async function openPostDetails(postId, event) {
         
         const brandObj = cachedBrandsList.find(b => b.id === post.brand_id);
         document.getElementById('details-brand-name').textContent = brandObj ? brandObj.name : 'Default Workspace';
+
+        const propName = post.property_name || (post.growth_property_id ? `Property #${post.growth_property_id}` : 'Unassigned');
+        const propElem = document.getElementById('details-property-name');
+        if (propElem) propElem.textContent = propName;
         
         document.getElementById('details-scheduled-time').textContent = post.local_display || post.scheduled_for;
         document.getElementById('details-caption').textContent = post.message || '(No text caption provided)';
