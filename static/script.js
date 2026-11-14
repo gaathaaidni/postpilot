@@ -9005,7 +9005,7 @@ async function confirmSubscriptionUpgrade() {
 // ==============================================================================
 
 let cachedGrowthProperties = [];
-let cachedBrandsList = [];
+// cachedBrandsList is declared globally at line 4656
 
 async function renderPropertiesView(container) {
     if (!container) return;
