@@ -4553,10 +4553,12 @@ def init_growth_properties(conn=None):
     if conn is not None:
         _execute_init(conn)
         migrate_phase2_1_property_calendar(conn)
+        migrate_phase2_website_intelligence(conn)
     else:
         with get_db_connection() as c:
             _execute_init(c)
             migrate_phase2_1_property_calendar(c)
+            migrate_phase2_website_intelligence(c)
 
 def migrate_phase2_1_property_calendar(conn=None):
     """
@@ -4607,6 +4609,211 @@ def migrate_phase2_1_property_calendar(conn=None):
                 INSERT INTO schema_migrations (version, description)
                 VALUES (?, ?)
             ''', ('20261114_002_link_posts_to_properties', 'Link scheduled_posts to growth_properties and backfill unambiguous brand mappings'))
+        c.commit()
+
+    if conn is not None:
+        _execute(conn)
+    else:
+        with get_db_connection() as c:
+            _execute(c)
+
+def migrate_phase2_website_intelligence(conn=None):
+    """
+    Additive migration 20261114_003_website_intelligence:
+    Initializes isolated tables for Website Intelligence:
+    - web_intel_sessions (anonymized visitor sessions, zero raw IP storage)
+    - web_intel_pageviews (granular pageview events)
+    - web_intel_events (custom interactions and buttons)
+    - web_intel_conversions (inbound leads, signups, enquiries)
+    - web_intel_daily_rollups (pre-aggregated daily reporting KPIs)
+    - web_intel_seo_audits (technical crawl audit summaries)
+    - web_intel_seo_pages (page-level SEO health records)
+    - web_intel_seo_recommendations (controlled staged recommendations)
+    """
+    is_pg = is_postgres()
+    auto_id = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+    def _execute(c):
+        # 1. web_intel_sessions table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_sessions (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                session_hash TEXT NOT NULL,
+                visitor_id_hash TEXT NOT NULL,
+                country_code TEXT,
+                country_name TEXT,
+                region_name TEXT,
+                city_name TEXT,
+                asn_org TEXT,
+                device_type TEXT DEFAULT 'desktop',
+                browser_name TEXT,
+                os_name TEXT,
+                referrer_source TEXT,
+                referrer_domain TEXT,
+                landing_page TEXT,
+                exit_page TEXT,
+                pageviews_count INTEGER DEFAULT 1,
+                duration_seconds INTEGER DEFAULT 0,
+                is_bot INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_sessions_prop_created ON web_intel_sessions(organization_id, property_id, created_at)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_sessions_hash ON web_intel_sessions(session_hash)")
+
+        # 2. web_intel_pageviews table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_pageviews (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                session_id INTEGER REFERENCES web_intel_sessions(id),
+                path TEXT NOT NULL,
+                query_string TEXT,
+                page_title TEXT,
+                load_time_ms INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_pageviews_prop_path ON web_intel_pageviews(property_id, path)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_pageviews_session ON web_intel_pageviews(session_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_pageviews_created ON web_intel_pageviews(organization_id, created_at)")
+
+        # 3. web_intel_events table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_events (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                session_id INTEGER REFERENCES web_intel_sessions(id),
+                event_category TEXT NOT NULL,
+                event_name TEXT NOT NULL,
+                event_label TEXT,
+                event_data_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_events_prop ON web_intel_events(property_id, event_name)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_events_session ON web_intel_events(session_id)")
+
+        # 4. web_intel_conversions table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_conversions (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                session_id INTEGER REFERENCES web_intel_sessions(id),
+                conversion_type TEXT NOT NULL,
+                lead_identifier_hash TEXT,
+                lead_source TEXT,
+                metadata_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_conversions_prop ON web_intel_conversions(property_id, conversion_type)")
+
+        # 5. web_intel_daily_rollups table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_daily_rollups (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                metric_date TEXT NOT NULL,
+                total_pageviews INTEGER DEFAULT 0,
+                unique_visitors INTEGER DEFAULT 0,
+                total_sessions INTEGER DEFAULT 0,
+                bounce_sessions INTEGER DEFAULT 0,
+                bounce_rate REAL DEFAULT 0.0,
+                avg_duration_seconds REAL DEFAULT 0.0,
+                total_conversions INTEGER DEFAULT 0,
+                top_sources_json TEXT,
+                top_pages_json TEXT,
+                top_countries_json TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, property_id, metric_date)
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_rollups_prop_date ON web_intel_daily_rollups(property_id, metric_date)")
+
+        # 6. web_intel_seo_audits table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_seo_audits (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                crawl_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NOT NULL DEFAULT 'completed',
+                pages_crawled INTEGER DEFAULT 0,
+                pages_passed INTEGER DEFAULT 0,
+                pages_with_issues INTEGER DEFAULT 0,
+                health_score REAL DEFAULT 100.0,
+                critical_count INTEGER DEFAULT 0,
+                warning_count INTEGER DEFAULT 0,
+                audit_summary_json TEXT,
+                completed_at TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_seo_audits_prop ON web_intel_seo_audits(property_id, crawl_timestamp)")
+
+        # 7. web_intel_seo_pages table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_seo_pages (
+                id {auto_id},
+                audit_id INTEGER NOT NULL REFERENCES web_intel_seo_audits(id),
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                url TEXT NOT NULL,
+                http_status INTEGER,
+                response_time_ms INTEGER,
+                title TEXT,
+                title_length INTEGER,
+                meta_description TEXT,
+                meta_desc_length INTEGER,
+                canonical_url TEXT,
+                h1_tag TEXT,
+                has_og_tags INTEGER DEFAULT 0,
+                schema_types_json TEXT,
+                broken_links_count INTEGER DEFAULT 0,
+                issues_json TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_seo_pages_audit ON web_intel_seo_pages(audit_id)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_seo_pages_prop_url ON web_intel_seo_pages(property_id, url)")
+
+        # 8. web_intel_seo_recommendations table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS web_intel_seo_recommendations (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                target_url TEXT NOT NULL,
+                category TEXT NOT NULL,
+                issue_description TEXT NOT NULL,
+                proposed_action TEXT NOT NULL,
+                current_content TEXT,
+                recommended_content TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                reviewed_by TEXT,
+                reviewed_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_web_intel_rec_prop_status ON web_intel_seo_recommendations(property_id, status)")
+
+        # Record migration version in schema_migrations idempotently
+        migration_version = '20261114_003_website_intelligence'
+        row = c.execute(
+            "SELECT version FROM schema_migrations WHERE version = ?",
+            (migration_version,)
+        ).fetchone()
+        if not row:
+            c.execute('''
+                INSERT INTO schema_migrations (version, description)
+                VALUES (?, ?)
+            ''', (migration_version, 'Website Intelligence foundation: visitor sessions, pageviews, events, conversions, rollups, SEO audits & recommendations'))
         c.commit()
 
     if conn is not None:
@@ -4914,3 +5121,212 @@ def delete_growth_property(property_id, organization_id):
         )
         conn.commit()
     return True
+
+# ── Website Intelligence Engine (Phase 2 Additive Foundation) ──────────
+
+def record_web_intel_telemetry(property_id, organization_id, session_hash, visitor_hash,
+                               country_code=None, country_name=None, region_name=None,
+                               city_name=None, asn_org=None, device_type='desktop',
+                               browser_name=None, os_name=None, referrer_source=None,
+                               referrer_domain=None, landing_page=None, path='/',
+                               query_string=None, page_title=None, load_time_ms=None, is_bot=0):
+    """
+    Records an incoming telemetry beacon safely and additively.
+    Finds or creates a session row (without storing raw IP), then logs the pageview.
+    """
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        # Check if session already exists
+        sess_row = conn.execute(
+            "SELECT id, pageviews_count FROM web_intel_sessions WHERE session_hash = ?",
+            (session_hash,)
+        ).fetchone()
+
+        if sess_row:
+            sess_id = sess_row['id']
+            cnt = (sess_row['pageviews_count'] or 1) + 1
+            conn.execute('''
+                UPDATE web_intel_sessions
+                SET pageviews_count = ?, exit_page = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (cnt, path, sess_id))
+        else:
+            if is_postgres():
+                cur = conn.execute('''
+                    INSERT INTO web_intel_sessions (
+                        organization_id, property_id, session_hash, visitor_id_hash,
+                        country_code, country_name, region_name, city_name, asn_org,
+                        device_type, browser_name, os_name, referrer_source, referrer_domain,
+                        landing_page, exit_page, pageviews_count, is_bot
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                    RETURNING id
+                ''', (
+                    org_id, p_id, session_hash, visitor_hash,
+                    country_code, country_name, region_name, city_name, asn_org,
+                    device_type, browser_name, os_name, referrer_source, referrer_domain,
+                    landing_page or path, path, is_bot
+                ))
+                sess_id = cur.fetchone()['id']
+            else:
+                cur = conn.execute('''
+                    INSERT INTO web_intel_sessions (
+                        organization_id, property_id, session_hash, visitor_id_hash,
+                        country_code, country_name, region_name, city_name, asn_org,
+                        device_type, browser_name, os_name, referrer_source, referrer_domain,
+                        landing_page, exit_page, pageviews_count, is_bot
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                ''', (
+                    org_id, p_id, session_hash, visitor_hash,
+                    country_code, country_name, region_name, city_name, asn_org,
+                    device_type, browser_name, os_name, referrer_source, referrer_domain,
+                    landing_page or path, path, is_bot
+                ))
+                sess_id = cur.lastrowid
+
+        # Insert pageview record
+        if is_postgres():
+            pv_cur = conn.execute('''
+                INSERT INTO web_intel_pageviews (
+                    organization_id, property_id, session_id, path, query_string,
+                    page_title, load_time_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
+            ''', (org_id, p_id, sess_id, path, query_string, page_title, load_time_ms))
+            pv_id = pv_cur.fetchone()['id']
+        else:
+            pv_cur = conn.execute('''
+                INSERT INTO web_intel_pageviews (
+                    organization_id, property_id, session_id, path, query_string,
+                    page_title, load_time_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (org_id, p_id, sess_id, path, query_string, page_title, load_time_ms))
+            pv_id = pv_cur.lastrowid
+
+        conn.commit()
+        return {'session_id': sess_id, 'pageview_id': pv_id}
+
+def record_web_intel_custom_event(property_id, organization_id, session_hash, event_category,
+                                  event_name, event_label=None, event_data=None):
+    """Logs a custom event linked to an anonymized session."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        sess = conn.execute("SELECT id FROM web_intel_sessions WHERE session_hash = ?", (session_hash,)).fetchone()
+        sess_id = sess['id'] if sess else None
+        data_json = json.dumps(event_data) if isinstance(event_data, dict) else (str(event_data) if event_data else None)
+
+        if is_postgres():
+            cur = conn.execute('''
+                INSERT INTO web_intel_events (
+                    organization_id, property_id, session_id, event_category, event_name, event_label, event_data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+            ''', (org_id, p_id, sess_id, event_category, event_name, event_label, data_json))
+            ev_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute('''
+                INSERT INTO web_intel_events (
+                    organization_id, property_id, session_id, event_category, event_name, event_label, event_data_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (org_id, p_id, sess_id, event_category, event_name, event_label, data_json))
+            ev_id = cur.lastrowid
+        conn.commit()
+        return ev_id
+
+def record_web_intel_conversion(property_id, organization_id, session_hash, conversion_type,
+                                lead_identifier_hash=None, lead_source=None, metadata=None):
+    """Logs an inbound lead, registration, or application conversion."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        sess = conn.execute("SELECT id FROM web_intel_sessions WHERE session_hash = ?", (session_hash,)).fetchone()
+        sess_id = sess['id'] if sess else None
+        meta_json = json.dumps(metadata) if isinstance(metadata, dict) else (str(metadata) if metadata else None)
+
+        if is_postgres():
+            cur = conn.execute('''
+                INSERT INTO web_intel_conversions (
+                    organization_id, property_id, session_id, conversion_type, lead_identifier_hash, lead_source, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+            ''', (org_id, p_id, sess_id, conversion_type, lead_identifier_hash, lead_source, meta_json))
+            conv_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute('''
+                INSERT INTO web_intel_conversions (
+                    organization_id, property_id, session_id, conversion_type, lead_identifier_hash, lead_source, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (org_id, p_id, sess_id, conversion_type, lead_identifier_hash, lead_source, meta_json))
+            conv_id = cur.lastrowid
+        conn.commit()
+        return conv_id
+
+def get_web_intel_overview(property_id, organization_id=1, days=30):
+    """Fetches high-level telemetry KPIs for a property over a window of days."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+
+        sess_stats = conn.execute('''
+            SELECT
+                COUNT(*) as total_sessions,
+                COUNT(DISTINCT visitor_id_hash) as unique_visitors,
+                COALESCE(SUM(pageviews_count), 0) as total_pageviews,
+                SUM(CASE WHEN pageviews_count = 1 THEN 1 ELSE 0 END) as bounce_sessions
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+        ''', (p_id, org_id, since_date)).fetchone()
+
+        total_sessions = sess_stats['total_sessions'] or 0
+        bounce_sessions = sess_stats['bounce_sessions'] or 0
+        bounce_rate = round((bounce_sessions / total_sessions * 100), 1) if total_sessions > 0 else 0.0
+
+        conv_count = conn.execute('''
+            SELECT COUNT(*) as cnt
+            FROM web_intel_conversions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+        ''', (p_id, org_id, since_date)).fetchone()['cnt']
+
+        top_pages = conn.execute('''
+            SELECT path, page_title, COUNT(*) as views
+            FROM web_intel_pageviews
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY path, page_title
+            ORDER BY views DESC
+            LIMIT 10
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        return {
+            'property_id': p_id,
+            'days': days,
+            'total_sessions': total_sessions,
+            'unique_visitors': sess_stats['unique_visitors'] or 0,
+            'total_pageviews': sess_stats['total_pageviews'] or 0,
+            'bounce_rate_pct': bounce_rate,
+            'total_conversions': conv_count,
+            'top_pages': [dict(r) for r in top_pages]
+        }
+
+def get_web_intel_geo_breakdown(property_id, organization_id=1, days=30):
+    """Fetches approximate visitor geolocation distribution."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        rows = conn.execute('''
+            SELECT
+                COALESCE(country_code, 'XX') as country_code,
+                COALESCE(country_name, 'Unknown') as country_name,
+                COALESCE(city_name, 'Unknown') as city_name,
+                COUNT(*) as session_count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY country_code, country_name, city_name
+            ORDER BY session_count DESC
+            LIMIT 50
+        ''', (p_id, org_id, since_date)).fetchall()
+        return [dict(r) for r in rows]

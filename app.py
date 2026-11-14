@@ -16,7 +16,7 @@ from functools import wraps
 from PIL import Image
 import urllib.parse
 from datetime import datetime, timezone
-from flask import Flask, render_template, jsonify, request, session, send_from_directory, redirect, url_for
+from flask import Flask, render_template, jsonify, request, session, send_from_directory, redirect, url_for, make_response
 
 import config
 import database
@@ -2350,6 +2350,229 @@ def update_growth_property_status_route(property_id):
     except Exception as e:
         logger.error(f"Error updating growth property status: {e}")
         return jsonify({'error': 'Failed to update property status'}), 500
+
+# ── Website Intelligence Engine (Phase 2 Additive Telemetry & Analytics) ──
+
+def _add_web_intel_cors_headers(response, origin):
+    """Adds permissive yet scoped CORS headers for Gaatha ecosystem domains."""
+    if not origin:
+        origin = '*'
+    else:
+        from urllib.parse import urlparse
+        netloc = (urlparse(origin).netloc or '').lower()
+        if netloc == 'gaatha.tech' or netloc.endswith('.gaatha.tech') or netloc.startswith('localhost') or netloc.startswith('127.0.0.1'):
+            pass  # keep origin as requested
+        else:
+            origin = '*'
+    response.headers['Access-Control-Allow-Origin'] = origin
+    response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Property-Key'
+    response.headers['Access-Control-Max-Age'] = '86400'
+    return response
+
+@app.route('/api/web-intel/collect', methods=['POST', 'OPTIONS'])
+def collect_web_intel():
+    """
+    Public, fail-closed telemetry collector endpoint.
+    Receives first-party beacons from postpilot-tracker.js.
+    Raw IP is stripped immediately in memory, anonymized with a daily salt, and never persisted.
+    """
+    origin = request.headers.get('Origin', '')
+    if request.method == 'OPTIONS':
+        resp = make_response(('', 204))
+        return _add_web_intel_cors_headers(resp, origin)
+
+    data = request.get_json(silent=True) or {}
+    property_key = data.get('property_key') or request.headers.get('X-Property-Key')
+    if not property_key:
+        resp = jsonify({'error': "Missing 'property_key' in telemetry payload."})
+        resp.status_code = 400
+        return _add_web_intel_cors_headers(resp, origin)
+
+    # Resolve growth property
+    with database.get_db_connection() as conn:
+        prop = conn.execute(
+            "SELECT id, organization_id, is_active FROM growth_properties WHERE property_key = ?",
+            (str(property_key).strip(),)
+        ).fetchone()
+
+    if not prop or not prop['is_active']:
+        resp = jsonify({'error': "Invalid or inactive property key."})
+        resp.status_code = 404
+        return _add_web_intel_cors_headers(resp, origin)
+
+    # 1. IP Anonymization (Zero Raw IP Persistence)
+    client_ip = request.headers.get('CF-Connecting-IP') or \
+                (request.headers.get('X-Forwarded-For', '').split(',')[0].strip()) or \
+                request.remote_addr or '127.0.0.1'
+
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    salt = app.config.get('SECRET_KEY', 'postpilot_web_intel_salt')
+    client_session_id = str(data.get('session_id') or 'default')
+
+    session_hash = hashlib.sha256(f"{client_ip}_{client_session_id}_{today_str}_{salt}".encode('utf-8')).hexdigest()[:32]
+    visitor_hash = hashlib.sha256(f"{client_ip}_{today_str}_{salt}".encode('utf-8')).hexdigest()[:32]
+
+    # 2. Approximate Geolocation Attribution
+    country_code = request.headers.get('CF-IPCountry') or request.headers.get('X-Country-Code')
+    country_name = None
+    city_name = request.headers.get('X-City-Name')
+
+    if not country_code:
+        if client_ip in ('127.0.0.1', '::1') or client_ip.startswith('192.168.') or client_ip.startswith('10.'):
+            country_code = 'LO'
+            country_name = 'Local Development'
+            city_name = 'Internal / Private'
+        else:
+            tz = str(data.get('tz') or '')
+            if 'Calcutta' in tz or 'Kolkata' in tz or 'Asia/Kolkata' in tz:
+                country_code = 'IN'
+                country_name = 'India'
+                city_name = 'Gujarat / West Hub'
+            else:
+                country_code = 'XX'
+                country_name = 'Global'
+                city_name = 'External'
+    elif country_code == 'IN':
+        country_name = 'India'
+        city_name = city_name or 'Ahmedabad'
+
+    # 3. User-Agent / Device / Bot Parsing
+    ua = request.headers.get('User-Agent', '')
+    ua_lower = ua.lower()
+    is_bot = 1 if any(b in ua_lower for b in ('bot', 'crawl', 'spider', 'slurp', 'bytespider', 'claudebot', 'petalbot', 'headless')) else 0
+
+    device_type = data.get('device_type')
+    if not device_type:
+        if any(m in ua_lower for m in ('mobile', 'android', 'iphone')):
+            device_type = 'mobile'
+        elif any(t in ua_lower for t in ('tablet', 'ipad')):
+            device_type = 'tablet'
+        else:
+            device_type = 'desktop'
+
+    browser_name = 'Chrome' if 'chrome' in ua_lower and 'edg' not in ua_lower else \
+                   'Safari' if 'safari' in ua_lower and 'chrome' not in ua_lower else \
+                   'Edge' if 'edg' in ua_lower else \
+                   'Firefox' if 'firefox' in ua_lower else 'Other'
+
+    os_name = 'Windows' if 'windows' in ua_lower else \
+              'Macintosh' if 'macintosh' in ua_lower or 'mac os' in ua_lower else \
+              'Android' if 'android' in ua_lower else \
+              'iOS' if 'iphone' in ua_lower or 'ipad' in ua_lower else \
+              'Linux' if 'linux' in ua_lower else 'Other'
+
+    referrer = str(data.get('referrer') or '').strip()
+    ref_source = 'Direct'
+    ref_domain = None
+    if referrer:
+        from urllib.parse import urlparse
+        ref_parsed = urlparse(referrer)
+        ref_domain = (ref_parsed.netloc or '').lower()
+        if any(s in ref_domain for s in ('google.', 'bing.', 'duckduckgo.', 'yahoo.', 'baidu.')):
+            ref_source = 'Organic Search'
+        elif any(soc in ref_domain for soc in ('linkedin.', 'facebook.', 'instagram.', 'twitter.', 'x.com', 'reddit.', 't.co')):
+            ref_source = 'Social'
+        elif ref_domain.endswith('gaatha.tech'):
+            ref_source = 'Internal Ecosystem'
+        else:
+            ref_source = 'Referral'
+
+    event_type = data.get('event_type', 'pageview')
+
+    try:
+        if event_type == 'pageview':
+            res = database.record_web_intel_telemetry(
+                property_id=prop['id'],
+                organization_id=prop['organization_id'],
+                session_hash=session_hash,
+                visitor_hash=visitor_hash,
+                country_code=country_code,
+                country_name=country_name,
+                region_name=None,
+                city_name=city_name,
+                asn_org=None,
+                device_type=device_type,
+                browser_name=browser_name,
+                os_name=os_name,
+                referrer_source=ref_source,
+                referrer_domain=ref_domain,
+                landing_page=data.get('path', '/'),
+                path=data.get('path', '/'),
+                query_string=data.get('query_string'),
+                page_title=data.get('page_title'),
+                load_time_ms=data.get('load_time_ms'),
+                is_bot=is_bot
+            )
+            resp = jsonify({'status': 'ok', 'recorded': 'pageview'})
+            return _add_web_intel_cors_headers(resp, origin)
+        elif event_type == 'event':
+            ev_id = database.record_web_intel_custom_event(
+                property_id=prop['id'],
+                organization_id=prop['organization_id'],
+                session_hash=session_hash,
+                event_category=data.get('event_category', 'general'),
+                event_name=data.get('event_name', 'action'),
+                event_label=data.get('event_label'),
+                event_data=data.get('event_data')
+            )
+            resp = jsonify({'status': 'ok', 'recorded': 'event', 'id': ev_id})
+            return _add_web_intel_cors_headers(resp, origin)
+        elif event_type == 'conversion':
+            conv_id = database.record_web_intel_conversion(
+                property_id=prop['id'],
+                organization_id=prop['organization_id'],
+                session_hash=session_hash,
+                conversion_type=data.get('conversion_type', 'lead'),
+                lead_identifier_hash=data.get('lead_identifier'),
+                lead_source=ref_source,
+                metadata=data.get('metadata')
+            )
+            resp = jsonify({'status': 'ok', 'recorded': 'conversion', 'id': conv_id})
+            return _add_web_intel_cors_headers(resp, origin)
+        else:
+            resp = jsonify({'error': f"Unknown event_type '{event_type}'."})
+            resp.status_code = 400
+            return _add_web_intel_cors_headers(resp, origin)
+    except Exception as e:
+        logger.error(f"Error in collect_web_intel: {e}")
+        resp = jsonify({'error': 'Failed to process telemetry beacon.'})
+        resp.status_code = 500
+        return _add_web_intel_cors_headers(resp, origin)
+
+@app.route('/api/web-intel/properties/<int:property_id>/overview', methods=['GET'])
+@login_required
+def get_web_intel_overview_route(property_id):
+    """Retrieves high-level website intelligence metrics for a property."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        overview = database.get_web_intel_overview(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(overview), 200
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error fetching web intel overview: {e}")
+        return jsonify({'error': 'Failed to fetch overview metrics.'}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/geo', methods=['GET'])
+@login_required
+def get_web_intel_geo_route(property_id):
+    """Retrieves approximate visitor geolocation distribution."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        geo = database.get_web_intel_geo_breakdown(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(geo), 200
+    except database.TenantIsolationError as e:
+        return jsonify({'error': str(e)}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        logger.error(f"Error fetching web intel geo breakdown: {e}")
+        return jsonify({'error': 'Failed to fetch geo metrics.'}), 500
 
 # --- AI Marketing Studio: Campaigns & Content Generation Endpoints ---
 
