@@ -369,6 +369,216 @@ class TestWebsiteIntelligence(unittest.TestCase):
         check = subprocess.run(["node", "-c", str(tracker_path)], capture_output=True, text=True)
         self.assertEqual(check.returncode, 0, f"tracker.js syntax check failed: {check.stderr}")
 
+    # ── 7. Milestone 2: Hardening, Domains, SEO & Dashboard Endpoints ──
+
+    def test_19_migration_004_property_domains_and_seo_registered(self):
+        """Verifies 20261114_004_property_domains_and_seo is executed and registered."""
+        with database.get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT version, description FROM schema_migrations WHERE version = ?",
+                ('20261114_004_property_domains_and_seo',)
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertIn("Multi-domain aliases", row['description'])
+
+    def test_20_growth_property_domains_table_populated(self):
+        """Verifies growth_property_domains has domain patterns for properties."""
+        with database.get_db_connection() as conn:
+            domains = conn.execute("SELECT property_id, domain_pattern FROM growth_property_domains WHERE organization_id = 1").fetchall()
+            self.assertGreaterEqual(len(domains), 11)
+            domain_names = [d['domain_pattern'] for d in domains]
+            self.assertIn('gaatha.tech', domain_names)
+            self.assertIn('phoenix.gaatha.tech', domain_names)
+            self.assertIn('cgs.gaatha.tech', domain_names)
+
+    def test_21_is_origin_allowed_for_property(self):
+        """Verifies origin validator accepts registered domain and rejects foreign domain."""
+        with database.get_db_connection() as conn:
+            prop = conn.execute("SELECT id FROM growth_properties WHERE property_key = 'gaatha_corporate'").fetchone()
+            p_id = prop['id']
+
+        self.assertTrue(database.is_origin_allowed_for_property(p_id, 'https://gaatha.tech'))
+        self.assertTrue(database.is_origin_allowed_for_property(p_id, 'http://localhost:5000'))
+        self.assertFalse(database.is_origin_allowed_for_property(p_id, 'https://malicious-tracker.com'))
+
+    def test_22_geoip_service_resolution_and_safeguards(self):
+        """Verifies geoip_service handles local/private IPs safely without fabrication."""
+        import geoip_service
+        # Loopback
+        res_local = geoip_service.resolve_ip_location('127.0.0.1')
+        self.assertEqual(res_local['country_code'], 'LO')
+        self.assertTrue(res_local['is_internal'])
+        self.assertEqual(res_local['source'], 'internal')
+
+        # Private RFC1918
+        res_priv = geoip_service.resolve_ip_location('192.168.1.100')
+        self.assertEqual(res_priv['country_code'], 'LO')
+        self.assertTrue(res_priv['is_internal'])
+
+        # Unknown / Unresolvable public IP
+        res_pub = geoip_service.resolve_ip_location('8.8.8.8')
+        self.assertIn('country_code', res_pub)
+        self.assertFalse(res_pub['is_internal'])
+
+    def test_23_collector_payload_limit_enforced(self):
+        """Rejects telemetry beacon larger than 64KB with HTTP 413."""
+        large_junk = "x" * 70000
+        res = self.client.post('/api/web-intel/collect', json={
+            "property_key": "gaatha_corporate",
+            "path": "/test",
+            "junk": large_junk
+        })
+        self.assertEqual(res.status_code, 413)
+
+    def test_24_collector_strict_origin_check(self):
+        """Rejects telemetry beacon from unauthorized origin with HTTP 403."""
+        res = self.client.post(
+            '/api/web-intel/collect',
+            json={"property_key": "gaatha_corporate", "path": "/"},
+            headers={"Origin": "https://unauthorized-phishing.com"}
+        )
+        self.assertEqual(res.status_code, 403)
+
+    def test_25_collector_rate_limiting(self):
+        """Verifies rate limiting kicks in if too many requests from same IP."""
+        import app as postpilot_app
+        postpilot_app._WEB_INTEL_RATE_LIMITS.clear()
+        test_ip = "198.51.100.42"
+
+        for _ in range(120):
+            res = self.client.post(
+                '/api/web-intel/collect',
+                json={"property_key": "gaatha_corporate", "path": "/"},
+                headers={"X-Real-IP": test_ip, "Origin": "https://gaatha.tech"}
+            )
+            self.assertEqual(res.status_code, 200)
+
+        res_blocked = self.client.post(
+            '/api/web-intel/collect',
+            json={"property_key": "gaatha_corporate", "path": "/"},
+            headers={"X-Real-IP": test_ip, "Origin": "https://gaatha.tech"}
+        )
+        self.assertEqual(res_blocked.status_code, 429)
+
+    def test_26_api_web_intel_timeline(self):
+        """Tests timeseries timeline API endpoint."""
+        self._login(user_id=1, username="admin", role="admin", org_id=1)
+        res = self.client.get('/api/web-intel/properties/1/timeline?days=30')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIsInstance(data, list)
+
+    def test_27_api_web_intel_sources_and_devices(self):
+        """Tests sources and devices breakdown APIs."""
+        self._login(user_id=1, username="admin", role="admin", org_id=1)
+        res_src = self.client.get('/api/web-intel/properties/1/sources?days=30')
+        self.assertEqual(res_src.status_code, 200)
+        data_src = res_src.get_json()
+        self.assertIn('channels', data_src)
+        self.assertTrue('referrers' in data_src or 'top_referrers' in data_src)
+
+        res_dev = self.client.get('/api/web-intel/properties/1/devices?days=30')
+        self.assertEqual(res_dev.status_code, 200)
+        data_dev = res_dev.get_json()
+        self.assertIn('devices', data_dev)
+        self.assertIn('browsers', data_dev)
+        self.assertIn('os', data_dev)
+
+    def test_28_api_web_intel_pages_and_conversions(self):
+        """Tests pages and conversions breakdown APIs."""
+        self._login(user_id=1, username="admin", role="admin", org_id=1)
+        res_pages = self.client.get('/api/web-intel/properties/1/pages?days=30')
+        self.assertEqual(res_pages.status_code, 200)
+        data_pages = res_pages.get_json()
+        self.assertIn('all_pages', data_pages)
+        self.assertIn('landing_pages', data_pages)
+
+        res_conv = self.client.get('/api/web-intel/properties/1/conversions?days=30')
+        self.assertEqual(res_conv.status_code, 200)
+        data_conv = res_conv.get_json()
+        self.assertIn('by_type', data_conv)
+        self.assertIn('recent', data_conv)
+
+    def test_29_seo_analyzer_detects_placeholder_canonical(self):
+        """Verifies SEO crawler analysis catches placeholder canonical domains."""
+        import seo_crawler
+        html = '''<!DOCTYPE html>
+<html>
+<head>
+    <title>Clean Title for Test Page Execution</title>
+    <meta name="description" content="This is an exact meta description for our test page that easily meets the length requirement of 70 characters.">
+    <link rel="canonical" href="https://yourwebsite.com/index.html">
+</head>
+<body>
+    <h1>Main Heading</h1>
+    <a href="/about">About</a>
+</body>
+</html>'''
+        page, issues, links = seo_crawler.analyze_page_seo(
+            url="https://cgs.gaatha.tech/",
+            html_content=html,
+            status_code=200,
+            response_time_ms=120
+        )
+        self.assertEqual(page['status_code'], 200)
+        self.assertEqual(page['canonical_url'], 'https://yourwebsite.com/index.html')
+        categories = [i['category'] for i in issues]
+        self.assertIn('canonical_placeholder', categories)
+        critical_issues = [i for i in issues if i['severity'] == 'critical']
+        self.assertGreaterEqual(len(critical_issues), 1)
+
+    def test_30_seo_recommendations_workflow(self):
+        """Tests creating, listing, and transitioning SEO recommendation status."""
+        self._login(user_id=1, username="admin", role="admin", org_id=1)
+        audit_summary = {
+            'status': 'completed',
+            'pages_crawled': 1,
+            'pages_passed': 0,
+            'pages_with_issues': 1,
+            'health_score': 85.0,
+            'critical_count': 1,
+            'warning_count': 0
+        }
+        pages = [{
+            'url': 'https://cgs.gaatha.tech/',
+            'status_code': 200,
+            'response_time_ms': 100,
+            'title': 'CGS Test',
+            'canonical_url': 'https://yourwebsite.com/',
+            'issues': [{'severity': 'critical', 'category': 'canonical_placeholder'}]
+        }]
+        recs = [{
+            'target_url': 'https://cgs.gaatha.tech/',
+            'category': 'canonical',
+            'issue_description': 'Placeholder canonical tag detected',
+            'proposed_action': 'Replace with https://cgs.gaatha.tech/',
+            'current_content': 'https://yourwebsite.com/',
+            'recommended_content': 'https://cgs.gaatha.tech/'
+        }]
+
+        audit_id = database.record_seo_audit_results(1, 1, audit_summary, pages, recs)
+        self.assertIsInstance(audit_id, int)
+
+        res_list = self.client.get('/api/web-intel/seo/recommendations?property_id=1&status=pending')
+        self.assertEqual(res_list.status_code, 200)
+        items = res_list.get_json()
+        self.assertGreaterEqual(len(items), 1)
+        rec_id = items[0]['id']
+
+        res_patch = self.client.patch(
+            f'/api/web-intel/seo/recommendations/{rec_id}',
+            json={'status': 'approved'}
+        )
+        self.assertEqual(res_patch.status_code, 200)
+        self.assertEqual(res_patch.get_json()['status'], 'approved')
+
+    def test_31_script_js_full_syntax_validation(self):
+        """Verifies static/script.js syntax integrity using Node.js compiler."""
+        script_path = Path("D:/postpilot/static/script.js")
+        self.assertTrue(script_path.exists())
+        check = subprocess.run(["node", "-c", str(script_path)], capture_output=True, text=True)
+        self.assertEqual(check.returncode, 0, f"script.js syntax check failed: {check.stderr}")
+
 
 if __name__ == '__main__':
     unittest.main()

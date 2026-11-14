@@ -25,6 +25,8 @@ from validation import validate_platform_creative
 import ai_service
 import linkedin_api
 import integrations_service
+import geoip_service
+import seo_crawler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] (App) %(message)s")
 logger = logging.getLogger(__name__)
@@ -2353,18 +2355,36 @@ def update_growth_property_status_route(property_id):
 
 # ── Website Intelligence Engine (Phase 2 Additive Telemetry & Analytics) ──
 
+_WEB_INTEL_RATE_LIMITS = {}
+_RATE_LIMIT_WINDOW_SEC = 60.0
+_RATE_LIMIT_MAX_PER_WINDOW = 120
+
+def _is_web_intel_rate_limited(client_key: str) -> bool:
+    """In-memory rate limiter: permits at most 120 telemetry beacons per minute."""
+    now = time.time()
+    cutoff = now - _RATE_LIMIT_WINDOW_SEC
+    timestamps = _WEB_INTEL_RATE_LIMITS.get(client_key, [])
+    # Prune expired timestamps
+    active = [t for t in timestamps if t > cutoff]
+    if len(active) >= _RATE_LIMIT_MAX_PER_WINDOW:
+        _WEB_INTEL_RATE_LIMITS[client_key] = active
+        return True
+    active.append(now)
+    _WEB_INTEL_RATE_LIMITS[client_key] = active
+    # Memory maintenance if cache grows large
+    if len(_WEB_INTEL_RATE_LIMITS) > 10000:
+        keys_to_purge = [k for k, v in _WEB_INTEL_RATE_LIMITS.items() if not v or v[-1] <= cutoff]
+        for k in keys_to_purge:
+            _WEB_INTEL_RATE_LIMITS.pop(k, None)
+    return False
+
 def _add_web_intel_cors_headers(response, origin):
-    """Adds permissive yet scoped CORS headers for Gaatha ecosystem domains."""
-    if not origin:
-        origin = '*'
+    """Sets CORS headers reflecting verified origin."""
+    if origin:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Vary'] = 'Origin'
     else:
-        from urllib.parse import urlparse
-        netloc = (urlparse(origin).netloc or '').lower()
-        if netloc == 'gaatha.tech' or netloc.endswith('.gaatha.tech') or netloc.startswith('localhost') or netloc.startswith('127.0.0.1'):
-            pass  # keep origin as requested
-        else:
-            origin = '*'
-    response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type, X-Property-Key'
     response.headers['Access-Control-Max-Age'] = '86400'
@@ -2374,12 +2394,18 @@ def _add_web_intel_cors_headers(response, origin):
 def collect_web_intel():
     """
     Public, fail-closed telemetry collector endpoint.
-    Receives first-party beacons from postpilot-tracker.js.
+    Receives first-party beacons from tracker.js.
     Raw IP is stripped immediately in memory, anonymized with a daily salt, and never persisted.
     """
     origin = request.headers.get('Origin', '')
     if request.method == 'OPTIONS':
         resp = make_response(('', 204))
+        return _add_web_intel_cors_headers(resp, origin)
+
+    # 1. Enforce payload size limit (max 64 KB)
+    if request.content_length and request.content_length > 65536:
+        resp = jsonify({'error': 'Payload exceeds 64KB limit.'})
+        resp.status_code = 413
         return _add_web_intel_cors_headers(resp, origin)
 
     data = request.get_json(silent=True) or {}
@@ -2389,7 +2415,7 @@ def collect_web_intel():
         resp.status_code = 400
         return _add_web_intel_cors_headers(resp, origin)
 
-    # Resolve growth property
+    # Resolve target growth property
     with database.get_db_connection() as conn:
         prop = conn.execute(
             "SELECT id, organization_id, is_active FROM growth_properties WHERE property_key = ?",
@@ -2401,11 +2427,23 @@ def collect_web_intel():
         resp.status_code = 404
         return _add_web_intel_cors_headers(resp, origin)
 
-    # 1. IP Anonymization (Zero Raw IP Persistence)
-    client_ip = request.headers.get('CF-Connecting-IP') or \
-                (request.headers.get('X-Forwarded-For', '').split(',')[0].strip()) or \
-                request.remote_addr or '127.0.0.1'
+    # 2. Strict Origin / Referer Validation against Registered Property Domains
+    if origin and not database.is_origin_allowed_for_property(prop['id'], origin, prop['organization_id']):
+        logger.warning(f"Rejected telemetry beacon from unauthorized origin: {origin} for property {property_key}")
+        resp = jsonify({'error': 'Origin not authorized for this property.'})
+        resp.status_code = 403
+        return _add_web_intel_cors_headers(resp, origin)
 
+    # 3. Client IP Extraction (Trust authoritative proxy header from Nginx)
+    client_ip = (request.headers.get('X-Real-IP') or request.remote_addr or '127.0.0.1').strip()
+
+    # 4. Rate Limiting Check
+    if _is_web_intel_rate_limited(client_ip):
+        resp = jsonify({'error': 'Rate limit exceeded. Too many requests.'})
+        resp.status_code = 429
+        return _add_web_intel_cors_headers(resp, origin)
+
+    # 5. IP Anonymization (Zero Raw IP Persistence)
     today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     salt = app.config.get('SECRET_KEY', 'postpilot_web_intel_salt')
     client_session_id = str(data.get('session_id') or 'default')
@@ -2413,31 +2451,15 @@ def collect_web_intel():
     session_hash = hashlib.sha256(f"{client_ip}_{client_session_id}_{today_str}_{salt}".encode('utf-8')).hexdigest()[:32]
     visitor_hash = hashlib.sha256(f"{client_ip}_{today_str}_{salt}".encode('utf-8')).hexdigest()[:32]
 
-    # 2. Approximate Geolocation Attribution
-    country_code = request.headers.get('CF-IPCountry') or request.headers.get('X-Country-Code')
-    country_name = None
-    city_name = request.headers.get('X-City-Name')
+    # 6. Approximate Geolocation Attribution via Offline GeoIP Service (No timezone fabrication)
+    geo_res = geoip_service.resolve_ip_location(client_ip)
+    country_code = geo_res.get('country_code', 'XX')
+    country_name = geo_res.get('country_name', 'Unknown')
+    region_name = geo_res.get('region_name')
+    city_name = geo_res.get('city_name')
+    asn_org = geo_res.get('asn_org')
 
-    if not country_code:
-        if client_ip in ('127.0.0.1', '::1') or client_ip.startswith('192.168.') or client_ip.startswith('10.'):
-            country_code = 'LO'
-            country_name = 'Local Development'
-            city_name = 'Internal / Private'
-        else:
-            tz = str(data.get('tz') or '')
-            if 'Calcutta' in tz or 'Kolkata' in tz or 'Asia/Kolkata' in tz:
-                country_code = 'IN'
-                country_name = 'India'
-                city_name = 'Gujarat / West Hub'
-            else:
-                country_code = 'XX'
-                country_name = 'Global'
-                city_name = 'External'
-    elif country_code == 'IN':
-        country_name = 'India'
-        city_name = city_name or 'Ahmedabad'
-
-    # 3. User-Agent / Device / Bot Parsing
+    # 7. User-Agent / Device / Bot Parsing
     ua = request.headers.get('User-Agent', '')
     ua_lower = ua.lower()
     is_bot = 1 if any(b in ua_lower for b in ('bot', 'crawl', 'spider', 'slurp', 'bytespider', 'claudebot', 'petalbot', 'headless')) else 0
@@ -2489,9 +2511,9 @@ def collect_web_intel():
                 visitor_hash=visitor_hash,
                 country_code=country_code,
                 country_name=country_name,
-                region_name=None,
+                region_name=region_name,
                 city_name=city_name,
-                asn_org=None,
+                asn_org=asn_org,
                 device_type=device_type,
                 browser_name=browser_name,
                 os_name=os_name,
@@ -2540,6 +2562,19 @@ def collect_web_intel():
         resp.status_code = 500
         return _add_web_intel_cors_headers(resp, origin)
 
+@app.route('/api/web-intel/properties', methods=['GET'])
+@login_required
+def get_web_intel_properties_route():
+    """Lists all growth properties enriched with their configured domain patterns."""
+    org_id = session.get('organization_id', 1)
+    props = database.list_growth_properties(organization_id=org_id)
+    enriched = []
+    for p in props:
+        p_dict = dict(p)
+        p_dict['domains'] = database.list_property_domains(p['id'], organization_id=org_id)
+        enriched.append(p_dict)
+    return jsonify(enriched), 200
+
 @app.route('/api/web-intel/properties/<int:property_id>/overview', methods=['GET'])
 @login_required
 def get_web_intel_overview_route(property_id):
@@ -2557,6 +2592,71 @@ def get_web_intel_overview_route(property_id):
         logger.error(f"Error fetching web intel overview: {e}")
         return jsonify({'error': 'Failed to fetch overview metrics.'}), 500
 
+@app.route('/api/web-intel/properties/<int:property_id>/timeline', methods=['GET'])
+@login_required
+def get_web_intel_timeline_route(property_id):
+    """Retrieves daily timeseries breakdown of sessions, pageviews, and visitors."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        timeline = database.get_web_intel_timeline(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(timeline), 200
+    except Exception as e:
+        logger.error(f"Error fetching web intel timeline: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/sources', methods=['GET'])
+@login_required
+def get_web_intel_sources_route(property_id):
+    """Retrieves traffic sources and referring domains breakdown."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        sources = database.get_web_intel_sources(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(sources), 200
+    except Exception as e:
+        logger.error(f"Error fetching web intel sources: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/devices', methods=['GET'])
+@login_required
+def get_web_intel_devices_route(property_id):
+    """Retrieves device, browser, and OS breakdown."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        devices = database.get_web_intel_devices(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(devices), 200
+    except Exception as e:
+        logger.error(f"Error fetching web intel devices: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/pages', methods=['GET'])
+@login_required
+def get_web_intel_pages_route(property_id):
+    """Retrieves top landing pages, exit pages, and pageview statistics."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        pages = database.get_web_intel_pages(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(pages), 200
+    except Exception as e:
+        logger.error(f"Error fetching web intel pages: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/conversions', methods=['GET'])
+@login_required
+def get_web_intel_conversions_route(property_id):
+    """Retrieves lead and conversion event breakdowns."""
+    org_id = session.get('organization_id', 1)
+    days = request.args.get('days', default=30, type=int)
+    try:
+        conversions = database.get_web_intel_conversions(property_id=property_id, organization_id=org_id, days=days)
+        return jsonify(conversions), 200
+    except Exception as e:
+        logger.error(f"Error fetching web intel conversions: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/web-intel/properties/<int:property_id>/geo', methods=['GET'])
 @login_required
 def get_web_intel_geo_route(property_id):
@@ -2573,6 +2673,124 @@ def get_web_intel_geo_route(property_id):
     except Exception as e:
         logger.error(f"Error fetching web intel geo breakdown: {e}")
         return jsonify({'error': 'Failed to fetch geo metrics.'}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/seo/crawl', methods=['POST'])
+@login_required
+def trigger_seo_crawl_route(property_id):
+    """Executes a polite, scoped technical SEO crawl for the property."""
+    org_id = session.get('organization_id', 1)
+    try:
+        database.validate_growth_property_ownership(property_id, org_id)
+        domains_list = database.list_property_domains(property_id, org_id)
+        if not domains_list:
+            prop = database.get_growth_property_by_id(property_id, org_id)
+            if prop and prop.get('website_url'):
+                from urllib.parse import urlparse
+                p_netloc = urlparse(prop['website_url']).netloc
+                entry_urls = [prop['website_url']]
+                allowed_domains = [p_netloc]
+            else:
+                return jsonify({'error': 'No registered domains found for this property.'}), 400
+        else:
+            entry_urls = []
+            allowed_domains = []
+            for d in domains_list:
+                allowed_domains.append(d['domain_pattern'])
+                entry_urls.append(f"https://{d['domain_pattern']}{d.get('path_prefix') or '/'}")
+
+        crawl_result = seo_crawler.run_seo_crawl(
+            property_id=property_id,
+            organization_id=org_id,
+            entry_urls=entry_urls,
+            allowed_domains=allowed_domains,
+            max_pages=25,
+            max_depth=2,
+            delay_sec=0.5
+        )
+
+        audit_id = database.record_seo_audit_results(
+            property_id=property_id,
+            organization_id=org_id,
+            audit_summary=crawl_result['audit_summary'],
+            pages_list=crawl_result['pages'],
+            recommendations_list=crawl_result['recommendations']
+        )
+
+        return jsonify({
+            'status': 'success',
+            'audit_id': audit_id,
+            'summary': crawl_result['audit_summary'],
+            'pages_count': len(crawl_result['pages']),
+            'recommendations_count': len(crawl_result['recommendations'])
+        }), 200
+    except Exception as e:
+        logger.error(f"Error executing SEO crawl: {e}")
+        return jsonify({'error': f'Crawl failed: {str(e)}'}), 500
+
+@app.route('/api/web-intel/properties/<int:property_id>/seo/audits', methods=['GET'])
+@login_required
+def list_seo_audits_route(property_id):
+    """Lists historical SEO audit runs."""
+    org_id = session.get('organization_id', 1)
+    limit = request.args.get('limit', default=10, type=int)
+    try:
+        audits = database.list_seo_audits(property_id=property_id, organization_id=org_id, limit=limit)
+        return jsonify(audits), 200
+    except Exception as e:
+        logger.error(f"Error listing SEO audits: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/seo/audits/<int:audit_id>', methods=['GET'])
+@login_required
+def get_seo_audit_details_route(audit_id):
+    """Retrieves full details and crawled page findings of an SEO audit."""
+    org_id = session.get('organization_id', 1)
+    try:
+        details = database.get_seo_audit_details(audit_id=audit_id, organization_id=org_id)
+        return jsonify(details), 200
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 404
+    except Exception as e:
+        logger.error(f"Error getting SEO audit details: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/seo/recommendations', methods=['GET'])
+@login_required
+def list_seo_recommendations_route():
+    """Lists staged SEO recommendations across properties."""
+    org_id = session.get('organization_id', 1)
+    property_id = request.args.get('property_id', type=int)
+    status = request.args.get('status', default='pending', type=str)
+    try:
+        recs = database.list_seo_recommendations(property_id=property_id, organization_id=org_id, status=status)
+        return jsonify(recs), 200
+    except Exception as e:
+        logger.error(f"Error listing SEO recommendations: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/web-intel/seo/recommendations/<int:rec_id>', methods=['PATCH'])
+@login_required
+def update_seo_recommendation_status_route(rec_id):
+    """Updates status of a staged recommendation (pending, approved, rejected, applied, rolled_back)."""
+    org_id = session.get('organization_id', 1)
+    data = request.get_json(silent=True) or {}
+    status = data.get('status')
+    if not status:
+        return jsonify({'error': "Missing 'status' in request body."}), 400
+    try:
+        user_email = session.get('user', 'admin')
+        updated = database.update_seo_recommendation_status(
+            rec_id=rec_id,
+            status=status,
+            reviewer=user_email,
+            organization_id=org_id
+        )
+        return jsonify(updated), 200
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        logger.error(f"Error updating recommendation status: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # --- AI Marketing Studio: Campaigns & Content Generation Endpoints ---
 

@@ -428,6 +428,7 @@ function loadTab(tab) {
         'queue': 'Publishing Queue',
         'analytics': 'Marketing & AI Analytics',
         'properties': 'Ecosystem Property Registry',
+        'website-intelligence': 'Website Intelligence & Analytics',
         'tour': 'Nexora Suite Management',
         'nz': 'Phoenix International Management',
         'gaatha': 'Gaatha AI Automation',
@@ -475,6 +476,8 @@ function loadTab(tab) {
         renderAnalytics(content);
     } else if (tab === 'properties') {
         renderPropertiesView(content);
+    } else if (tab === 'website-intelligence') {
+        renderWebsiteIntelligenceView(content);
     } else if (tab === 'about') {
         renderHelpAboutView(content);
     } else if (['tour', 'nz', 'gaatha', 'insta'].includes(tab)) {
@@ -9480,4 +9483,898 @@ async function createPropertySubmit() {
 function closePropertyModal(modalId) {
     const el = document.getElementById(modalId);
     if (el) el.classList.remove('active');
+}
+
+
+// ── Website Intelligence Engine (Phase 2 Additive Dashboard & SEO Management) ──
+
+let webIntelSelectedPropId = null;
+let webIntelSelectedDays = 30;
+let webIntelActiveSubtab = 'overview';
+let cachedWebIntelProperties = [];
+
+async function renderWebsiteIntelligenceView(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div style="text-align: center; padding: 3rem 1rem;">
+            <i class="fa-solid fa-spinner fa-spin fa-2x" style="color: var(--primary);"></i>
+            <p style="margin-top: 1rem; color: var(--text-muted);">Loading Website Intelligence & Visitor Analytics...</p>
+        </div>
+    `;
+
+    try {
+        const propsRes = await authFetch('/api/web-intel/properties');
+        if (!propsRes.ok) {
+            throw new Error(`Failed to load properties (HTTP ${propsRes.status})`);
+        }
+        cachedWebIntelProperties = await propsRes.json();
+
+        if (cachedWebIntelProperties.length === 0) {
+            container.innerHTML = `
+                <div class="card fade-in" style="text-align: center; padding: 3rem 1.5rem; margin: 1.5rem auto; max-width: 600px;">
+                    <i class="fa-solid fa-globe fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1.25rem;">No Properties Found</h3>
+                    <p style="color: var(--text-muted);">No ecosystem properties have been registered yet.</p>
+                    <button class="btn btn-primary" onclick="loadTab('properties')">
+                        <i class="fa-solid fa-sitemap"></i> Open Property Registry
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        if (!webIntelSelectedPropId) {
+            webIntelSelectedPropId = cachedWebIntelProperties[0].id;
+        }
+
+        const currentProp = cachedWebIntelProperties.find(p => p.id === parseInt(webIntelSelectedPropId, 10)) || cachedWebIntelProperties[0];
+        webIntelSelectedPropId = currentProp.id;
+
+        let html = `
+            <div class="web-intel-view-container fade-in">
+                <!-- Header & Controls -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(59, 130, 246, 0.15); display: flex; align-items: center; justify-content: center; color: #3b82f6; font-size: 1.1rem;">
+                                <i class="fa-solid fa-globe"></i>
+                            </div>
+                            <h2 style="margin: 0; font-size: 1.35rem; font-weight: 800; color: var(--text-primary);">
+                                Website Intelligence &amp; Analytics
+                            </h2>
+                        </div>
+                        <p style="margin: 0.35rem 0 0 0; color: var(--text-muted); font-size: 0.88rem;">
+                            Privacy-first visitor telemetry, geolocation attribution, and technical SEO health monitoring across Gaatha &amp; Aidni properties.
+                        </p>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <select id="web-intel-prop-selector" class="form-control" style="width: auto; min-width: 180px; font-weight: 600;" onchange="changeWebIntelProperty(this.value)">
+                            ${cachedWebIntelProperties.map(p => `
+                                <option value="${p.id}" ${p.id === currentProp.id ? 'selected' : ''}>
+                                    ${escapeHtml(p.display_name)} (${escapeHtml(p.property_key)})
+                                </option>
+                            `).join('')}
+                        </select>
+
+                        <select id="web-intel-days-selector" class="form-control" style="width: auto; font-weight: 600;" onchange="changeWebIntelDays(this.value)">
+                            <option value="7" ${webIntelSelectedDays === 7 ? 'selected' : ''}>Last 7 Days</option>
+                            <option value="30" ${webIntelSelectedDays === 30 ? 'selected' : ''}>Last 30 Days</option>
+                            <option value="90" ${webIntelSelectedDays === 90 ? 'selected' : ''}>Last 90 Days</option>
+                        </select>
+
+                        <button type="button" class="btn btn-secondary" onclick="openTrackerSnippetModal('${escapeHtml(currentProp.property_key)}')" title="Get tracking snippet for this website">
+                            <i class="fa-solid fa-code"></i> Embed Snippet
+                        </button>
+
+                        <button type="button" class="btn btn-primary" onclick="triggerWebIntelSeoCrawl(${currentProp.id})" title="Polite, scoped SEO health crawl">
+                            <i class="fa-solid fa-magnifying-glass-chart"></i> Run SEO Audit
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sub-Navigation Tabs -->
+                <div style="display: flex; gap: 0.5rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; overflow-x: auto; padding-bottom: 0.25rem;">
+                    ${[
+                        { id: 'overview', icon: 'fa-chart-pie', label: 'Overview' },
+                        { id: 'geo', icon: 'fa-earth-americas', label: 'Geography' },
+                        { id: 'sources', icon: 'fa-diagram-project', label: 'Traffic Sources' },
+                        { id: 'pages', icon: 'fa-file-lines', label: 'Pages & Performance' },
+                        { id: 'conversions', icon: 'fa-bullseye', label: 'Conversions & Leads' },
+                        { id: 'seo', icon: 'fa-shield-halved', label: 'Technical SEO Audits' },
+                        { id: 'recs', icon: 'fa-list-check', label: 'Staged Recommendations' }
+                    ].map(tab => `
+                        <button type="button" class="btn btn-sm ${webIntelActiveSubtab === tab.id ? 'btn-primary' : 'btn-secondary'}" 
+                                onclick="switchWebIntelSubtab('${tab.id}')" style="display: inline-flex; align-items: center; gap: 0.4rem; white-space: nowrap;">
+                            <i class="fa-solid ${tab.icon}"></i> ${tab.label}
+                        </button>
+                    `).join('')}
+                </div>
+
+                <!-- Dynamic Subtab Container -->
+                <div id="web-intel-subtab-content">
+                    <div style="text-align: center; padding: 2rem;">
+                        <i class="fa-solid fa-spinner fa-spin"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tracker Snippet Modal Root -->
+            <div id="tracker-snippet-modal" class="modal" role="dialog" aria-modal="true"></div>
+        `;
+
+        container.innerHTML = html;
+        loadActiveWebIntelSubtab();
+    } catch (e) {
+        container.innerHTML = `
+            <div class="card" style="padding: 2rem; text-align: center; color: var(--danger);">
+                <i class="fa-solid fa-triangle-exclamation fa-2x"></i>
+                <h3 style="margin-top: 1rem;">Failed to load Website Intelligence</h3>
+                <p>${escapeHtml(e.message)}</p>
+                <button class="btn btn-secondary" onclick="renderWebsiteIntelligenceView(document.getElementById('content-area'))">
+                    <i class="fa-solid fa-arrows-rotate"></i> Retry
+                </button>
+            </div>
+        `;
+    }
+}
+
+function changeWebIntelProperty(propId) {
+    webIntelSelectedPropId = parseInt(propId, 10);
+    renderWebsiteIntelligenceView(document.getElementById('content-area'));
+}
+
+function changeWebIntelDays(days) {
+    webIntelSelectedDays = parseInt(days, 10);
+    loadActiveWebIntelSubtab();
+}
+
+function switchWebIntelSubtab(subtab) {
+    webIntelActiveSubtab = subtab;
+    renderWebsiteIntelligenceView(document.getElementById('content-area'));
+}
+
+async function loadActiveWebIntelSubtab() {
+    const container = document.getElementById('web-intel-subtab-content');
+    if (!container || !webIntelSelectedPropId) return;
+
+    if (webIntelActiveSubtab === 'overview') {
+        await loadWebIntelOverviewSubtab(container);
+    } else if (webIntelActiveSubtab === 'geo') {
+        await loadWebIntelGeoSubtab(container);
+    } else if (webIntelActiveSubtab === 'sources') {
+        await loadWebIntelSourcesSubtab(container);
+    } else if (webIntelActiveSubtab === 'pages') {
+        await loadWebIntelPagesSubtab(container);
+    } else if (webIntelActiveSubtab === 'conversions') {
+        await loadWebIntelConversionsSubtab(container);
+    } else if (webIntelActiveSubtab === 'seo') {
+        await loadWebIntelSeoSubtab(container);
+    } else if (webIntelActiveSubtab === 'recs') {
+        await loadWebIntelRecommendationsSubtab(container);
+    }
+}
+
+async function loadWebIntelOverviewSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Overview...</div>`;
+    try {
+        const [overviewRes, timelineRes] = await Promise.all([
+            authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/overview?days=${webIntelSelectedDays}`),
+            authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/timeline?days=${webIntelSelectedDays}`)
+        ]);
+        const overview = overviewRes.ok ? await overviewRes.json() : {};
+        const timeline = timelineRes.ok ? await timelineRes.json() : [];
+
+        const visitors = overview.unique_visitors || 0;
+        const sessions = overview.sessions || 0;
+        const pageviews = overview.pageviews || 0;
+        const avgLoadTime = overview.avg_load_time_ms ? Math.round(overview.avg_load_time_ms) + ' ms' : '—';
+        const bounceRate = overview.bounce_rate !== undefined ? overview.bounce_rate + '%' : '—';
+        const conversions = overview.conversions || 0;
+
+        let html = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Unique Visitors</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: var(--primary); margin-top: 0.35rem;">${visitors.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Last ${webIntelSelectedDays} days</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Total Sessions</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #10b981; margin-top: 0.35rem;">${sessions.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Bounce rate: ${bounceRate}</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Pageviews</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #8b5cf6; margin-top: 0.35rem;">${pageviews.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">${sessions > 0 ? (pageviews / sessions).toFixed(1) : '0'} views/session</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Avg Load Time</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #f59e0b; margin-top: 0.35rem;">${avgLoadTime}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Navigation timing</div>
+                </div>
+                <div class="card" style="padding: 1.25rem;">
+                    <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">Conversions</div>
+                    <div style="font-size: 1.8rem; font-weight: 800; color: #ec4899; margin-top: 0.35rem;">${conversions.toLocaleString()}</div>
+                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem;">Leads &amp; enquiries</div>
+                </div>
+            </div>
+        `;
+
+        if (sessions === 0) {
+            html += `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem; margin-top: 1rem;">
+                    <i class="fa-solid fa-chart-line fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1.25rem;">No Visitor Traffic Recorded Yet</h3>
+                    <p style="color: var(--text-muted); max-width: 500px; margin: 0.5rem auto 1.5rem auto; font-size: 0.9rem;">
+                        This property has not received any privacy-preserving telemetry beacons within the last ${webIntelSelectedDays} days. 
+                        Embed the first-party tracker snippet on your website to begin collecting visitor analytics.
+                    </p>
+                    <button class="btn btn-primary" onclick="openTrackerSnippetModal('${escapeHtml(cachedWebIntelProperties.find(p => p.id === webIntelSelectedPropId)?.property_key || '')}')">
+                        <i class="fa-solid fa-code"></i> Get Tracker Snippet
+                    </button>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="card" style="padding: 1.25rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Daily Traffic Activity</h3>
+                    <div style="overflow-x: auto;">
+                        <table class="data-table" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Sessions</th>
+                                    <th>Pageviews</th>
+                                    <th>Unique Visitors</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${timeline.map(row => `
+                                    <tr>
+                                        <td><strong>${escapeHtml(row.date)}</strong></td>
+                                        <td>${row.sessions}</td>
+                                        <td>${row.pageviews}</td>
+                                        <td>${row.unique_visitors}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load overview: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadWebIntelGeoSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Geolocation Distribution...</div>`;
+    try {
+        const res = await authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/geo?days=${webIntelSelectedDays}`);
+        const geoList = res.ok ? await res.json() : [];
+
+        if (!geoList || geoList.length === 0) {
+            container.innerHTML = `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+                    <i class="fa-solid fa-earth-americas fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Geolocation Data</h3>
+                    <p style="color: var(--text-muted);">No geographic visitor records available for this period.</p>
+                </div>
+            `;
+            return;
+        }
+
+        const totalSessions = geoList.reduce((acc, g) => acc + (g.sessions || 0), 0);
+
+        let html = `
+            <div class="card" style="padding: 1.25rem;">
+                <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Visitor Geographic Breakdown</h3>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Country</th>
+                                <th>City / Hub</th>
+                                <th>Sessions</th>
+                                <th>Share</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${geoList.map(g => {
+                                const share = totalSessions > 0 ? ((g.sessions / totalSessions) * 100).toFixed(1) : 0;
+                                return `
+                                    <tr>
+                                        <td><strong>${escapeHtml(g.country_name || g.country_code || 'Unknown')}</strong> (${escapeHtml(g.country_code || 'XX')})</td>
+                                        <td>${escapeHtml(g.city_name || 'Unresolved')}</td>
+                                        <td>${g.sessions}</td>
+                                        <td>
+                                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                                <div style="flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; max-width: 100px;">
+                                                    <div style="width: ${share}%; height: 100%; background: var(--primary);"></div>
+                                                </div>
+                                                <span style="font-size: 0.82rem; font-weight: 600;">${share}%</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load geography: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadWebIntelSourcesSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Traffic Sources...</div>`;
+    try {
+        const res = await authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/sources?days=${webIntelSelectedDays}`);
+        const sources = res.ok ? await res.json() : { channels: [], referrers: [] };
+
+        const channels = sources.channels || [];
+        const referrers = sources.referrers || [];
+
+        if (channels.length === 0 && referrers.length === 0) {
+            container.innerHTML = `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+                    <i class="fa-solid fa-diagram-project fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Traffic Source Data</h3>
+                    <p style="color: var(--text-muted);">No referrers or traffic channels recorded yet.</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem;">
+                <div class="card" style="padding: 1.25rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Acquisition Channels</h3>
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Channel</th>
+                                <th>Sessions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${channels.map(c => `
+                                <tr>
+                                    <td><span class="badge badge-info">${escapeHtml(c.channel || 'Direct')}</span></td>
+                                    <td><strong>${c.sessions}</strong></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="card" style="padding: 1.25rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Top Referring Domains</h3>
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Referring Domain</th>
+                                <th>Sessions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${referrers.map(r => `
+                                <tr>
+                                    <td><strong>${escapeHtml(r.domain || 'Direct')}</strong></td>
+                                    <td>${r.sessions}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load sources: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadWebIntelPagesSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Pages & Performance...</div>`;
+    try {
+        const res = await authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/pages?days=${webIntelSelectedDays}`);
+        const pagesData = res.ok ? await res.json() : { landing_pages: [], exit_pages: [], all_pages: [] };
+
+        const allPages = pagesData.all_pages || [];
+
+        if (allPages.length === 0) {
+            container.innerHTML = `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+                    <i class="fa-solid fa-file-lines fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Pageview Data</h3>
+                    <p style="color: var(--text-muted);">No pageview data recorded for this property.</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div class="card" style="padding: 1.25rem; margin-bottom: 1.25rem;">
+                <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Most Visited Pages</h3>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Path</th>
+                                <th>Page Title</th>
+                                <th>Total Views</th>
+                                <th>Avg Load Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${allPages.map(p => `
+                                <tr>
+                                    <td><code>${escapeHtml(p.path)}</code></td>
+                                    <td>${escapeHtml(p.page_title || '—')}</td>
+                                    <td><strong>${p.views}</strong></td>
+                                    <td>${p.avg_load_time_ms ? Math.round(p.avg_load_time_ms) + ' ms' : '—'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem;">
+                <div class="card" style="padding: 1.25rem;">
+                    <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem;">Top Landing Pages</h4>
+                    <table class="data-table" style="width: 100%;">
+                        <thead><tr><th>Landing Path</th><th>Sessions</th></tr></thead>
+                        <tbody>
+                            ${(pagesData.landing_pages || []).map(l => `
+                                <tr><td><code>${escapeHtml(l.page)}</code></td><td><strong>${l.sessions}</strong></td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="card" style="padding: 1.25rem;">
+                    <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 0.75rem;">Top Exit Pages</h4>
+                    <table class="data-table" style="width: 100%;">
+                        <thead><tr><th>Exit Path</th><th>Exits</th></tr></thead>
+                        <tbody>
+                            ${(pagesData.exit_pages || []).map(e => `
+                                <tr><td><code>${escapeHtml(e.page)}</code></td><td><strong>${e.exits}</strong></td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load pages: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadWebIntelConversionsSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Conversions...</div>`;
+    try {
+        const res = await authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/conversions?days=${webIntelSelectedDays}`);
+        const convData = res.ok ? await res.json() : { total: 0, by_type: [], by_source: [], recent: [] };
+
+        if (!convData || convData.total === 0) {
+            container.innerHTML = `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+                    <i class="fa-solid fa-bullseye fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Conversions Recorded</h3>
+                    <p style="color: var(--text-muted); max-width: 500px; margin: 0.5rem auto 1rem auto; font-size: 0.88rem;">
+                        Track form submissions, contact enquiries, and user registrations with 
+                        <code>window.postpilot.trackConversion('lead', identifierHash)</code>.
+                    </p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
+                <div class="card" style="padding: 1.25rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Conversions by Type</h3>
+                    <table class="data-table" style="width: 100%;">
+                        <thead><tr><th>Type</th><th>Count</th></tr></thead>
+                        <tbody>
+                            ${convData.by_type.map(t => `
+                                <tr><td><span class="badge badge-primary">${escapeHtml(t.conversion_type)}</span></td><td><strong>${t.count}</strong></td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="card" style="padding: 1.25rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Conversions by Lead Source</h3>
+                    <table class="data-table" style="width: 100%;">
+                        <thead><tr><th>Source</th><th>Count</th></tr></thead>
+                        <tbody>
+                            ${convData.by_source.map(s => `
+                                <tr><td>${escapeHtml(s.source)}</td><td><strong>${s.count}</strong></td></tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card" style="padding: 1.25rem;">
+                <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Recent Conversion Events</h3>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead><tr><th>ID</th><th>Type</th><th>Source</th><th>Timestamp</th></tr></thead>
+                        <tbody>
+                            ${convData.recent.map(r => `
+                                <tr>
+                                    <td>#${r.id}</td>
+                                    <td><span class="badge badge-success">${escapeHtml(r.conversion_type)}</span></td>
+                                    <td>${escapeHtml(r.lead_source || 'Direct')}</td>
+                                    <td>${escapeHtml(r.created_at)}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load conversions: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadWebIntelSeoSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Technical SEO Audits...</div>`;
+    try {
+        const auditsRes = await authFetch(`/api/web-intel/properties/${webIntelSelectedPropId}/seo/audits?limit=5`);
+        const audits = auditsRes.ok ? await auditsRes.json() : [];
+
+        if (audits.length === 0) {
+            container.innerHTML = `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+                    <i class="fa-solid fa-shield-halved fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No SEO Audits Found</h3>
+                    <p style="color: var(--text-muted); max-width: 500px; margin: 0.5rem auto 1.5rem auto; font-size: 0.9rem;">
+                        Run a polite, non-destructive crawl to audit page status codes, title tags, meta descriptions, canonical URLs, and heading structure.
+                    </p>
+                    <button class="btn btn-primary" onclick="triggerWebIntelSeoCrawl(${webIntelSelectedPropId})">
+                        <i class="fa-solid fa-magnifying-glass-chart"></i> Run First SEO Audit
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        const latestAudit = audits[0];
+        const detailsRes = await authFetch(`/api/web-intel/seo/audits/${latestAudit.id}`);
+        const auditDetails = detailsRes.ok ? await detailsRes.json() : latestAudit;
+        const pages = auditDetails.pages || [];
+
+        const score = latestAudit.health_score || 100.0;
+        const scoreColor = score >= 90 ? '#10b981' : (score >= 70 ? '#f59e0b' : '#ef4444');
+
+        let html = `
+            <div class="card" style="padding: 1.25rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <div style="display: flex; align-items: center; gap: 1.25rem;">
+                    <div style="width: 64px; height: 64px; border-radius: 50%; border: 4px solid ${scoreColor}; display: flex; align-items: center; justify-content: center; font-size: 1.35rem; font-weight: 800; color: ${scoreColor};">
+                        ${Math.round(score)}%
+                    </div>
+                    <div>
+                        <div style="font-weight: 700; font-size: 1.1rem; color: var(--text-primary);">
+                            Technical SEO Health Score
+                        </div>
+                        <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">
+                            Latest crawl completed: ${escapeHtml(latestAudit.completed_at || latestAudit.crawl_timestamp || 'Just now')}
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <div style="text-align: center; padding: 0.5rem 1rem; background: var(--bg-surface); border-radius: 8px;">
+                        <div style="font-size: 1.25rem; font-weight: 800;">${latestAudit.pages_crawled || 0}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Crawled</div>
+                    </div>
+                    <div style="text-align: center; padding: 0.5rem 1rem; background: var(--bg-surface); border-radius: 8px;">
+                        <div style="font-size: 1.25rem; font-weight: 800; color: #10b981;">${latestAudit.pages_passed || 0}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Clean</div>
+                    </div>
+                    <div style="text-align: center; padding: 0.5rem 1rem; background: var(--bg-surface); border-radius: 8px;">
+                        <div style="font-size: 1.25rem; font-weight: 800; color: #ef4444;">${latestAudit.critical_count || 0}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Critical</div>
+                    </div>
+                    <div style="text-align: center; padding: 0.5rem 1rem; background: var(--bg-surface); border-radius: 8px;">
+                        <div style="font-size: 1.25rem; font-weight: 800; color: #f59e0b;">${latestAudit.warning_count || 0}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Warnings</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="triggerWebIntelSeoCrawl(${webIntelSelectedPropId})">
+                        <i class="fa-solid fa-arrows-rotate"></i> Re-Crawl
+                    </button>
+                </div>
+            </div>
+
+            <div class="card" style="padding: 1.25rem;">
+                <h3 style="font-size: 1.05rem; font-weight: 700; margin-bottom: 1rem;">Audited Pages (${pages.length})</h3>
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>URL</th>
+                                <th>Status</th>
+                                <th>Title &amp; Canonical</th>
+                                <th>Heading &amp; Meta</th>
+                                <th>Issues</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${pages.map(p => {
+                                let issues = [];
+                                try {
+                                    issues = typeof p.issues_json === 'string' ? JSON.parse(p.issues_json) : (p.issues || []);
+                                } catch (e) {}
+
+                                const hasCanonicalPlaceholder = issues.some(i => i.category === 'canonical_placeholder');
+
+                                return `
+                                    <tr>
+                                        <td>
+                                            <a href="${escapeHtml(p.url)}" target="_blank" style="font-size: 0.84rem; font-weight: 600; text-decoration: none; color: var(--primary);">
+                                                ${escapeHtml(p.url)} <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.7rem;"></i>
+                                            </a>
+                                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem;">
+                                                Response: ${p.response_time_ms || 0}ms
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="badge ${p.http_status === 200 ? 'badge-success' : 'badge-danger'}">
+                                                ${p.http_status}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div style="font-size: 0.84rem; font-weight: 600;">${escapeHtml(p.title || 'Missing Title')}</div>
+                                            <div style="font-size: 0.75rem; margin-top: 0.2rem;">
+                                                Canonical: 
+                                                ${hasCanonicalPlaceholder ? 
+                                                    `<span style="color: #ef4444; font-weight: 700;"><i class="fa-solid fa-triangle-exclamation"></i> Placeholder (${escapeHtml(p.canonical_url)})</span>` : 
+                                                    `<code>${escapeHtml(p.canonical_url || 'None')}</code>`}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div style="font-size: 0.8rem;">H1: ${escapeHtml(p.h1_tag || 'Missing')}</div>
+                                            <div style="font-size: 0.75rem; color: var(--text-muted);">Meta: ${p.meta_desc_length || 0} chars</div>
+                                        </td>
+                                        <td>
+                                            ${issues.length === 0 ? 
+                                                `<span class="badge badge-success"><i class="fa-solid fa-check"></i> Passed</span>` :
+                                                issues.map(iss => `
+                                                    <div style="font-size: 0.75rem; margin-bottom: 0.2rem;">
+                                                        <span class="badge ${iss.severity === 'critical' ? 'badge-danger' : 'badge-warning'}">
+                                                            ${escapeHtml(iss.category)}
+                                                        </span>
+                                                        <span style="color: var(--text-secondary); margin-left: 0.3rem;">${escapeHtml(iss.message)}</span>
+                                                    </div>
+                                                `).join('')}
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load SEO audits: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+async function loadWebIntelRecommendationsSubtab(container) {
+    container.innerHTML = `<div style="text-align: center; padding: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i> Loading Staged Recommendations...</div>`;
+    try {
+        const res = await authFetch(`/api/web-intel/seo/recommendations?property_id=${webIntelSelectedPropId}&status=all`);
+        const recs = res.ok ? await res.json() : [];
+
+        if (recs.length === 0) {
+            container.innerHTML = `
+                <div class="card" style="text-align: center; padding: 3rem 1.5rem;">
+                    <i class="fa-solid fa-list-check fa-3x" style="color: var(--text-muted); opacity: 0.5;"></i>
+                    <h3 style="margin-top: 1rem;">No Staged Recommendations</h3>
+                    <p style="color: var(--text-muted); max-width: 500px; margin: 0.5rem auto 1.5rem auto; font-size: 0.9rem;">
+                        Run a technical SEO crawl to generate actionable recommendations for canonical tags, titles, headings, and descriptions.
+                    </p>
+                    <button class="btn btn-primary" onclick="triggerWebIntelSeoCrawl(${webIntelSelectedPropId})">
+                        <i class="fa-solid fa-magnifying-glass-chart"></i> Run SEO Audit
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div class="card" style="padding: 1.25rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <h3 style="font-size: 1.05rem; font-weight: 700; margin: 0;">Staged Actionable Recommendations (${recs.length})</h3>
+                    <div style="font-size: 0.82rem; color: var(--text-muted);">
+                        Review, approve, or reject proposed SEO remediation actions.
+                    </div>
+                </div>
+
+                <div style="overflow-x: auto;">
+                    <table class="data-table" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Category &amp; Target</th>
+                                <th>Issue &amp; Proposed Action</th>
+                                <th>Content Diff / Suggestion</th>
+                                <th>Status &amp; Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${recs.map(r => `
+                                <tr>
+                                    <td>
+                                        <span class="badge ${r.category === 'canonical' ? 'badge-danger' : 'badge-primary'}">
+                                            ${escapeHtml(r.category)}
+                                        </span>
+                                        <div style="font-size: 0.78rem; font-weight: 600; margin-top: 0.35rem; max-width: 200px; word-break: break-all;">
+                                            ${escapeHtml(r.target_url)}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div style="font-size: 0.84rem; font-weight: 600; color: var(--text-primary);">${escapeHtml(r.issue_description)}</div>
+                                        <div style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.25rem;">${escapeHtml(r.proposed_action)}</div>
+                                    </td>
+                                    <td>
+                                        ${r.current_content ? `
+                                            <div style="font-size: 0.75rem; color: #ef4444; margin-bottom: 0.2rem;">
+                                                <i class="fa-solid fa-minus"></i> <code>${escapeHtml(r.current_content)}</code>
+                                            </div>
+                                        ` : ''}
+                                        ${r.recommended_content ? `
+                                            <div style="font-size: 0.75rem; color: #10b981;">
+                                                <i class="fa-solid fa-plus"></i> <code>${escapeHtml(r.recommended_content)}</code>
+                                            </div>
+                                        ` : ''}
+                                    </td>
+                                    <td>
+                                        <div style="display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap;">
+                                            <span class="badge ${r.status === 'approved' ? 'badge-success' : (r.status === 'rejected' ? 'badge-secondary' : 'badge-warning')}">
+                                                ${escapeHtml(r.status)}
+                                            </span>
+                                            ${r.status === 'pending' ? `
+                                                <button class="btn btn-sm btn-primary" onclick="patchSeoRecommendation(${r.id}, 'approved')" title="Approve Recommendation">
+                                                    <i class="fa-solid fa-check"></i>
+                                                </button>
+                                                <button class="btn btn-sm btn-secondary" onclick="patchSeoRecommendation(${r.id}, 'rejected')" title="Reject Recommendation">
+                                                    <i class="fa-solid fa-xmark"></i>
+                                                </button>
+                                            ` : ''}
+                                            ${r.status === 'approved' ? `
+                                                <button class="btn btn-sm btn-outline-success" onclick="patchSeoRecommendation(${r.id}, 'applied')" title="Mark as Applied">
+                                                    <i class="fa-solid fa-circle-check"></i> Applied
+                                                </button>
+                                            ` : ''}
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="card" style="padding: 1.5rem; color: var(--danger);">Failed to load recommendations: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function openTrackerSnippetModal(propertyKey) {
+    const modal = document.getElementById('tracker-snippet-modal');
+    if (!modal) return;
+    const snippetCode = `<script async src="https://postpilot.gaatha.tech/static/tracker.js" data-property="${propertyKey}"><\/script>`;
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 620px;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fa-solid fa-code" style="color: var(--primary);"></i> Embed First-Party Tracker
+                    </h3>
+                    <p class="card-subtitle" style="margin: 0.25rem 0 0 0;">
+                        Property Key: <strong style="color: var(--text-primary);">${escapeHtml(propertyKey)}</strong>
+                    </p>
+                </div>
+                <button class="close-btn" onclick="closeTrackerSnippetModal()" aria-label="Close dialog">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 1.25rem;">
+                <p style="font-size: 0.88rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                    Paste this snippet immediately before the closing <code>&lt;/body&gt;</code> or <code>&lt;/head&gt;</code> tag on your website. 
+                    The script is lightweight (&lt; 2KB gzipped), non-blocking, zero-cookie, and strictly preserves visitor privacy.
+                </p>
+                <div style="position: relative;">
+                    <textarea id="tracker-snippet-text" class="form-control" rows="3" readonly style="font-family: monospace; font-size: 0.84rem; background: var(--bg-surface); color: var(--text-primary); resize: none;">${escapeHtml(snippetCode)}</textarea>
+                </div>
+                <div style="margin-top: 1rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem; font-size: 0.82rem; color: var(--text-muted);">
+                    <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 0.25rem;"><i class="fa-solid fa-shield-halved" style="color: #10b981;"></i> Privacy &amp; Data Safeguards:</div>
+                    <ul style="margin: 0; padding-left: 1.25rem;">
+                        <li>Zero raw IP address storage (daily cryptographic SHA-256 salting).</li>
+                        <li>Zero cross-site tracking cookies.</li>
+                        <li>Strict origin verification against registered property domains.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.5rem; padding: 1rem 1.25rem;">
+                <button type="button" class="btn btn-secondary" onclick="closeTrackerSnippetModal()">Close</button>
+                <button type="button" class="btn btn-primary" onclick="copyTrackerSnippet('tracker-snippet-text')">
+                    <i class="fa-solid fa-copy"></i> Copy Snippet
+                </button>
+            </div>
+        </div>
+    `;
+    modal.classList.add('active');
+}
+
+function closeTrackerSnippetModal() {
+    const modal = document.getElementById('tracker-snippet-modal');
+    if (modal) modal.classList.remove('active');
+}
+
+function copyTrackerSnippet(textareaId) {
+    const el = document.getElementById(textareaId);
+    if (!el) return;
+    el.select();
+    navigator.clipboard.writeText(el.value).then(() => {
+        showToast("Tracking snippet copied to clipboard!", "success");
+    }).catch(() => {
+        showToast("Snippet copied!", "info");
+    });
+}
+
+async function triggerWebIntelSeoCrawl(propId) {
+    if (!propId) return;
+    showToast("Launching technical SEO crawl in background...", "info");
+    try {
+        const res = await authFetch(`/api/web-intel/properties/${propId}/seo/crawl`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || `Crawl failed (HTTP ${res.status})`);
+        }
+        const data = await res.json();
+        showToast(`SEO Crawl completed: Health Score ${data.summary.health_score}% (${data.pages_count} pages)`, "success");
+        webIntelActiveSubtab = 'seo';
+        renderWebsiteIntelligenceView(document.getElementById('content-area'));
+    } catch (e) {
+        showToast(e.message || "SEO Crawl failed", "danger");
+    }
+}
+
+async function patchSeoRecommendation(recId, newStatus) {
+    try {
+        const res = await authFetch(`/api/web-intel/seo/recommendations/${recId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || `Update failed (HTTP ${res.status})`);
+        }
+        showToast(`Recommendation marked as '${newStatus}'`, "success");
+        loadActiveWebIntelSubtab();
+    } catch (e) {
+        showToast(e.message || "Failed to update recommendation", "danger");
+    }
 }

@@ -4554,11 +4554,13 @@ def init_growth_properties(conn=None):
         _execute_init(conn)
         migrate_phase2_1_property_calendar(conn)
         migrate_phase2_website_intelligence(conn)
+        migrate_phase2_property_domains_and_seo(conn)
     else:
         with get_db_connection() as c:
             _execute_init(c)
             migrate_phase2_1_property_calendar(c)
             migrate_phase2_website_intelligence(c)
+            migrate_phase2_property_domains_and_seo(c)
 
 def migrate_phase2_1_property_calendar(conn=None):
     """
@@ -4609,6 +4611,169 @@ def migrate_phase2_1_property_calendar(conn=None):
                 INSERT INTO schema_migrations (version, description)
                 VALUES (?, ?)
             ''', ('20261114_002_link_posts_to_properties', 'Link scheduled_posts to growth_properties and backfill unambiguous brand mappings'))
+        c.commit()
+
+    if conn is not None:
+        _execute(conn)
+    else:
+        with get_db_connection() as c:
+            _execute(c)
+
+def migrate_phase2_property_domains_and_seo(conn=None):
+    """
+    Additive migration 20261114_004_property_domains_and_seo:
+    - Creates growth_property_domains table for multi-domain & subpath mapping.
+    - Seeds extended Gaatha ecosystem properties (cgs, mans, cct, aidni_global).
+    - Seeds domain patterns and path prefixes for all 11 properties.
+    """
+    is_pg = is_postgres()
+    auto_id = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+
+    def _execute(c):
+        # 1. growth_property_domains table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS growth_property_domains (
+                id {auto_id},
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                property_id INTEGER NOT NULL REFERENCES growth_properties(id),
+                domain_pattern TEXT NOT NULL,
+                path_prefix TEXT DEFAULT '/',
+                is_primary INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(organization_id, domain_pattern, path_prefix)
+            )
+        ''')
+        c.execute("CREATE INDEX IF NOT EXISTS idx_prop_domains_lookup ON growth_property_domains(domain_pattern, path_prefix)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_prop_domains_prop ON growth_property_domains(property_id)")
+
+        # 2. Seed extended properties for Organization 1
+        extended_properties = [
+            {
+                'property_key': 'cgs',
+                'display_name': 'Chamunda Grahak Suraksha Mandal',
+                'canonical_url': 'https://cgs.gaatha.tech',
+                'property_type': 'ngo_portal',
+                'description': 'Consumer rights protection, legal literacy, and public welfare NGO',
+                'category': 'Consumer Rights / NGO',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN',
+                'primary_language': 'gu,hi,en'
+            },
+            {
+                'property_key': 'mans',
+                'display_name': 'Mahila Atyachar Nivaran Samiti',
+                'canonical_url': 'https://mans.gaatha.tech',
+                'property_type': 'ngo_portal',
+                'description': 'Women rights protection, legal assistance, and human dignity advocacy',
+                'category': 'Human Rights / NGO',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN',
+                'primary_language': 'gu,hi,en'
+            },
+            {
+                'property_key': 'cct',
+                'display_name': 'Chintan Charitable Trust',
+                'canonical_url': 'https://cct.gaatha.tech',
+                'property_type': 'ngo_portal',
+                'description': 'Community development, healthcare, education, and ecological awareness trust',
+                'category': 'Charitable Trust / NGO',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN',
+                'primary_language': 'gu,hi,en'
+            },
+            {
+                'property_key': 'aidni_global',
+                'display_name': 'Aidni Global',
+                'canonical_url': 'https://aidniglobal.in',
+                'property_type': 'corporate',
+                'description': 'Aidni Global LLP holding, investments, enterprise ventures, and governance',
+                'category': 'Corporate Holding',
+                'timezone': 'Asia/Kolkata',
+                'target_countries': 'IN,GLOBAL',
+                'primary_language': 'en'
+            }
+        ]
+
+        for p in extended_properties:
+            existing = c.execute(
+                "SELECT id FROM growth_properties WHERE organization_id = 1 AND property_key = ?",
+                (p['property_key'],)
+            ).fetchone()
+            if not existing:
+                c.execute('''
+                    INSERT INTO growth_properties (
+                        organization_id, brand_id, property_key, slug, display_name,
+                        canonical_url, property_type, description, category, timezone,
+                        target_countries, primary_language, is_active
+                    ) VALUES (1, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ''', (
+                    p['property_key'], p['property_key'], p['display_name'],
+                    p['canonical_url'], p['property_type'], p['description'], p['category'],
+                    p['timezone'], p['target_countries'], p['primary_language']
+                ))
+
+        # 3. Seed domain patterns for all properties
+        props_map = {r['property_key']: r['id'] for r in c.execute("SELECT id, property_key FROM growth_properties WHERE organization_id = 1").fetchall()}
+
+        domain_mappings = [
+            # Corporate
+            ('gaatha_corporate', 'gaatha.tech', '/', 1),
+            ('gaatha_corporate', 'www.gaatha.tech', '/', 0),
+            # Suite (both subpath and subdomain)
+            ('gaatha_suite', 'gaatha.tech', '/suite/', 1),
+            ('gaatha_suite', 'gaathasuite.gaatha.tech', '/', 0),
+            # POS (both subpath and subdomain)
+            ('gaatha_pos', 'gaatha.tech', '/pos/', 1),
+            ('gaatha_pos', 'pos.gaatha.tech', '/', 0),
+            # Sentira (both subpath and subdomain)
+            ('sentira_ai', 'gaatha.tech', '/sentira/', 1),
+            ('sentira_ai', 'sentira.gaatha.tech', '/', 0),
+            # Terra
+            ('gaatha_terra', 'terra.gaatha.tech', '/', 1),
+            # Gaatha AI
+            ('gaatha_ai', 'ai.gaatha.tech', '/', 1),
+            # Phoenix
+            ('phoenix', 'phoenix.gaatha.tech', '/', 1),
+            # CGS
+            ('cgs', 'cgs.gaatha.tech', '/', 1),
+            # MANS
+            ('mans', 'mans.gaatha.tech', '/', 1),
+            # CCT
+            ('cct', 'cct.gaatha.tech', '/', 1),
+            # Aidni Global
+            ('aidni_global', 'aidniglobal.in', '/', 1),
+            ('aidni_global', 'www.aidniglobal.in', '/', 0),
+        ]
+
+        for pkey, dom, path, is_prim in domain_mappings:
+            pid = props_map.get(pkey)
+            if pid:
+                if is_postgres():
+                    c.execute('''
+                        INSERT INTO growth_property_domains (
+                            organization_id, property_id, domain_pattern, path_prefix, is_primary, is_active
+                        ) VALUES (1, ?, ?, ?, ?, 1)
+                        ON CONFLICT DO NOTHING
+                    ''', (pid, dom, path, is_prim))
+                else:
+                    c.execute('''
+                        INSERT OR IGNORE INTO growth_property_domains (
+                            organization_id, property_id, domain_pattern, path_prefix, is_primary, is_active
+                        ) VALUES (1, ?, ?, ?, ?, 1)
+                    ''', (pid, dom, path, is_prim))
+
+        # 4. Record migration version
+        migration_version = '20261114_004_property_domains_and_seo'
+        row = c.execute(
+            "SELECT version FROM schema_migrations WHERE version = ?",
+            (migration_version,)
+        ).fetchone()
+        if not row:
+            c.execute('''
+                INSERT INTO schema_migrations (version, description)
+                VALUES (?, ?)
+            ''', (migration_version, 'Multi-domain aliases, extended ecosystem properties (cgs, mans, cct, aidni_global) and SEO tracking foundation'))
         c.commit()
 
     if conn is not None:
@@ -5330,3 +5495,403 @@ def get_web_intel_geo_breakdown(property_id, organization_id=1, days=30):
             LIMIT 50
         ''', (p_id, org_id, since_date)).fetchall()
         return [dict(r) for r in rows]
+
+# ── Multi-Domain Registry, Analytics Dashboards & SEO Helpers ─────────
+
+def get_property_for_domain_and_path(domain, path='/', organization_id=1):
+    """
+    Resolves an incoming request domain and path to a registered growth property.
+    Matches the most specific path_prefix first (e.g. /suite/ before /).
+    """
+    if not domain:
+        return None
+    dom_clean = domain.strip().lower()
+    path_clean = path.strip() if path else '/'
+    org_id = int(organization_id)
+
+    with get_db_connection() as conn:
+        rows = conn.execute('''
+            SELECT gpd.property_id, gpd.path_prefix, gp.property_key, gp.display_name, gp.is_active
+            FROM growth_property_domains gpd
+            JOIN growth_properties gp ON gpd.property_id = gp.id
+            WHERE gpd.organization_id = ? AND gpd.domain_pattern = ? AND gpd.is_active = 1 AND gp.is_active = 1
+            ORDER BY LENGTH(gpd.path_prefix) DESC
+        ''', (org_id, dom_clean)).fetchall()
+
+        for r in rows:
+            prefix = r['path_prefix']
+            if prefix == '/' or path_clean.startswith(prefix):
+                return dict(r)
+        return None
+
+def list_property_domains(property_id=None, organization_id=1):
+    """Lists registered domain aliases scoped to the organization and optional property."""
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        if property_id is not None:
+            p_id = int(property_id)
+            rows = conn.execute('''
+                SELECT gpd.*, gp.property_key, gp.display_name
+                FROM growth_property_domains gpd
+                JOIN growth_properties gp ON gpd.property_id = gp.id
+                WHERE gpd.organization_id = ? AND gpd.property_id = ?
+                ORDER BY gpd.is_primary DESC, gpd.domain_pattern
+            ''', (org_id, p_id)).fetchall()
+        else:
+            rows = conn.execute('''
+                SELECT gpd.*, gp.property_key, gp.display_name
+                FROM growth_property_domains gpd
+                JOIN growth_properties gp ON gpd.property_id = gp.id
+                WHERE gpd.organization_id = ?
+                ORDER BY gp.id, gpd.is_primary DESC
+            ''', (org_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+def is_origin_allowed_for_property(property_id, origin_url, organization_id=1):
+    """
+    Strict origin validator: Verifies that an Origin or Referer matches a registered
+    domain for the target property (or localhost/127.0.0.1 for local dev/testing).
+    """
+    if not origin_url:
+        return True
+    from urllib.parse import urlparse
+    parsed = urlparse(origin_url)
+    netloc = (parsed.netloc or '').lower().split(':')[0]
+    if not netloc or netloc in ('localhost', '127.0.0.1'):
+        return True
+
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        match = conn.execute('''
+            SELECT id FROM growth_property_domains
+            WHERE organization_id = ? AND property_id = ? AND domain_pattern = ? AND is_active = 1
+        ''', (org_id, p_id, netloc)).fetchone()
+        return bool(match)
+
+def get_web_intel_timeline(property_id, organization_id=1, days=30):
+    """Fetches daily time-series of pageviews, unique visitors, sessions, and conversions."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        rows = conn.execute('''
+            SELECT
+                SUBSTR(created_at, 1, 10) as day_date,
+                COUNT(*) as session_count,
+                COUNT(DISTINCT visitor_id_hash) as unique_visitors,
+                COALESCE(SUM(pageviews_count), 0) as pageviews_count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND SUBSTR(created_at, 1, 10) >= ?
+            GROUP BY SUBSTR(created_at, 1, 10)
+            ORDER BY day_date ASC
+        ''', (p_id, org_id, since_date)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_web_intel_sources(property_id, organization_id=1, days=30):
+    """Fetches traffic acquisition channels and top referrer domains."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        channels = conn.execute('''
+            SELECT
+                COALESCE(referrer_source, 'Direct') as channel,
+                COUNT(*) as session_count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY referrer_source
+            ORDER BY session_count DESC
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        referrers = conn.execute('''
+            SELECT
+                COALESCE(referrer_domain, 'Direct / None') as domain,
+                COUNT(*) as session_count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ? AND referrer_domain IS NOT NULL
+            GROUP BY referrer_domain
+            ORDER BY session_count DESC
+            LIMIT 15
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        return {
+            'channels': [dict(c) for c in channels],
+            'top_referrers': [dict(r) for r in referrers]
+        }
+
+def get_web_intel_devices(property_id, organization_id=1, days=30):
+    """Fetches device types, top browsers, and operating systems."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        devices = conn.execute('''
+            SELECT COALESCE(device_type, 'desktop') as device, COUNT(*) as count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY device_type ORDER BY count DESC
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        browsers = conn.execute('''
+            SELECT COALESCE(browser_name, 'Other') as browser, COUNT(*) as count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY browser_name ORDER BY count DESC LIMIT 10
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        os_list = conn.execute('''
+            SELECT COALESCE(os_name, 'Other') as os, COUNT(*) as count
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY os_name ORDER BY count DESC LIMIT 10
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        return {
+            'devices': [dict(d) for d in devices],
+            'browsers': [dict(b) for b in browsers],
+            'os': [dict(o) for o in os_list]
+        }
+
+def get_web_intel_pages(property_id, organization_id=1, days=30, limit=20):
+    """Fetches top landing pages and top exit pages."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        landing = conn.execute('''
+            SELECT COALESCE(landing_page, '/') as page, COUNT(*) as sessions
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY landing_page ORDER BY sessions DESC LIMIT ?
+        ''', (p_id, org_id, since_date, limit)).fetchall()
+
+        exit_pages = conn.execute('''
+            SELECT COALESCE(exit_page, '/') as page, COUNT(*) as exits
+            FROM web_intel_sessions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY exit_page ORDER BY exits DESC LIMIT ?
+        ''', (p_id, org_id, since_date, limit)).fetchall()
+
+        all_pages = conn.execute('''
+            SELECT path, page_title, COUNT(*) as views, AVG(load_time_ms) as avg_load_time_ms
+            FROM web_intel_pageviews
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY path, page_title ORDER BY views DESC LIMIT ?
+        ''', (p_id, org_id, since_date, limit)).fetchall()
+
+        return {
+            'landing_pages': [dict(l) for l in landing],
+            'exit_pages': [dict(e) for e in exit_pages],
+            'all_pages': [dict(p) for p in all_pages]
+        }
+
+def get_web_intel_conversions(property_id, organization_id=1, days=30, limit=50):
+    """Fetches conversion breakdown and recent conversion events."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        by_type = conn.execute('''
+            SELECT conversion_type, COUNT(*) as count
+            FROM web_intel_conversions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY conversion_type ORDER BY count DESC
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        by_source = conn.execute('''
+            SELECT COALESCE(lead_source, 'Direct') as source, COUNT(*) as count
+            FROM web_intel_conversions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            GROUP BY lead_source ORDER BY count DESC
+        ''', (p_id, org_id, since_date)).fetchall()
+
+        recent = conn.execute('''
+            SELECT id, conversion_type, lead_source, metadata_json, created_at
+            FROM web_intel_conversions
+            WHERE property_id = ? AND organization_id = ? AND created_at >= ?
+            ORDER BY created_at DESC LIMIT ?
+        ''', (p_id, org_id, since_date, limit)).fetchall()
+
+        return {
+            'by_type': [dict(t) for t in by_type],
+            'by_source': [dict(s) for s in by_source],
+            'recent': [dict(r) for r in recent],
+            'total': sum(t['count'] for t in by_type)
+        }
+
+def record_seo_audit_results(property_id, organization_id, audit_summary, pages_list, recommendations_list):
+    """Stores technical crawl results, page records, and staged recommendations."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        summary_json = json.dumps(audit_summary.get('summary_data', {}))
+
+        if is_postgres():
+            cur = conn.execute('''
+                INSERT INTO web_intel_seo_audits (
+                    organization_id, property_id, status, pages_crawled, pages_passed,
+                    pages_with_issues, health_score, critical_count, warning_count,
+                    audit_summary_json, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                RETURNING id
+            ''', (
+                org_id, p_id, audit_summary.get('status', 'completed'),
+                audit_summary.get('pages_crawled', 0), audit_summary.get('pages_passed', 0),
+                audit_summary.get('pages_with_issues', 0), audit_summary.get('health_score', 100.0),
+                audit_summary.get('critical_count', 0), audit_summary.get('warning_count', 0),
+                summary_json
+            ))
+            audit_id = cur.fetchone()['id']
+        else:
+            cur = conn.execute('''
+                INSERT INTO web_intel_seo_audits (
+                    organization_id, property_id, status, pages_crawled, pages_passed,
+                    pages_with_issues, health_score, critical_count, warning_count,
+                    audit_summary_json, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (
+                org_id, p_id, audit_summary.get('status', 'completed'),
+                audit_summary.get('pages_crawled', 0), audit_summary.get('pages_passed', 0),
+                audit_summary.get('pages_with_issues', 0), audit_summary.get('health_score', 100.0),
+                audit_summary.get('critical_count', 0), audit_summary.get('warning_count', 0),
+                summary_json
+            ))
+            audit_id = cur.lastrowid
+
+        for p in pages_list:
+            issues_json = json.dumps(p.get('issues', []))
+            schemas_json = json.dumps(p.get('schemas', []))
+            conn.execute('''
+                INSERT INTO web_intel_seo_pages (
+                    audit_id, property_id, url, http_status, response_time_ms,
+                    title, title_length, meta_description, meta_desc_length,
+                    canonical_url, h1_tag, has_og_tags, schema_types_json,
+                    broken_links_count, issues_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                audit_id, p_id, p.get('url'), p.get('status_code'), p.get('response_time_ms'),
+                p.get('title'), len(p.get('title') or ''), p.get('meta_description'), len(p.get('meta_description') or ''),
+                p.get('canonical_url'), p.get('h1_tag'), 1 if p.get('has_og_tags') else 0,
+                schemas_json, p.get('broken_links_count', 0), issues_json
+            ))
+
+        for r in recommendations_list:
+            existing = conn.execute('''
+                SELECT id FROM web_intel_seo_recommendations
+                WHERE property_id = ? AND target_url = ? AND category = ? AND status = 'pending'
+            ''', (p_id, r.get('target_url'), r.get('category'))).fetchone()
+
+            if not existing:
+                conn.execute('''
+                    INSERT INTO web_intel_seo_recommendations (
+                        organization_id, property_id, target_url, category,
+                        issue_description, proposed_action, current_content,
+                        recommended_content, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                ''', (
+                    org_id, p_id, r.get('target_url'), r.get('category'),
+                    r.get('issue_description'), r.get('proposed_action'),
+                    r.get('current_content'), r.get('recommended_content')
+                ))
+
+        conn.commit()
+        return audit_id
+
+def list_seo_audits(property_id, organization_id=1, limit=10):
+    """Lists historical crawl audit runs with summary health scores."""
+    p_id = int(property_id)
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        validate_growth_property_ownership(p_id, org_id)
+        rows = conn.execute('''
+            SELECT * FROM web_intel_seo_audits
+            WHERE property_id = ? AND organization_id = ?
+            ORDER BY crawl_timestamp DESC
+            LIMIT ?
+        ''', (p_id, org_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_seo_audit_details(audit_id, organization_id=1):
+    """Retrieves full details and page findings of a specific audit."""
+    a_id = int(audit_id)
+    org_id = int(organization_id)
+    with get_db_connection() as conn:
+        audit = conn.execute('''
+            SELECT * FROM web_intel_seo_audits
+            WHERE id = ? AND organization_id = ?
+        ''', (a_id, org_id)).fetchone()
+        if not audit:
+            raise ValueError(f"SEO audit ID {a_id} does not exist.")
+
+        pages = conn.execute('''
+            SELECT * FROM web_intel_seo_pages
+            WHERE audit_id = ?
+            ORDER BY http_status DESC, url ASC
+        ''', (a_id,)).fetchall()
+
+        res = dict(audit)
+        res['pages'] = [dict(p) for p in pages]
+        return res
+
+def list_seo_recommendations(property_id=None, organization_id=1, status=None):
+    """Lists staged SEO recommendations filtered by property and status."""
+    org_id = int(organization_id)
+    query = "SELECT r.*, gp.property_key, gp.display_name FROM web_intel_seo_recommendations r JOIN growth_properties gp ON r.property_id = gp.id WHERE r.organization_id = ?"
+    params = [org_id]
+
+    if property_id is not None:
+        p_id = int(property_id)
+        validate_growth_property_ownership(p_id, org_id)
+        query += " AND r.property_id = ?"
+        params.append(p_id)
+
+    if status and str(status).lower() != 'all':
+        query += " AND r.status = ?"
+        params.append(str(status).lower())
+
+    query += " ORDER BY r.created_at DESC"
+
+    with get_db_connection() as conn:
+        rows = conn.execute(query, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+def update_seo_recommendation_status(rec_id, status, reviewer=None, organization_id=1):
+    """Transitions an SEO recommendation status (pending, approved, rejected, applied, rolled_back)."""
+    valid_statuses = ('pending', 'approved', 'rejected', 'applied', 'verified', 'rolled_back')
+    new_status = str(status).lower().strip()
+    if new_status not in valid_statuses:
+        raise ValueError(f"Invalid status '{new_status}'. Must be one of {valid_statuses}")
+
+    r_id = int(rec_id)
+    org_id = int(organization_id)
+
+    with get_db_connection() as conn:
+        existing = conn.execute(
+            "SELECT id, property_id, status FROM web_intel_seo_recommendations WHERE id = ? AND organization_id = ?",
+            (r_id, org_id)
+        ).fetchone()
+        if not existing:
+            raise ValueError(f"Recommendation ID {r_id} does not exist.")
+
+        conn.execute('''
+            UPDATE web_intel_seo_recommendations
+            SET status = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND organization_id = ?
+        ''', (new_status, reviewer, r_id, org_id))
+        conn.commit()
+
+        updated = conn.execute("SELECT * FROM web_intel_seo_recommendations WHERE id = ?", (r_id,)).fetchone()
+        return dict(updated)
